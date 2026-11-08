@@ -1,0 +1,86 @@
+From: Escapement
+Subject: [PATCH] power: axp20x_battery: expose VOLTAGE_NOW and CAPACITY for AXP2101
+
+The pending AXP2101 series exposes only configuration to userspace:
+PRESENT, ONLINE, STATUS, CONSTANT_CHARGE_CURRENT_MAX, VOLTAGE_MAX,
+CHARGE_TERM_CURRENT. There is no VOLTAGE_NOW and no CAPACITY, so a fully bound
+PMIC still cannot answer "how full is the battery" -- which is the one number a
+watch needs.
+
+Both values are already in registers the driver touches, and both were measured
+on this board before writing this:
+
+    0x34/0x35 = 0x10 0x55 -> 4181 mV   battery voltage, 14 bits, already mV
+    0xa4      = 0x64      -> 100 %     state of charge in bits 6:0
+
+Note there is no IIO fallback available here. The AXP20x handler reads voltage
+through iio_read_channel_processed_scale(), but drivers/iio/adc/axp20x_adc.c
+has no AXP2101 channel map, so for this variant the value comes straight out
+of the register instead.
+
+CAPACITY reports -ENODATA when bit 7 (the gauge-valid flag) is clear, rather
+than a plausible-looking 0 %. The flag drops while the gauge resets.
+
+Not included: CURRENT_NOW and HEALTH. Neither register is in the AXP2101 map
+this driver carries, and guessing at addresses is how a driver reports
+confident nonsense.
+
+--- a/drivers/power/supply/axp20x_battery.c
++++ b/drivers/power/supply/axp20x_battery.c
+@@ -561,6 +561,42 @@
+ 				      AXP2101_CURRENT_STEP;
+ 		return 0;
+ 
++	case POWER_SUPPLY_PROP_VOLTAGE_NOW:
++		/*
++		 * AXP2101_BATT_V_H/L hold the battery voltage as a 14-bit
++		 * value already in millivolts -- measured on this board as
++		 * 0x10 0x55 = 4181 mV. No conversion or IIO channel: this
++		 * variant has no IIO map in mainline, so read the register.
++		 * Power Supply reports microvolts.
++		 */
++		ret = regmap_read(axp20x_batt->regmap, AXP2101_BATT_V_H, &reg);
++		if (ret)
++			return ret;
++		val->intval = (reg & 0x3f) << 8;
++
++		ret = regmap_read(axp20x_batt->regmap, AXP2101_BATT_V_H + 1,
++				  &reg);
++		if (ret)
++			return ret;
++		val->intval |= reg;
++		val->intval *= 1000;
++		return 0;
++
++	case POWER_SUPPLY_PROP_CAPACITY:
++		/*
++		 * 7-bit state of charge. Bit 7 is the gauge-valid flag, which
++		 * clears while the gauge is resetting; report that as
++		 * unavailable rather than a bogus 0 %.
++		 */
++		ret = regmap_read(axp20x_batt->regmap,
++				  AXP2101_BATT_PERCENT_DATA, &reg);
++		if (ret)
++			return ret;
++		if (!(reg & BIT(7)))
++			return -ENODATA;
++		val->intval = reg & 0x7f;
++		return 0;
++
+ 	default:
+ 		return -EINVAL;
+ 	}
+@@ -1000,6 +1036,13 @@
+ 	POWER_SUPPLY_PROP_CONSTANT_CHARGE_CURRENT_MAX,
+ 	POWER_SUPPLY_PROP_VOLTAGE_MAX,
+ 	POWER_SUPPLY_PROP_CHARGE_TERM_CURRENT,
++	/*
++	 * Escapement: the pending series exposes only configuration here.
++	 * A watch needs the two measurements, and both are already in
++	 * hardware registers the driver reads for other properties.
++	 */
++	POWER_SUPPLY_PROP_VOLTAGE_NOW,
++	POWER_SUPPLY_PROP_CAPACITY,
+ };
+ 
+ static enum power_supply_property axp717_battery_props[] = {
