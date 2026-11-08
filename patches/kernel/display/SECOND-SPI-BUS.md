@@ -1,76 +1,72 @@
-# The watch has a second, independent SPI bus
+# The second SPI bus, and what the probe actually established
 
-This is the most useful thing to come out of the display work, and it should
-have been found first. From LilyGo's hardware page for the T-Watch Ultra:
+## The bus
 
-```
-Second SPI bus (separate from the panel)
-  SCK    35
-  MOSI   34
-  MISO   33
-  SD   CS 21
-  NFC  CS  4,  INT 5      ST25R3916
-  LoRa CS 36, RESET 47, BUSY 48, INT 14   SX1262 or SX1280
-```
-
-The display is on its own QSPI pins (SCK 40, D0–D3 38/39/42/45, CS 41, RST 37,
-TE 6) and shares nothing with these. So the panel's bus and a general-purpose
-SPI bus are independent, and the second one can be tested without disturbing
-the panel at all.
-
-## Why it matters
-
-The CO5300 is **write-only**. It never acknowledges, never returns a byte, and
-reports no error. A driver can run every transaction to completion against a
-panel that is not listening — which is exactly what happened across eight
-register-level fixes. There was no feedback signal anywhere.
-
-Every device on the second bus answers. Any of them would have told us within
-minutes whether SPI worked at all.
-
-## First attempt: the SX1262
-
-`spi-probe.c` resets the radio and reads `GetStatus` (0xC0). Result:
+From LilyGo's hardware page for the T-Watch Ultra, the board has a
+general-purpose SPI bus **entirely separate** from the display's QSPI pins:
 
 ```
-BUSY before reset = 0
-BUSY after reset:  high=0 low=200  -> stuck low
-GetStatus returned 0x00  -> no response
-second read 0x00
+SCK 35   MOSI 34   MISO 33
+SD   CS 21
+NFC  CS  4,  INT 5        ST25R3916
+LoRa CS 36,  RST 47,  BUSY 48,  INT 14   SX1262 or SX1280
 ```
 
-Interpretation, and its limits:
+The panel is on SCK 40, D0–D3 38/39/42/45, CS 41, RST 37, TE 6 and shares
+nothing with these.
 
-  * MISO reads a **stable 0x00**, not 0xFF and not noise. A floating line
-    would not do that, so something is holding it.
-  * BUSY never moves, which for an SX1262 means it is not running.
+## Power map (from the same page)
 
-Power is the likely cause. The radio is enabled by XL9555 P05, and `cfg0`
-reads `0x3f` — bits 0..5 are **inputs**, so nothing was driving it. A
-`gpio-hog` on line 5 was added to drive it high; the probe still got no
-answer, but it is not confirmed the hog ran before the probe at 1.35 s.
+```
+DC1        ESP32-S3       ALDO1  SD card        BLDO1  GNSS
+ALDO2      Display        ALDO3  LoRa          BLDO2  Speaker
+ALDO4      Sensor         DLDO1  NFC           LDO1   GNSS backup
+```
 
-**And there is a bigger caveat:** LilyGo list the radio as "SX1262 **or**
-SX1280", i.e. a variant option. This unit may not have a LoRa module fitted at
-all, in which case the test is meaningless and the `0x00` is just an idle line.
+## What the probe established
 
-## What to test instead
+`spi-probe.c` reads the ST25R3916 chip-identity register. It never got a
+reply, but the diagnostics narrowed it down completely:
 
-Two better candidates on the same bus:
+```
+regulator enable -> 0, state enabled          DLDO1 (NFC) is genuinely on
+np        MISO=0  IRQ=0  (iomux33=0x00001200)
+pull-up   MISO=0  IRQ=0  (iomux33=0x00001300)  pad config correct
+CONTROL gpio0 (known-good input), pull-up = 1  method proven sound
+IC_IDENTITY with pull-up -> 0x00               no reply
+```
 
-  * **ST25R3916 NFC** (CS 4). A standard SPI register device with a chip-ID
-    read, and it is listed as standard equipment rather than an option. Its
-    interrupt shares nothing with the panel.
-  * **The SD socket** (CS 21). `mmc_spi` is in-tree, and a card identification
-    either works or does not — no ambiguity. Requires enabling `CONFIG_BLOCK`
-    and `MMC`/`MMC_SPI`, which this kernel currently lacks entirely.
+The **control** is the important line. GPIO0 is Pusher B, already proven to work
+as an input; the identical code path pulls it high. So the pad configuration is
+not at fault, and GPIO33 really is being held low by something external.
 
-Either would settle "does SPI2 work" definitively.
+A bug of mine in the way of that conclusion, worth recording: the first version
+routed MISO with the output helper, enabling the pad's output driver so the
+ESP32 drove its own MISO low and fought its own pull-up. That looked exactly
+like "an unpowered chip holds the line low".
 
-## The architectural lesson
+## What this means
 
-Do not hand-program the SPI peripheral for the panel. Extend
-`drivers/spi/spi-esp32.c` — it already owns clock gating, DMA, pin routing and
-transfer framing correctly, and it is exercised by nobody on this board today.
-The bespoke register driver in `co5300.c` was the wrong shape from the start,
-and the lack of a feedback signal is what made the wrong shape expensive.
+  * The GPIO-matrix routing and IO_MUX programming **work** — proven by the
+    control.
+  * The NFC rail is on and it still does not answer, with MISO clamped low.
+
+So: the ST25R3916 is absent on this unit, is on different pins than documented,
+or the line is loaded by the SD socket. None of those is a kernel problem.
+
+**The remaining honest gap:** none of this proves SPI itself transfers data.
+Every target on the bus either does not answer or is not fitted. To prove the
+peripheral works without relying on any external part, the thing to try is a
+**peripheral loopback** — configure SPI2 to shift a byte out and read it back
+with MOSI internally routed to MISO, or bridge the two pins with a wire and
+read the same buffer back.
+
+## Correction to an earlier claim
+
+An earlier version of this note said LilyGo's documentation had the touch reset
+on the wrong pin, because their table says "Expander GPIO10" while `board.h`
+drives `EXPANDS_TOUCH_RST = 8`.
+
+**That was my mistake.** Their table numbers expander pins Pxy-style, so
+"GPIO10" means P1_0, which is linear gpio 8. Both sources agree; I misread the
+convention and then wrote it up as a documentation error.

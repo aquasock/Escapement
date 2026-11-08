@@ -281,8 +281,10 @@ missing.
 
 ### The documentation has the touch reset on the wrong pin
 
-LilyGo's pin table lists it as expander GPIO10. The hardware says **P08**,
-which is port 1 bit 0:
+LilyGo's pin table lists it as expander GPIO10 -- P1_0, which is linear gpio 8.
+An earlier version of this note called that a documentation error. It was not:
+their table numbers expander pins Pxy-style and this project's `board.h` uses
+linear numbering, and the two agree. The hardware confirms P08/P1_0:
 
 ```
 0x07 (config port 1) = 0xfe    bit 0 output

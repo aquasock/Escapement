@@ -26,6 +26,7 @@
 #include <linux/module.h>
 #include <linux/of.h>
 #include <linux/platform_device.h>
+#include <linux/regulator/consumer.h>
 
 #define DRIVER_NAME "spi-probe"
 
@@ -71,6 +72,7 @@
 #define GPIO_ENABLE_W1TC (0x28)
 
 #define RDY_VAL          BIT(9)        // FUN_IE
+#define RDY_WPU          BIT(8)        // FUN_WPU
 #define MCU_SEL_GPIO     (1 << 12)     // bits 14:12
 #define DRV_20MA         (2 << 10)     // bits 11:10
 
@@ -79,16 +81,29 @@
 #define FSPIQ_OUT_IDX    102
 #define FSPID_OUT_IDX    103
 
-// ---- SX1262 ----
+// ---- pins (second SPI bus) ----
 #define PIN_SCK   35
 #define PIN_MOSI  34
 #define PIN_MISO  33
-#define PIN_CS    36
-#define PIN_RST   47
-#define PIN_BUSY  48
 
-#define SX126X_GET_STATUS 0xC0
-#define SX126X_SET_STDBY_RC 0x80
+/*
+ * Target: ST25R3916 NFC, CS 4 / INT 5.
+ *
+ * Chosen over the SX1262 because LilyGo list the radio as "SX1262 or SX1280",
+ * a variant option, while the NFC reader is standard equipment. It also has a
+ * chip-identity register, so the answer is a value rather than a guess.
+ *
+ * ST25R3916 SPI framing (datasheet DS12484):
+ *   register read  : first byte 0x40 | addr, then clock out the value
+ *   register write : first byte 0x80 | addr, then data
+ *   IC_IDENTITY    : 0x3F in register space A
+ *   expected       0x05 for ST25R3916
+ */
+#define PIN_CS    4
+#define PIN_IRQ   5
+
+#define NFC_REG_IC_IDENTITY 0x3F
+#define NFC_EXPECT_ID       0x05
 
 static int io_mux_off(int pin)
 {
@@ -156,30 +171,25 @@ static void run(struct probe *p)
 		pr_err("spi-probe: transaction never completed\n");
 }
 
-// SX1262 single-byte command with one dummy byte, returning the reply.
-static u8 sx_xfer(struct probe *p, u8 op)
+// Read one ST25R3916 register: command byte out, then clock a byte in.
+static u8 nfc_read(struct probe *p, u8 reg, u32 ctrl)
 {
-	u32 bus = 40000000;	// XTAL, close enough for 1 MHz
-	u32 n = 40;
+	u32 user = SPI_USR_COMMAND | SPI_USR_MOSI | SPI_USR_MISO | SPI_CS_HOLD;
 
-	// 1 MHz: PL022-style divider is not right here; the peripheral derives
-	// SCLK from APB. Keep it slow -- this is a liveness test, not a
-	// performance one.
-	sw(p, SPI_CLOCK_REG, FIELD_PREP(GENMASK(5, 0), n - 1) |
-			     FIELD_PREP(GENMASK(11, 6), (n - 1) / 2) |
-			     FIELD_PREP(GENMASK(17, 12), n - 1));
+	// 1 MHz-ish; this is a liveness check, not a benchmark.
+	sw(p, SPI_CLOCK_REG, FIELD_PREP(GENMASK(5, 0), 19) |
+			     FIELD_PREP(GENMASK(11, 6), 9) |
+			     FIELD_PREP(GENMASK(17, 12), 19));
 
-	sw(p, SPI_USER2_REG, FIELD_PREP(SPI_USR_COMMAND_VALUE, op) |
+	sw(p, SPI_USER2_REG, FIELD_PREP(SPI_USR_COMMAND_VALUE, 0x40 | (reg & 0x3F)) |
 			     FIELD_PREP(SPI_USR_COMMAND_BITLEN, 7));
 	sw(p, SPI_USER1_REG, 0);
-	sw(p, SPI_CTRL_REG, 0x00340000);
-	sw(p, SPI_USER_REG, SPI_USR_COMMAND | SPI_USR_MOSI | SPI_USR_MISO |
-			    SPI_CS_HOLD);
+	sw(p, SPI_CTRL_REG, ctrl);
+	sw(p, SPI_USER_REG, user);
 	sw(p, SPI_MS_DLEN_REG, FIELD_PREP(SPI_MS_DATA_BITLEN, 7));
 	sw(p, SPI_W0_REG, 0x00);
 
 	run(p);
-	(void)bus;
 	return sr(p, SPI_W0_REG) & 0xFF;
 }
 
@@ -187,8 +197,12 @@ static int spi_probe_probe(struct platform_device *pdev)
 {
 	struct device *dev = &pdev->dev;
 	struct probe *p;
-	int busy_hi = 0, busy_lo = 0, i;
-	u8 st;
+	u8 a, b;
+	int i;
+	static const char *const names[] = {
+		"ctrl=0x00340000 (idf)", "ctrl=0x00000000 (plain)", NULL
+	};
+	static const u32 ctrls[] = { 0x00340000, 0x00000000 };
 
 	p = devm_kzalloc(dev, sizeof(*p), GFP_KERNEL);
 	if (!p)
@@ -201,61 +215,103 @@ static int spi_probe_probe(struct platform_device *pdev)
 	if (!p->spi || !p->gpio || !p->iomux)
 		return -ENOMEM;
 
-	// Route the shared bus: SCK 35, MOSI 34, MISO 33.
 	pin_out(p, PIN_SCK, FSPICLK_OUT_IDX);
 	pin_out(p, PIN_MOSI, FSPID_OUT_IDX);
-	pin_out(p, PIN_MISO, FSPIQ_OUT_IDX);
+
+	/*
+	 * MISO must be INPUT ONLY.
+	 *
+	 * The first version used pin_out() for it, which enables the pad's
+	 * output driver and points it at FSPIQ_OUT -- so the ESP32 was driving
+	 * MISO low and fighting its own pull-up. That is why the line read 0
+	 * no matter what, and why "held low by an unpowered chip" looked like a
+	 * credible theory. The pad was holding itself low.
+	 */
+	iowrite32(MCU_SEL_GPIO | RDY_VAL, p->iomux + io_mux_off(PIN_MISO));
+	iowrite32(BIT(PIN_MISO), p->gpio + GPIO_ENABLE_W1TC);
 	iowrite32(PIN_MISO, p->gpio + GPIO_IN_SEL(FSPIQ_IN_IDX));
 
-	// Control lines.
+	/*
+	 * Power the NFC explicitly. The rail is AXP2101 DLDO1 and it comes up
+	 * off; relying on the DT regulator being applied left the reader
+	 * unpowered, and an unpowered chip holds MISO low through its ESD
+	 * diodes -- indistinguishable from a dead bus.
+	 */
+	{
+		struct regulator *v = devm_regulator_get_optional(dev, "vdd");
+		int rc;
+
+		if (IS_ERR(v)) {
+			pr_warn("spi-probe: no vdd supply (%ld) - assuming always-on\n",
+				PTR_ERR(v));
+		} else {
+			rc = regulator_enable(v);
+			pr_info("spi-probe: regulator enable -> %d, state %s\n",
+				rc, regulator_is_enabled(v) ? "enabled" : "off");
+			msleep(50);
+		}
+	}
+
 	pin_gpio_out(p, PIN_CS);
-	pin_gpio_out(p, PIN_RST);
-	pin_gpio_in(p, PIN_BUSY);
+	pin_gpio_in(p, PIN_IRQ);
+	set_pin(p, PIN_CS, 1);
 
-	set_pin(p, PIN_CS, 1);		// CS idle high
-
-	// Peripheral bring-up.
 	sw(p, SPI_CLK_GATE_REG, SPI_CLK_EN | SPI_MST_CLK_ACTIVE | SPI_MST_CLK_SEL);
 	sw(p, SPI_SLAVE_REG, SPI_SOFT_RESET);
 	sw(p, SPI_SLAVE_REG, 0);
 
-	pr_info("spi-probe: BUSY before reset = %d (expect 0 or 1, then it moves)\n",
-		get_pin(p, PIN_BUSY));
+	/*
+	 * The decisive test, and the one that should have come first.
+	 *
+	 * MISO reading a constant 0x00 is three different faults wearing one
+	 * mask: the device may be driving low because it is unpowered, the line
+	 * may be floating, or the input path may be broken so the peripheral
+	 * sees a hard zero regardless.
+	 *
+	 * Pull-ups tell them apart. A floating line goes high when pulled up; a
+	 * line held low by a real driver does not; and if the input path is
+	 * broken it stays zero even with the pull-up on.
+	 */
+	for (i = 0; i < 2; i++) {
+		int wpu = (i == 1);
 
-	// Reset the radio: SX1262 wants NRESET low for ~100 us, then high.
-	set_pin(p, PIN_RST, 0);
-	udelay(200);
-	set_pin(p, PIN_RST, 1);
-	msleep(20);
-
-	// Sample BUSY for a while. It goes high while the chip boots and drops
-	// when it is ready -- that transition is proof the part is powered and
-	// running, independent of SPI.
-	for (i = 0; i < 200; i++) {
-		if (get_pin(p, PIN_BUSY))
-			busy_hi++;
-		else
-			busy_lo++;
+		iowrite32(MCU_SEL_GPIO | RDY_VAL | (wpu ? RDY_WPU : 0),
+			  p->iomux + io_mux_off(PIN_MISO));
+		iowrite32(MCU_SEL_GPIO | RDY_VAL | (wpu ? RDY_WPU : 0),
+			  p->iomux + io_mux_off(PIN_IRQ));
+		iowrite32(BIT(PIN_MISO) | BIT(PIN_IRQ),
+			  p->gpio + GPIO_ENABLE_W1TC);
 		udelay(200);
+
+		pr_info("spi-probe: %-8s  MISO=%d  IRQ=%d  (iomux33=0x%08x)\n",
+			wpu ? "pull-up" : "np",
+			get_pin(p, PIN_MISO), get_pin(p, PIN_IRQ),
+			ioread32(p->iomux + io_mux_off(PIN_MISO)));
 	}
-	pr_info("spi-probe: BUSY samples after reset: high=%d low=%d  -> %s\n",
-		busy_hi, busy_lo,
-		(busy_hi && busy_lo) ? "CHIP ALIVE (busy toggled)" :
-		busy_lo ? "stuck low" : "stuck high");
 
+	/*
+	 * Control: GPIO0 is Pusher B, proven to work as an input earlier in this
+	 * project. If a pull-up on GPIO0 reads 1 while the same treatment on
+	 * GPIO33 reads 0, then the method is sound and GPIO33 really is being
+	 * held low by something external -- meaning the NFC is absent, on a
+	 * different pin, or damaged. If GPIO0 also reads 0, the fault is in how
+	 * this driver touches pads, not in the board.
+	 */
+	iowrite32(MCU_SEL_GPIO | RDY_VAL | RDY_WPU, p->iomux + io_mux_off(0));
+	iowrite32(BIT(0), p->gpio + GPIO_ENABLE_W1TC);
+	udelay(200);
+	pr_info("spi-probe: CONTROL gpio0 (known-good input) with pull-up = %d\n",
+		get_pin(p, 0));
+
+	// Now re-run the register read with the pull-up left on: if the value
+	// changes from 0x00 to 0xFF, the input path works and the device is
+	// simply not driving the bus.
 	set_pin(p, PIN_CS, 0);
-	st = sx_xfer(p, SX126X_GET_STATUS);
+	a = nfc_read(p, NFC_REG_IC_IDENTITY, 0x00340000);
 	set_pin(p, PIN_CS, 1);
-
-	pr_info("spi-probe: GetStatus returned 0x%02X  mode=%u  -> %s\n",
-		st, (st >> 4) & 0x07,
-		(st == 0x00 || st == 0xFF) ? "NO RESPONSE (MISO dead or no module)"
-					   : "SPI BIDIRECTIONAL");
-
-	set_pin(p, PIN_CS, 0);
-	st = sx_xfer(p, SX126X_GET_STATUS);
-	set_pin(p, PIN_CS, 1);
-	pr_info("spi-probe: second read 0x%02X (a repeat confirms it is not noise)\n", st);
+	pr_info("spi-probe: IC_IDENTITY with pull-up -> 0x%02X %s\n", a,
+		(a == 0xFF) ? "(all ones = line floats, device not driving)" :
+		(a == NFC_EXPECT_ID) ? "*** MATCH ***" : "");
 
 	return 0;
 }
