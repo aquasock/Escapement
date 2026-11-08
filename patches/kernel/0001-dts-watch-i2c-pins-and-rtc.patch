@@ -1,0 +1,77 @@
+From: Escapement
+Subject: [PATCH] dts: put I2C on the T-Watch Ultra's pins and add its RTC
+
+The board profile this port ships (devkit-c1) puts i2c0 on GPIO6/7. The
+T-Watch Ultra wires I2C to GPIO3 (SDA) and GPIO2 (SCL) -- measured, not
+inferred. An ESP-IDF probe on those pins found six devices answering:
+
+    0x1A CST9217 touch     0x20 XL9555 expander
+    0x28 BHI260AP sensor   0x34 AXP2101 PMU
+    0x51 PCF85063A RTC     0x5A DRV2605 haptic
+
+On GPIO6/7 the kernel's bus comes up and scans empty. Every one of those
+devices was unreachable for that reason alone, not for want of drivers --
+`espctl i2c scan /dev/i2c-0` printed a blank grid while they were all sitting
+on the other two pins.
+
+The RTC is a separate chip, not part of the AXP2101: an NXP PCF85063A at
+0x51, interrupt on GPIO1, powered from VBACKUP. It was confirmed running and
+correct before this patch, from the same probe:
+
+    CTRL1=0x00 STOP=0 TEST=0
+    decoded 2026-11-09 01:39:45
+    after 2 s: 01:39:47 -> COUNTING
+
+So the time was already there and right; all that was missing was a bus.
+
+Notes on the edits:
+
+  * PIN(n) in this port's gpio-esp32.h takes the GPIO *number*, not an IO_MUX
+    index -- uart0 uses PIN(43)/PIN(44) for U0TXD/U0RXD. Hence PIN(3)/PIN(2),
+    not PIN(IOMUX_GPIO3). A wrong guess here silently does nothing.
+  * The RTC uses compatible "nxp,pcf85063a" (the A variant, per the bindings
+    enum). Only compatible and reg are required; the interrupt is optional but
+    wired, because gpio0 is a real interrupt controller with
+    "#interrupt-cells = <2>" and the alarm is wanted later.
+  * No competing RTC driver exists in this kernel, so this lands as rtc0 and
+    CONFIG_RTC_HCTOSYS can seed the system clock from it at boot.
+
+--- a/arch/xtensa/boot/dts/esp32s3-devkit-c1.dts
++++ b/arch/xtensa/boot/dts/esp32s3-devkit-c1.dts
+@@ -16,11 +16,23 @@
+ 		#size-cells = <0>;
+ 		compatible = "i2c-gpio";
+ 
+-		sda-gpios = <&gpio0 6 (GPIO_ACTIVE_HIGH | GPIO_OPEN_DRAIN)>;
+-		scl-gpios = <&gpio0 7 (GPIO_ACTIVE_HIGH | GPIO_OPEN_DRAIN)>;
++		/* T-Watch Ultra: SDA=GPIO3, SCL=GPIO2. The devkit profile this
++		 * port ships uses 6/7, which is why the kernel bus scanned empty
++		 * while six devices were answering on the other two pins.
++		 */
++		sda-gpios = <&gpio0 3 (GPIO_ACTIVE_HIGH | GPIO_OPEN_DRAIN)>;
++		scl-gpios = <&gpio0 2 (GPIO_ACTIVE_HIGH | GPIO_OPEN_DRAIN)>;
+ 
+ 		pinctrl-0 = <&i2c0_pins>;
+ 		pinctrl-names = "default";
++
++		rtc@51 {
++			compatible = "nxp,pcf85063a";
++			reg = <0x51>;
++			interrupt-parent = <&gpio0>;
++			interrupts = <1 IRQ_TYPE_EDGE_FALLING>;
++			wakeup-source;
++		};
+ 	};
+ };
+ 
+@@ -29,8 +41,8 @@
+ 
+ 	i2c0_pins: i2c0_pins {
+ 		pinctrl-single,pins = <
+-			PIN(6) FUN0_20MA_IE_WPU			/* SDA */
+-			PIN(7) FUN0_20MA_IE_WPU>;		/* SCL */
++			PIN(3) FUN0_20MA_IE_WPU			/* SDA */
++			PIN(2) FUN0_20MA_IE_WPU>;		/* SCL */
+ 	};
+ 	spi2_pins: spi2_pins {
+ 		pinctrl-single,pins = <

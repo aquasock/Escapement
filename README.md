@@ -176,6 +176,9 @@ cores.
   port's architecture is core 0 drawing and handing finished framebuffers over
   the shared-memory channel that already carries wifi frames.
 - **No input.** `CONFIG_INPUT` is off in the kernel config.
+- **The RTC's stored time is UTC+8.** The chip counts correctly but the factory
+  set it to China Standard Time. It is exactly 8 h ahead of true UTC, so it
+  needs one `hwclock --set` to correct. Not a driver fault.
 - **No console.** Enabling the `ttyGS3` getty means editing `/etc/inittab` on
   the jffs2 partition, which needs mtd-utils built from source.
 - **No PMU or expander bring-up** on core 0, so no rails, no haptic, no battery.

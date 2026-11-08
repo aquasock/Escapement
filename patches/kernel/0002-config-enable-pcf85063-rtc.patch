@@ -1,0 +1,40 @@
+From: Escapement
+Subject: [PATCH] config: enable the RTC class and the PCF85063A
+
+The shipped config has no RTC support of any kind -- no CONFIG_RTC_CLASS, so
+/dev/rtc* does not exist and hwclock has nothing to talk to. This adds the
+minimum needed to read the watch's PCF85063A: the RTC class, the driver, and
+hctosys so the kernel seeds its own clock at boot instead of starting at the
+epoch every time.
+
+Modules are off in this config (no CONFIG_MODULES), so these are =y. The
+kernel is XIP from flash and module support would cost RAM this board does
+not have to spare.
+
+CONFIG_RTC_HCTOSYS is the point of the exercise. Without it the driver is
+just a readable file and userspace still has to run hwclock; with it the
+kernel sets the wall clock from the RTC before init starts, which is what
+makes timestamps, TLS certificate checks and jffs2 mtimes correct on a board
+that has no NTP until WiFi associates.
+
+Deliberately not included: alarms, the UIE/PIE/AIE interfaces, and
+CONFIG_RTC_DRV_AXP2101 -- this board's clock is the PCF85063A, not the PMU's.
+Those are a later pass.
+
+--- a/new-files/board/espressif/esp32s3/devkit_c1_16m_linux.config
++++ b/new-files/board/espressif/esp32s3/devkit_c1_16m_linux.config
+@@ -110,6 +110,14 @@
+ CONFIG_I2C=y
+ CONFIG_I2C_CHARDEV=y
+ CONFIG_I2C_GPIO=y
++# The watch has a PCF85063A on I2C 0x51, backed by VBACKUP, and it is the only
++# clock on the board that survives power loss. hctosys is what makes it useful:
++# it seeds the kernel clock before init, so timestamps and certificate checks
++# are right without waiting for NTP.
++CONFIG_RTC_CLASS=y
++CONFIG_RTC_HCTOSYS=y
++CONFIG_RTC_HCTOSYS_DEVICE="rtc0"
++CONFIG_RTC_DRV_PCF85063=y
+ CONFIG_SPI=y
+ CONFIG_SPI_ESP32=y
+ CONFIG_PINCTRL=y

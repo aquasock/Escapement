@@ -1,0 +1,5 @@
+# Console on the S3's USB-Serial-JTAG, matching how this watch is reached:
+# it has no UART bridge, so UART0 output is invisible.
+CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
+CONFIG_ESP_CONSOLE_UART_DEFAULT=n
+CONFIG_ESP_CONSOLE_SECONDARY_NONE=y
