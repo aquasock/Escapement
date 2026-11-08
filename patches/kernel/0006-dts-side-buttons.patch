@@ -35,6 +35,20 @@ what the ESP-IDF firmware does anyway.
 `KEY_ENTER` because there is no better fit in the key code space for a
 general-purpose button, and userspace binds meaning, not the kernel.
 
+## Verified on hardware
+
+Both devices produce real events, captured from /dev/input/eventN:
+
+    event0  Pusher B   01 00 1c 00 01 00   EV_KEY code 28 (KEY_ENTER) press
+                       01 00 1c 00 00 00   release
+
+    event1  Pusher A   01 00 74 00 01 00   EV_KEY code 116 (KEY_POWER) press
+                       01 00 74 00 00 00   release
+
+Pusher A delivering KEY_POWER is also the proof that the PMU interrupt works
+end to end: axp20x-pek only reports on the PEK edge interrupts, so those edges
+are reaching the kernel through esp32xx-gpio.
+
 --- a/arch/xtensa/boot/dts/esp32s3-devkit-c1.dts	2026-11-08 13:31:58.614772362 -0700
 +++ arch/xtensa/boot/dts/esp32s3-devkit-c1.dts	2026-11-08 13:36:50.728499173 -0700
 @@ -2,6 +2,7 @@

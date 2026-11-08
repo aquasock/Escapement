@@ -400,6 +400,19 @@ general failure -- GPIO1 (RTC) and GPIO7 (PMU) both get real virtual IRQs. So
 `gpio-keys-polled` at 50 ms is used for Pusher B, which is what the ESP-IDF
 firmware did too.
 
+### Verified
+
+```
+event0 (Pusher B)  01 00 1c 00 01 00 -> EV_KEY 28 KEY_ENTER, press
+                   01 00 1c 00 00 00 -> release
+event1 (Pusher A)  01 00 74 00 01 00 -> EV_KEY 116 KEY_POWER, press
+                   01 00 74 00 00 00 -> release
+```
+
+`KEY_POWER` arriving from `axp20x-pek` is the end-to-end proof that the PMU
+interrupt works: that driver only reports on PEK edge interrupts, so the edges
+are genuinely reaching the kernel through esp32xx-gpio.
+
 ### Pusher A cannot be held
 
 The PMIC implements long-press power-off in hardware. Software can ignore
