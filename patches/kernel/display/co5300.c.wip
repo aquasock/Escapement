@@ -69,11 +69,19 @@
 #define SPI_ADDR_REG    0x04
 
 #define SPI_CTRL_REG    0x08
-#define SPI_FCMD_DUAL   BIT(10)
-#define SPI_FCMD_QUAD   BIT(11)
-#define SPI_FADDR_DUAL  BIT(13)
-#define SPI_FADDR_QUAD  BIT(14)
-#define SPI_FREAD_QUAD  BIT(20)
+/*
+ * ctrl bit positions, decoded from the esp32s3 spi_struct.h field order and
+ * cross-checked against the SPI_FCMD_QUAD family in spi_reg.h. The first
+ * version of this driver had every one of them wrong -- fcmd_quad at 11
+ * instead of 9, faddr_quad at 14 instead of 6 -- which is a plausible reason
+ * for a transaction that never starts. The kernel's own spi-esp32.c had
+ * q_pol/d_pol/hold_pol/wp_pol right and these were simply guessed.
+ */
+#define SPI_FCMD_DUAL   BIT(8)      /* spi_reg.h: SPI_FCMD_DUAL  */
+#define SPI_FCMD_QUAD   BIT(9)      /* spi_reg.h: SPI_FCMD_QUAD  */
+#define SPI_FADDR_DUAL  BIT(5)      /* spi_reg.h: SPI_FADDR_DUAL */
+#define SPI_FADDR_QUAD  BIT(6)      /* spi_reg.h: SPI_FADDR_QUAD */
+#define SPI_FREAD_QUAD  BIT(15)     /* spi_reg.h: SPI_FREAD_QUAD */
 
 #define SPI_CLOCK_REG   0x0c
 #define SPI_CLKCNT_L    GENMASK(5, 0)
@@ -107,7 +115,12 @@
 #define SPI_MS_DATA_BITLEN GENMASK(17, 0)
 
 #define SPI_W0_REG      0x98
-#define FIFO_WORDS      64
+/*
+ * The FIFO is W0..W15: sixteen 32-bit words, 64 bytes. The first version said
+ * 64, which is 256 bytes -- writing that far runs off the end of the FIFO and
+ * over the control registers at 0xe0/0xe8. spi_reg.h defines exactly W0..W15.
+ */
+#define FIFO_WORDS      16
 
 #define SPI_SLAVE_REG   0xe0
 #define SPI_SOFT_RESET  BIT(27)
@@ -129,6 +142,83 @@
 #define SPI_MST_CLK_ACTIVE BIT(1)
 #define SPI_MST_CLK_SEL  BIT(2)
 
+/* GPIO matrix and IO_MUX.
+ *
+ * This is the piece the first version of the driver got wrong, and it failed
+ * with no error at all. The panel's pins are GPIO 38, 39, 40, 42, 45 -- and
+ * those have NO SPI2 alternate function in IO_MUX. GPIO38's only SPI function
+ * is FSPIWP at sel 2, and GPIO39/40/42/45 expose nothing but plain GPIO.
+ *
+ * The default SPI2 pins (10..13) do have FSPICLK/FSPID/FSPIQ at sel 4, which
+ * is where FUN_SEL(4) came from -- copied from the devkit profile and applied
+ * to pins that cannot accept it. Nothing was routed, so the panel received no
+ * clock and no data while every register write succeeded.
+ *
+ * So the signals have to go through the GPIO matrix instead, which is what
+ * ESP-IDF's SPI driver does for these pins. Signal indices are from the
+ * ESP32-S3 gpio_sig_map.h.
+ */
+#define GPIO_BASE        0x60004000
+#define GPIO_IN_REG      0x3c
+#define GPIO_OUT_SEL(n)  (0x554 + (n) * 4)
+#define GPIO_IN_SEL(m)   (0x154 + (m) * 4)
+#define IO_MUX_BASE      0x60009000
+
+/*
+ * IO_MUX register offsets. NOT n*4.
+ *
+ * Pins 0..21 are sequential, but 37..45 are the JTAG and flash pads and their
+ * IO_MUX registers are laid out by pad name, not by GPIO number:
+ *
+ *     GPIO37 = 0x98   GPIO38 = 0x9c   GPIO39 = 0xa0 (MTCK)
+ *     GPIO40 = 0xa4 (MTDO)            GPIO41 = 0xa8 (MTDI)
+ *     GPIO42 = 0xac (MTMS)            GPIO45 = 0xb8
+ *
+ * The first version used n*4, which pointed every panel pin one pad over: the
+ * write meant for GPIO38 configured GPIO39, and so on. Nothing reached the
+ * panel while every register write reported success, and the tearing-effect
+ * pin read a constant 0.
+ */
+static int io_mux_off(int pin)
+{
+	switch (pin) {
+	case 6:  return 0x18;    /* TE, sequential range */
+	case 37: return 0x98;
+	case 38: return 0x9c;
+	case 39: return 0xa0;    /* MTCK */
+	case 40: return 0xa4;    /* MTDO */
+	case 41: return 0xa8;    /* MTDI */
+	case 42: return 0xac;    /* MTMS */
+	case 45: return 0xb8;
+	default: return pin * 4;
+	}
+}
+#define IO_MUX_REG(n)    io_mux_off(n)
+
+#define FUNC_OE          BIT(10)
+#define FUNC_IE          BIT(9)
+/* MCU_SEL lives in bits 14:12, not bit 0. Writing a bare 1 here left every
+ * panel pin in its IO_MUX default function -- MTDO stayed MTDO -- so the GPIO
+ * matrix output selector pointed the SPI signal at a pad that was not in GPIO
+ * mode. Readback made it obvious: iomux[40] read back 0x8401, exactly the
+ * value written, with MCU_SEL still 0.
+ */
+#define MCU_SEL_GPIO     (1 << 12)
+#define FUNC_DRV_20MA    (2 << 14)
+
+#define FSPICLK_OUT_IDX  101
+#define FSPIQ_IN_IDX     102
+#define FSPIQ_OUT_IDX    102
+#define FSPID_OUT_IDX    103
+#define FSPIHD_OUT_IDX   104
+#define FSPIWP_OUT_IDX   105
+
+#define PIN_SCK  40
+#define PIN_D0   38    /* FSPID */
+#define PIN_D1   39    /* FSPIQ */
+#define PIN_D2   42    /* FSPIWP */
+#define PIN_D3   45    /* FSPIHD */
+
 #define SPI_DIN_MODE_REG  0x24
 #define SPI_DOUT_MODE_REG 0x28
 
@@ -141,6 +231,8 @@
 
 struct co5300 {
 	void __iomem *regs;
+	void __iomem *gpio;      /* GPIO matrix */
+	void __iomem *iomux;     /* IO_MUX, a separate peripheral */
 	struct clk *clk;
 	struct reset_control *rst;
 	u32 speed_hz;
@@ -154,10 +246,114 @@ struct co5300 {
 	size_t swap_words;
 };
 
+
+// Is the controller scanning?
+//
+// GPIO6 is the panel's tearing-effect output: it pulses once per refresh while
+// the controller is running. From the bring-up notes, this is "the only signal
+// that distinguishes 'controller running' from 'rails up'" -- and it separates
+// the two failure classes that otherwise look identical from the kernel side:
+//
+//   no edges   the panel never initialised -- command path is wrong
+//   edges      the panel is alive and scanning -- only the pixel path is wrong
+//
+// Sampled by polling, not by interrupt: at ~60 Hz and a 50 ms window there are
+// several edges, and polling needs no irq plumbing on a pin the SoC GPIO driver
+// has already been awkward about.
+#define PIN_TE 6
+
+static int co5300_te_count(struct co5300 *p, int ms)
+{
+	u32 mux;
+	int last, edges = 0, i;
+
+	// GPIO6 is plain GPIO on the panel side: input, no driver.
+	mux = MCU_SEL_GPIO | FUNC_IE;
+	iowrite32(mux, p->iomux + IO_MUX_REG(PIN_TE));
+
+	last = ioread32(p->gpio + GPIO_IN_REG) & BIT(PIN_TE);
+	for (i = 0; i < ms * 20; i++) {
+		int now = ioread32(p->gpio + GPIO_IN_REG) & BIT(PIN_TE);
+
+		if (now != last) {
+			edges++;
+			last = now;
+		}
+		udelay(50);
+	}
+	return edges;
+}
+
+// Route SPI2 onto the panel's pins through the GPIO matrix.
+//
+// Output side: IO_MUX selects plain GPIO and enables the driver; the matrix
+// OUT_SEL then points that pin at the SPI2 signal. Input side: the matrix
+// IN_SEL for the FSPIQ signal names which pin drives it.
+static void co5300_route_pins(struct co5300 *p)
+{
+	struct { int pin, sig; bool oe; } outs[] = {
+		{ PIN_SCK, FSPICLK_OUT_IDX, true  },
+		{ PIN_D0,  FSPID_OUT_IDX,   true  },
+		{ PIN_D1,  FSPIQ_OUT_IDX,   true  },
+		{ PIN_D2,  FSPIWP_OUT_IDX,  true  },
+		{ PIN_D3,  FSPIHD_OUT_IDX,  true  },
+	};
+	int i;
+
+	for (i = 0; i < ARRAY_SIZE(outs); i++) {
+		u32 mux = MCU_SEL_GPIO | FUNC_DRV_20MA;
+
+		if (outs[i].oe)
+			mux |= FUNC_OE;
+		// D1 doubles as the panel's data-in, so it keeps its input
+		// enable regardless.
+		if (outs[i].pin == PIN_D1)
+			mux |= FUNC_IE;
+		iowrite32(mux, p->iomux + IO_MUX_REG(outs[i].pin));
+		iowrite32(outs[i].sig, p->gpio + GPIO_OUT_SEL(outs[i].pin));
+	}
+
+	// FSPIQ is driven by PIN_D1.
+	iowrite32(PIN_D1, p->gpio + GPIO_IN_SEL(FSPIQ_IN_IDX));
+
+	// Read back what actually landed. A wrong IO_MUX offset writes a
+	// neighbouring pad and produces no error, so the only way to tell is to
+	// look.
+	pr_info("co5300 pins: iomux[40]=%08x outsel[40]=%08x iomux[38]=%08x outsel[38]=%08x iomux[37]=%08x\n",
+		ioread32(p->iomux + IO_MUX_REG(PIN_SCK)),
+		ioread32(p->gpio + GPIO_OUT_SEL(PIN_SCK)),
+		ioread32(p->iomux + IO_MUX_REG(PIN_D0)),
+		ioread32(p->gpio + GPIO_OUT_SEL(PIN_D0)),
+		ioread32(p->iomux + IO_MUX_REG(37)));
+}
+
+// Both CS and reset are declared GPIO_ACTIVE_LOW// Both CS and reset are declared GPIO_ACTIVE_LOW, which makes the gpiod value
+// the opposite of the wire: 1 means ASSERTED (driven low), 0 means deasserted
+// (driven high). The first version of this driver used the raw pin levels, so
+// "assert CS" drove it high and the panel never saw a chip select at all --
+// and reset was left asserted through the whole init.
+static inline void co5300_cs_assert(struct co5300 *p)   { gpiod_set_value(p->cs, 1); }
+static inline void co5300_cs_release(struct co5300 *p)  { gpiod_set_value(p->cs, 0); }
+static inline void co5300_rst_assert(struct co5300 *p)  { if (p->rst_gpio) gpiod_set_value(p->rst_gpio, 1); }
+static inline void co5300_rst_release(struct co5300 *p) { if (p->rst_gpio) gpiod_set_value(p->rst_gpio, 0); }
+
 static void wreg(struct co5300 *p, int off, u32 v) { iowrite32(v, p->regs + off); }
 static u32 rreg(struct co5300 *p, int off) { return ioread32(p->regs + off); }
 
 // Run the peripheral: pulse USR and wait for it to clear.
+// Dump the registers that decide whether a transfer can run at all. A
+// transaction that never completes can be a clock that is not gated on, a
+// peripheral left in reset, or a USR bit armed without MOSI enabled -- and
+// those look identical from outside. This prints which it is.
+static void co5300_dump(struct co5300 *p, const char *when)
+{
+	pr_info("co5300 %s: cmd=%08x ctrl=%08x clock=%08x user=%08x u1=%08x u2=%08x dlen=%08x dma_conf=%08x gate=%08x slave=%08x\n",
+		when,
+		rreg(p, 0x00), rreg(p, 0x08), rreg(p, 0x0c),
+		rreg(p, 0x10), rreg(p, 0x14), rreg(p, 0x18),
+		rreg(p, 0x1c), rreg(p, 0x30), rreg(p, 0xe8), rreg(p, 0xe0));
+}
+
 static void run(struct co5300 *p)
 {
 	int guard;
@@ -172,16 +368,17 @@ static void run(struct co5300 *p)
 	// Bounded: a peripheral that never finishes must fail loudly rather than
 	// hang the boot in a spin loop inside probe, which produces no message at
 	// all and looks exactly like a dead panel.
-	for (guard = 0; guard < 1000000; guard++) {
+	for (guard = 0; guard < 20000; guard++) {
 		if (!(rreg(p, SPI_CMD_REG) & SPI_USR))
 			break;
 		cpu_relax();
 	}
-	if (guard >= 1000000) {
+	if (guard >= 20000) {
 		static bool warned;
 
 		if (!warned) {
 			pr_err("co5300: SPI transaction never completed\n");
+			co5300_dump(p, "stuck");
 			warned = true;
 		}
 	}
@@ -215,30 +412,51 @@ static void set_clock(struct co5300 *p, u32 hz)
 // `opcode` goes in the address phase, shifted up by 8 because the CO5300 puts
 // its register byte in the top of a 24-bit address (the reference firmware
 // sends `opcode << 8`).
-static int qspi_write(struct co5300 *p, u8 opcode, const u8 *data, size_t len)
+// One transaction with CS already held low.
+//
+// Split into command / address / data phases exactly as the reference firmware
+// builds them, because the constants are not interchangeable:
+//
+//   0x02  single-line "write"        used for every register write
+//   0x32  quad "write"               used only for the pixel stream
+//
+// and the address phase carries the register byte at bits 23:16.
+//
+// `cmd_bits`/`addr_bits` of 0 disable those phases, which is what a
+// continuation transfer of a pixel stream needs: bare data, no command, no
+// address, CS still held.
+static int spi_xfer(struct co5300 *p, u8 cmd, int cmd_bits,
+		    u32 addr, int addr_bits,
+		    const u8 *data, size_t len, bool quad_data)
 {
 	size_t done = 0;
+	u32 user = SPI_USR_MOSI | SPI_CS_HOLD | SPI_CS_SETUP |
+		   SPI_DOUTDIN | SPI_CK_OUT_EDGE;
 
-	gpiod_set_value(p->cs, 0);
+	if (quad_data)
+		user |= SPI_FWRITE_QUAD;
+	if (cmd_bits)
+		user |= SPI_USR_COMMAND;
+	if (addr_bits)
+		user |= SPI_USR_ADDR;
 
-	// Command phase: 8 bits of 0x02, on four lines.
-	wreg(p, SPI_USER2_REG, FIELD_PREP(SPI_USR_COMMAND_VALUE, CMD_WRITE) |
-	     FIELD_PREP(SPI_USR_COMMAND_BITLEN, 8 - 1));
-	// Address phase: 24 bits, opcode in the high byte.
-	wreg(p, SPI_USER1_REG, FIELD_PREP(SPI_USR_ADDR_BITLEN, 24 - 1));
-	wreg(p, SPI_ADDR_REG, (u32)opcode << 8 << 8);
-	wreg(p, SPI_CTRL_REG, SPI_FCMD_QUAD | SPI_FADDR_QUAD);
-	wreg(p, SPI_USER_REG, SPI_USR_COMMAND | SPI_USR_ADDR | SPI_USR_MOSI |
-	     SPI_FWRITE_QUAD | SPI_CS_HOLD | SPI_CS_SETUP | SPI_DOUTDIN |
-	     SPI_CK_OUT_EDGE);
+	wreg(p, SPI_USER_REG, user);
+	wreg(p, SPI_USER2_REG,
+	     FIELD_PREP(SPI_USR_COMMAND_VALUE, cmd) |
+	     FIELD_PREP(SPI_USR_COMMAND_BITLEN, cmd_bits ? cmd_bits - 1 : 0));
+	wreg(p, SPI_USER1_REG,
+	     FIELD_PREP(SPI_USR_ADDR_BITLEN, addr_bits ? addr_bits - 1 : 0));
+	wreg(p, SPI_ADDR_REG, addr);
+	// Command and address travel on four lines; only the data width varies.
+	wreg(p, SPI_CTRL_REG, (cmd_bits ? SPI_FCMD_QUAD : 0) |
+	     (addr_bits ? SPI_FADDR_QUAD : 0));
+
 	if (!len) {
 		wreg(p, SPI_MS_DLEN_REG, 0);
 		run(p);
-		gpiod_set_value(p->cs, 1);
 		return 0;
 	}
 
-	// Data phase, four bytes at a time through the FIFO.
 	while (done < len) {
 		size_t chunk = min_t(size_t, len - done, FIFO_WORDS * 4);
 		size_t i;
@@ -250,24 +468,39 @@ static int qspi_write(struct co5300 *p, u8 opcode, const u8 *data, size_t len)
 			size_t n = min_t(size_t, 4, chunk - i);
 
 			memcpy(&w, data + done + i, n);
-			// The peripheral clocks out the low byte of each FIFO
-			// word first; the bytes are already in the order the panel
-			// wants, so hand them over as they are.
 			wreg(p, SPI_W0_REG + i, w);
 		}
 		run(p);
 		done += chunk;
 	}
 
-	gpiod_set_value(p->cs, 1);
 	return 0;
+}
+
+static int qspi_write(struct co5300 *p, u8 opcode, const u8 *data, size_t len,
+		      bool quad_data)
+{
+	int ret;
+
+	co5300_cs_assert(p);
+	// Register writes: command 0x02, address = opcode << 8, data single-bit.
+	ret = spi_xfer(p, 0x02, 8, (u32)opcode << 8, 24, data, len, quad_data);
+	co5300_cs_release(p);
+	return ret;
 }
 
 // A panel register write: opcode plus up to four parameter bytes, which is the
 // shape of every entry in the init table.
 static void cmd(struct co5300 *p, u8 opcode, const u8 *data, int len)
 {
-	qspi_write(p, opcode, data, len);
+	// Register writes: quad command/address, single-bit parameters.
+	qspi_write(p, opcode, data, len, false);
+}
+
+// Pixels: quad command/address *and* quad data.
+static int cmd_quad(struct co5300 *p, u8 opcode, const u8 *data, size_t len)
+{
+	return qspi_write(p, opcode, data, len, true);
 }
 
 // ---- init ------------------------------------------------------------------
@@ -305,6 +538,64 @@ static void co5300_init_panel(struct co5300 *p)
 		if (co5300_init[i].len & 0x80)
 			msleep(120);
 	}
+
+	/*
+	 * Brightness comes after init, and it is not optional.
+	 *
+	 * The init table sets 0x51 (display brightness) to 0x00, and the
+	 * reference firmware then issues a separate 0xFF to bring it up. Without
+	 * that second write the panel is fully initialised, receiving pixels,
+	 * and displaying them on a black backplane -- which on an AMOLED is
+	 * indistinguishable from a dead panel. The driver looked correct by
+	 * every measure available from the kernel.
+	 */
+	{
+		u8 full = 0xFF;
+
+		cmd(p, 0x51, &full, 1);
+	}
+}
+
+
+// Can SPI2 run a transaction at all?
+//
+// Deliberately the simplest thing the peripheral can do: one byte out,
+// single-bit, no command phase, no address phase, CS toggled by hand. If this
+// completes, the clock and reset are right and any later failure is the quad
+// or command/address setup. If it does not, the panel is irrelevant.
+static int co5300_selftest(struct co5300 *p)
+{
+	int guard;
+
+	co5300_cs_assert(p);
+
+	wreg(p, SPI_USER_REG, SPI_USR_MOSI | SPI_DOUTDIN | SPI_CK_OUT_EDGE |
+	     SPI_CS_HOLD | SPI_CS_SETUP);
+	wreg(p, SPI_USER1_REG, 0);
+	wreg(p, SPI_USER2_REG, 0);
+	wreg(p, SPI_CTRL_REG, 0);
+	wreg(p, SPI_MS_DLEN_REG, FIELD_PREP(SPI_MS_DATA_BITLEN, 7));
+	wreg(p, SPI_W0_REG, 0xA5);
+
+	wreg(p, SPI_CMD_REG, SPI_UPDATE);
+	for (guard = 0; guard < 20000; guard++) {
+		if (!(rreg(p, SPI_CMD_REG) & SPI_UPDATE))
+			break;
+	}
+	wreg(p, SPI_CMD_REG, SPI_USR);
+	for (guard = 0; guard < 20000; guard++) {
+		if (!(rreg(p, SPI_CMD_REG) & SPI_USR))
+			break;
+	}
+	co5300_cs_release(p);
+
+	if (guard >= 20000) {
+		pr_err("co5300: self-test FAILED - peripheral will not run a single-bit byte\n");
+		co5300_dump(p, "selftest");
+		return -EIO;
+	}
+	pr_info("co5300: self-test passed - single-bit transaction completes\n");
+	return 0;
 }
 
 // ---- framebuffer -----------------------------------------------------------
@@ -315,67 +606,98 @@ static void co5300_init_panel(struct co5300 *p)
 static void co5300_blit(struct co5300 *p, int x0, int y0, int x1, int y1)
 {
 	const u16 *src = p->fb;
-	int y;
+	u8 w[4];
+	int y, first = 1;
 
-	gpiod_set_value(p->cs, 0);
-	{
-		u8 win[4];
+	/*
+	 * Window registers, then the pixel stream. This mirrors the reference
+	 * firmware exactly, because two of the constants are not obvious:
+	 *
+	 *   0x02  is the single-line write used for every register
+	 *   0x32  is the *quad* write, and it is what opens the pixel stream
+	 *   the address phase carries the register byte at bits 23:16
+	 *
+	 * So 0x2C is set up as a normal single-line command, and the stream
+	 * then re-opens at 0x32 with address 0x002C00. Sending 0x2C as a quad
+	 * command instead does nothing at all -- which is what the earlier
+	 * version did.
+	 */
 
-		// Column window, offset by the glass origin.
-		win[0] = (x0 + PANEL_OFFSET_X) >> 8;
-		win[1] = (x0 + PANEL_OFFSET_X) & 0xFF;
-		win[2] = (x1 + PANEL_OFFSET_X) >> 8;
-		win[3] = (x1 + PANEL_OFFSET_X) & 0xFF;
-		wreg(p, SPI_USER2_REG, FIELD_PREP(SPI_USR_COMMAND_VALUE, CMD_WRITE) |
-		     FIELD_PREP(SPI_USR_COMMAND_BITLEN, 7));
-		wreg(p, SPI_USER1_REG, FIELD_PREP(SPI_USR_ADDR_BITLEN, 23));
-		wreg(p, SPI_ADDR_REG, (u32)0x2A << 16);
-		wreg(p, SPI_CTRL_REG, SPI_FCMD_QUAD | SPI_FADDR_QUAD);
-		wreg(p, SPI_USER_REG, SPI_USR_COMMAND | SPI_USR_ADDR | SPI_USR_MOSI |
-		     SPI_FWRITE_QUAD | SPI_CS_HOLD | SPI_CS_SETUP | SPI_DOUTDIN |
-		     SPI_CK_OUT_EDGE);
-		wreg(p, SPI_MS_DLEN_REG, FIELD_PREP(SPI_MS_DATA_BITLEN, 31));
-		wreg(p, SPI_W0_REG, win[0] | (win[1] << 8) | (win[2] << 16) | (win[3] << 24));
-		run(p);
+	// Column window: x offset by the glass origin.
+	w[0] = (x0 + PANEL_OFFSET_X) >> 8;
+	w[1] = (x0 + PANEL_OFFSET_X) & 0xFF;
+	w[2] = (x1 + PANEL_OFFSET_X) >> 8;
+	w[3] = (x1 + PANEL_OFFSET_X) & 0xFF;
+	qspi_write(p, 0x2A, w, 4, false);
 
-		// Row window.
-		win[0] = y0 >> 8; win[1] = y0 & 0xFF;
-		win[2] = y1 >> 8; win[3] = y1 & 0xFF;
-		wreg(p, SPI_MS_DLEN_REG, FIELD_PREP(SPI_MS_DATA_BITLEN, 31));
-		wreg(p, SPI_W0_REG, win[0] | (win[1] << 8) | (win[2] << 16) | (win[3] << 24));
-		wreg(p, SPI_ADDR_REG, (u32)0x2B << 16);
-		run(p);
+	// Row window: no offset in Y.
+	w[0] = y0 >> 8; w[1] = y0 & 0xFF;
+	w[2] = y1 >> 8; w[3] = y1 & 0xFF;
+	qspi_write(p, 0x2B, w, 4, false);
 
-		// RAMWR: the stream opens here and runs to the end of the window.
-		wreg(p, SPI_ADDR_REG, (u32)0x2C << 16);
-		wreg(p, SPI_MS_DLEN_REG, 0);
-		run(p);
-	}
+	// RAMWR, single-line, no data.
+	qspi_write(p, 0x2C, NULL, 0, false);
 
-	// Pixels. The swap has to happen here: the panel wants each RGB565 value
-	// low byte first, and the peripheral sends 16-bit words high byte first.
+	/*
+	 * Pixel stream. CS is held low across every transfer: the controller
+	 * treats a CS edge as end-of-burst and silently discards the rest.
+	 */
+	co5300_cs_assert(p);
 	for (y = y0; y <= y1; y++) {
-		int x;
-		int n = (x1 - x0 + 1);
+		int n = x1 - x0 + 1;
 		int done = 0;
 
 		while (done < n) {
-			int chunk = min(n - done, FIFO_WORDS * 2);
+			int px = min(n - done, FIFO_WORDS * 2);
+			int words = (px + 1) / 2;
 			int i;
 
 			wreg(p, SPI_MS_DLEN_REG,
-			     FIELD_PREP(SPI_MS_DATA_BITLEN, chunk * 16 - 1));
-			for (i = 0; i < chunk; i++) {
-				u16 v = src[(size_t)y * PANEL_W + x0 + done + i];
+			     FIELD_PREP(SPI_MS_DATA_BITLEN, px * 16 - 1));
+			for (i = 0; i < words; i++) {
+				int k = i * 2;
+				u16 a = src[(size_t)y * PANEL_W + x0 + done + k];
+				u32 word = swab16(a);
 
-				wreg(p, SPI_W0_REG + i * 2, swab16(v));
+				if (k + 1 < px) {
+					u16 b = src[(size_t)y * PANEL_W + x0 + done + k + 1];
+
+					word |= (u32)swab16(b) << 16;
+				}
+				wreg(p, SPI_W0_REG + i * 4, word);
+			}
+			if (first) {
+				// First transfer of the window carries the
+				// quad-write opcode and the RAMWR address.
+				wreg(p, SPI_USER_REG,
+				     SPI_USR_COMMAND | SPI_USR_ADDR | SPI_USR_MOSI |
+				     SPI_FWRITE_QUAD | SPI_CS_HOLD | SPI_CS_SETUP |
+				     SPI_DOUTDIN | SPI_CK_OUT_EDGE);
+				wreg(p, SPI_USER2_REG,
+				     FIELD_PREP(SPI_USR_COMMAND_VALUE, 0x32) |
+				     FIELD_PREP(SPI_USR_COMMAND_BITLEN, 7));
+				wreg(p, SPI_USER1_REG,
+				     FIELD_PREP(SPI_USR_ADDR_BITLEN, 23));
+				wreg(p, SPI_ADDR_REG, 0x002C00);
+				wreg(p, SPI_CTRL_REG,
+				     SPI_FCMD_QUAD | SPI_FADDR_QUAD);
+				first = 0;
+			} else {
+				// Continuation: bare data, no command or address
+				// phase, so the write pointer advances instead of
+				// rewinding to the window origin.
+				wreg(p, SPI_USER_REG,
+				     SPI_USR_MOSI | SPI_FWRITE_QUAD | SPI_CS_HOLD |
+				     SPI_CS_SETUP | SPI_DOUTDIN | SPI_CK_OUT_EDGE);
+				wreg(p, SPI_USER2_REG, 0);
+				wreg(p, SPI_USER1_REG, 0);
+				wreg(p, SPI_CTRL_REG, 0);
 			}
 			run(p);
-			done += chunk;
+			done += px;
 		}
-		(void)x;
 	}
-	gpiod_set_value(p->cs, 1);
+	co5300_cs_release(p);
 }
 
 static int co5300_fb_setcolreg(u_int regno, u_int red, u_int green, u_int blue,
@@ -413,6 +735,23 @@ static int co5300_probe(struct platform_device *pdev)
 	if (IS_ERR(p->regs))
 		return PTR_ERR(p->regs);
 
+	// The panel's pins are not on IO_MUX SPI2 alternates, so the matrix
+	// registers have to be reachable from here.
+	// Plain ioremap, not devm_platform_ioremap_resource: the GPIO and
+	// IO_MUX blocks are already claimed by the esp32s3-gpio driver, and
+	// requesting them again fails with -EBUSY. Two mappings over the same
+	// registers is safe here because the driver only writes the matrix
+	// output-select and the pin mux for the panel's own pins.
+	//
+	// IO_MUX is a separate peripheral at 0x60009000; indexing it off the
+	// GPIO base would reach UART registers instead.
+	p->gpio = devm_ioremap(dev, 0x60004000, 0x800);
+	if (!p->gpio)
+		return dev_err_probe(dev, -ENOMEM, "cannot map gpio matrix\n");
+	p->iomux = devm_ioremap(dev, 0x60009000, 0x200);
+	if (!p->iomux)
+		return dev_err_probe(dev, -ENOMEM, "cannot map iomux\n");
+
 	p->clk = devm_clk_get(dev, NULL);
 	if (IS_ERR(p->clk))
 		return dev_err_probe(dev, PTR_ERR(p->clk), "no bus clock\n");
@@ -435,12 +774,12 @@ static int co5300_probe(struct platform_device *pdev)
 	of_property_read_u32(dev->of_node, "spi-max-frequency", &speed);
 
 	// Reset pulse, then let the controller settle.
-	if (p->rst_gpio) {
-		gpiod_set_value(p->rst_gpio, 0);
-		msleep(20);
-		gpiod_set_value(p->rst_gpio, 1);
-		msleep(120);
-	}
+	// Assert, hold, release, then let the controller settle. Assert is value 1
+	// because the pin is ACTIVE_LOW.
+	co5300_rst_assert(p);
+	msleep(20);
+	co5300_rst_release(p);
+	msleep(120);
 
 	// Peripheral bring-up, matching esp32_spi_init() in this tree.
 	wreg(p, SPI_CLK_GATE_REG,
@@ -454,9 +793,26 @@ static int co5300_probe(struct platform_device *pdev)
 	wreg(p, SPI_USER2_REG, 0);
 	wreg(p, SPI_DMA_CONF_REG, SPI_BUF_AFIFO_RST | SPI_RX_AFIFO_RST);
 
+	co5300_route_pins(p);
 	set_clock(p, speed);
 
+	pr_info("co5300: TE edges before init: %d (0 = controller not scanning)\n",
+		co5300_te_count(p, 50));
+
+	co5300_dump(p, "before-selftest");
+	if (co5300_selftest(p)) {
+		// Do not attempt the panel if the bus cannot run a transaction:
+		// each failed command costs a timeout and tells us nothing new.
+		vfree(p->fb);
+		vfree(p->swap);
+		return -EIO;
+	}
+	co5300_dump(p, "after-selftest");
+
 	co5300_init_panel(p);
+
+	pr_info("co5300: TE edges after init: %d (0 = still not scanning)\n",
+		co5300_te_count(p, 50));
 
 	// Framebuffer.
 	p->fb = vzalloc(fbsize);

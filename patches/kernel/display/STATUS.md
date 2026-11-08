@@ -74,3 +74,82 @@ From `TinyPetz/firmware/bringup/main/panel.c`, which works on this hardware:
 That firmware is the ground truth. Its own notes warn that a failed transfer
 returns ESP_OK silently, so on ESP-IDF the same bug would have looked like a
 blank panel rather than an error.
+
+---
+
+## Second pass: six bugs found, panel still dark
+
+The driver now builds, boots, registers `fb0`, runs every transaction without
+error — and the panel does not light. The controller is not scanning:
+GPIO6 (the tearing-effect pin) shows **0 edges** before and after init, which
+from the bring-up notes separates "panel dead" from "panel alive but fed bad
+pixels". It is the former.
+
+Bugs found and fixed this pass, in the order they surfaced. Each was invisible
+from the kernel side, which is why the diagnostics were worth writing.
+
+**1. Every SPI_CTRL quad bit was wrong.** `fcmd_quad` I had at 11, actual 9;
+`faddr_quad` 14 vs 6; `faddr_dual` 13 vs 5; `fread_quad` 20 vs 15. Transcribed
+from memory of ESP-IDF's helpers instead of decoded from `spi_struct.h`. The
+kernel's own `spi-esp32.c` had `q_pol`/`d_pol`/`hold_pol` right, which is
+exactly why the others looked trustworthy.
+
+**2. FIFO overrun.** `FIFO_WORDS 64` — the FIFO is `W0..W15`, sixteen 32-bit
+words. The pixel loop wrote one 16-bit pixel per slot at a 2-byte stride, ran
+past the end, and overwrote the control registers at 0xe0/0xe8. The register
+dump caught it: `clock` read `0xffff` where `0x3043` had been written.
+
+**3. No pin routing at all.** The panel's pins have no SPI2 alternate function
+in IO_MUX — GPIO38's only SPI function is `FSPIWP` at sel 2, and
+39/40/42/45 expose nothing but plain GPIO. The devkit's pins 10–13 *do* have
+SPI2 at sel 4, which is where the copied `FUN_SEL(4)` came from. Everything
+must go through the GPIO matrix.
+
+**4. The SPI clock gate.** Without
+`SPI_CLK_GATE_REG = CLK_EN | MST_CLK_ACTIVE | MST_CLK_SEL` the peripheral never
+clocks, `SPI_USR` never clears, and the first version spun forever inside probe
+with no message at all.
+
+**5. Register data phase width.** The reference sends command parameters
+single-bit and only pixels quad — it sets `MULTILINE_CMD|MULTILINE_ADDR` but not
+`MODE_QIO` on a register write. Sending parameters quad puts a wrong value in
+every register. Also: the pixel stream opens with command **0x32** and address
+**0x002C00**, not 0x2C — 0x02 is single-line write, 0x32 is the quad write.
+
+**6. `MCU_SEL` not shifted.** `MCU_SEL_GPIO` was `1` instead of `1 << 12`, so
+every panel pad stayed in its IO_MUX default function (MTDO stayed MTDO) while
+the matrix output selector pointed the SPI signal at it. Readback made it
+obvious: `iomux[40]` read back `0x8401` — precisely the value written, with
+`MCU_SEL` still 0.
+
+After fix 6 the readback is `iomux[40]=0x9400 outsel[40]=0x65` — MCU_SEL is
+GPIO and the output selector names FSPICLK. Correct, and the panel is still
+dark.
+
+## What is left
+
+Two candidates, neither yet tested:
+
+  * **Display power may not actually be asserted.** The rail is XL9555 P07,
+    driven through `regulator-fixed`. The regulator framework reports
+    `enabled`, but that only proves `regulator_enable()` was called — not that
+    `pca953x` made P07 an *output* (the expander powers up all-inputs, and an
+    output-register write to a pin still configured as input does nothing).
+    This is the single most likely remaining cause and the cheapest to check.
+
+  * **Reset may not be toggling.** `iomux[37]` reads `0x0a00`: input-enable
+    set, `MCU_SEL` 0. For most S3 pads sel 0 is the GPIO default so this is
+    probably fine, but it has not been confirmed that GPIO37 actually moves.
+
+## The next concrete step
+
+Stop guessing at the SPI protocol; it is now built to match the reference
+line for line. Determine whether the panel is powered:
+
+    i2cget -y -f 0 0x20 0x06     # config: bit 7 must be 0 (output)
+    i2cget -y -f 0 0x20 0x02     # output: bit 7 must be 1 (high)
+
+If `cfg0` bit 7 is 1, the expander never made P07 an output and the panel has
+had no power this whole time — which would explain every symptom, including a
+silent one, and would mean `regulator-fixed` needs its gpio requested with an
+explicit direction rather than relying on the framework.
