@@ -193,6 +193,81 @@ static u8 nfc_read(struct probe *p, u8 reg, u32 ctrl)
 	return sr(p, SPI_W0_REG) & 0xFF;
 }
 
+
+/*
+ * Internal loopback: the only test on this board that needs nothing to answer.
+ *
+ * Every external target on the second SPI bus either does not respond or is
+ * not fitted, so no experiment so far has actually proved that the peripheral
+ * shifts bits. This one does, with no wire and no external part:
+ *
+ *   - MISO's pad is switched to OUTPUT
+ *   - its matrix output selector is pointed at FSPID_OUT_IDX, the same signal
+ *     the peripheral drives on MOSI
+ *   - FSPIQ_IN stays mapped to that pad
+ *
+ * So whatever the peripheral shifts out on MOSI is looped straight back into
+ * its own receive path. Shift 0xA5 (10100101) and the received byte must be the
+ * same pattern; if the clock, data or phase is wrong it comes back shifted,
+ * inverted or zero.
+ */
+static int spi_loopback(struct probe *p)
+{
+	static const u8 patterns[] = { 0xA5, 0x5A, 0xFF, 0x00, 0x81 };
+	int i, pass = 0;
+
+	/*
+	 * Sanity check the pad's output driver before trusting any loopback
+	 * result: drive GPIO33 as a plain GPIO and read it back. If this does
+	 * not work, the pad never drives and loopback could never succeed.
+	 */
+	iowrite32(MCU_SEL_GPIO | DRV_20MA | RDY_VAL, p->iomux + io_mux_off(PIN_MISO));
+	iowrite32(BIT(PIN_MISO), p->gpio + GPIO_ENABLE_W1TS);
+	set_pin(p, PIN_MISO, 1);
+	udelay(50);
+	pr_info("spi-probe: pad33 driven high reads %d\n", get_pin(p, PIN_MISO));
+	set_pin(p, PIN_MISO, 0);
+	udelay(50);
+	pr_info("spi-probe: pad33 driven low  reads %d\n", get_pin(p, PIN_MISO));
+
+	// MISO pad -> output, driven by FSPID_OUT (the MOSI signal).
+	iowrite32(MCU_SEL_GPIO | DRV_20MA, p->iomux + io_mux_off(PIN_MISO));
+	iowrite32(FSPID_OUT_IDX, p->gpio + GPIO_OUT_SEL(PIN_MISO));
+	iowrite32(BIT(PIN_MISO), p->gpio + GPIO_ENABLE_W1TS);
+	iowrite32(PIN_MISO, p->gpio + GPIO_IN_SEL(FSPIQ_IN_IDX));
+
+	for (i = 0; i < ARRAY_SIZE(patterns); i++) {
+		u8 tx = patterns[i], rx;
+
+		sw(p, SPI_CLOCK_REG, FIELD_PREP(GENMASK(5, 0), 19) |
+				     FIELD_PREP(GENMASK(11, 6), 9) |
+				     FIELD_PREP(GENMASK(17, 12), 19));
+		sw(p, SPI_USER_REG, SPI_USR_MOSI | SPI_USR_MISO | SPI_CS_HOLD);
+		sw(p, SPI_USER1_REG, 0);
+		sw(p, SPI_USER2_REG, 0);
+		sw(p, SPI_CTRL_REG, 0x00340000);
+		sw(p, SPI_MS_DLEN_REG, FIELD_PREP(SPI_MS_DATA_BITLEN, 7));
+		sw(p, SPI_W0_REG, tx);
+		sw(p, SPI_W8_REG, 0);          // clear the receive slot
+		run(p);
+		rx = sr(p, SPI_W0_REG) & 0xFF;
+
+		pr_info("spi-probe: loopback tx 0x%02X rx 0x%02X  %s\n", tx, rx,
+			rx == tx ? "MATCH" : "differ");
+		if (rx == tx)
+			pass++;
+	}
+
+	// Restore MISO to an input so anything later is not fighting a driver.
+	iowrite32(MCU_SEL_GPIO | RDY_VAL, p->iomux + io_mux_off(PIN_MISO));
+	iowrite32(BIT(PIN_MISO), p->gpio + GPIO_ENABLE_W1TC);
+
+	pr_info("spi-probe: LOOPBACK %d/%d -> %s\n", pass, (int)ARRAY_SIZE(patterns),
+		pass == ARRAY_SIZE(patterns) ? "SPI PERIPHERAL WORKS" :
+		pass ? "partial - phase or data width wrong" : "no data shifted");
+	return pass;
+}
+
 static int spi_probe_probe(struct platform_device *pdev)
 {
 	struct device *dev = &pdev->dev;
@@ -251,6 +326,14 @@ static int spi_probe_probe(struct platform_device *pdev)
 			msleep(50);
 		}
 	}
+
+	/*
+	 * Loopback FIRST, before any external device is blamed. It needs
+	 * nothing to answer: MISO's pad is driven by the peripheral's own
+	 * data-out signal, so what is shifted out is shifted straight back in.
+	 * If this fails, no device on the bus could ever have worked.
+	 */
+	spi_loopback(p);
 
 	pin_gpio_out(p, PIN_CS);
 	pin_gpio_in(p, PIN_IRQ);
