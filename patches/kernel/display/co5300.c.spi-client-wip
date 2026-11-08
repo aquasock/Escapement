@@ -1,0 +1,446 @@
+// co5300.c - the T-Watch Ultra's AMOLED panel, as an SPI client.
+//
+// This replaces an earlier version that programmed the SPI peripheral directly.
+// That was the wrong shape: the kernel's own esp32-spi driver already handles
+// clock gating, reset and register mapping, and it demonstrably binds to SPI3
+// on this board:
+//
+//     esp32_spi 60025000.spi: probed: bus -1, clk 80000000 Hz
+//
+// Everything about the panel below is taken from LilyGo's own MIT-licensed
+// driver (LilyGoLib, src/display/LilyGoDispInterface.cpp) rather than inferred:
+//
+//   host      SPI3_HOST for the T-Watch Ultra (SPI2 only for the LoRa Pager)
+//   mode      SPI_MODE0, command_bits 8, address_bits 24, CS driven by hand
+//   reset     HIGH 200 ms, LOW 300 ms, HIGH 200 ms
+//   register  0x02 then a 24-bit address carrying the register byte at 23:16
+//   pixels    0x32 then address 0x002C00, then the data stream, CS held
+//
+// spi_transfer cannot express separate command and address phases, so they are
+// sent as one byte stream: 0x02, addr[23:16], addr[15:8], addr[7:0], then any
+// parameters. The pixel stream uses the same shape with 0x32.
+//
+// The panel is write-only: it never acknowledges and never returns a byte. The
+// only evidence anything worked is the glass -- and GPIO6, the tearing-effect
+// output, which pulses once per refresh while the controller scans. That pin is
+// the instrument this driver reports on.
+
+#include <linux/delay.h>
+#include <linux/fb.h>
+#include <linux/gpio/consumer.h>
+#include <linux/module.h>
+#include <linux/of.h>
+#include <linux/spi/spi.h>
+#include <linux/io.h>
+#include <linux/vmalloc.h>
+
+#define DRIVER_NAME "co5300"
+
+#define PANEL_W 410
+#define PANEL_H 502
+#define PANEL_OFFSET_X 22
+#define BPP 16
+
+struct co5300 {
+	struct spi_device *spi;
+	struct gpio_desc *cs;
+	struct gpio_desc *rst;
+	struct gpio_desc *te;
+
+	struct fb_info *info;
+	u16 *fb;
+	size_t fb_bytes;
+
+	u8 *tx;
+	size_t tx_len;
+};
+
+
+// ---- pin routing -----------------------------------------------------------
+//
+// These pins have no SPI3 alternate function in IO_MUX, which is why
+// SPICOMMON_BUSFLAG_GPIO_PINS is set in LilyGo's bus config: the signals go
+// through the GPIO matrix. spi-esp32 does not do this itself (it expects
+// pinctrl to have arranged the pads), so the board-specific routing lives here,
+// done once at probe.
+//
+// Signal indices are SPI3's, not SPI2's:
+//            SPI3  SPI2(FSPI)
+//   CLK        4      101
+//   D          1      103
+//   Q          0      102
+//   HD         2      104
+//   WP         3      105
+
+#define GPIO_MATRIX_BASE 0x60004000
+#define IO_MUX_BASE      0x60009000
+#define GPIO_OUT_SEL(n)  (0x554 + (n) * 4)
+
+#define RDY_VAL          BIT(9)        /* FUN_IE  */
+#define MCU_SEL_GPIO     (1 << 12)     /* bits 14:12 */
+#define DRV_20MA         (2 << 10)     /* bits 11:10 */
+
+#define SPICLK_OUT_IDX   4
+#define SPID_OUT_IDX     1
+#define SPIQ_OUT_IDX     0
+#define SPIHD_OUT_IDX    2
+#define SPIWP_OUT_IDX    3
+
+#define PIN_SCK   40
+#define PIN_D0    38
+#define PIN_D1    39
+#define PIN_D2    42
+#define PIN_D3    45
+
+/*
+ * IO_MUX offsets are NOT pin*4 above GPIO21. Pins 37..45 are the JTAG and flash
+ * pads, laid out by pad name: GPIO37 0x98, 38 0x9c, 39 0xa0 (MTCK), 40 0xa4
+ * (MTDO), 41 0xa8 (MTDI), 42 0xac (MTMS), 45 0xb8.
+ */
+static int co5300_iomux_off(int pin)
+{
+	switch (pin) {
+	case 37: return 0x98;
+	case 38: return 0x9c;
+	case 39: return 0xa0;
+	case 40: return 0xa4;
+	case 41: return 0xa8;
+	case 42: return 0xac;
+	case 45: return 0xb8;
+	default: return pin * 4;
+	}
+}
+
+static int co5300_route_pins(struct device *dev)
+{
+	void __iomem *gpio, *iomux;
+	struct { int pin, sig; } outs[] = {
+		{ PIN_SCK, SPICLK_OUT_IDX },
+		{ PIN_D0,  SPID_OUT_IDX   },
+		{ PIN_D1,  SPIQ_OUT_IDX   },
+		/*
+		 * Quad data is four *different* signals, not four copies of D:
+		 * D0 = SPID (1), D1 = SPIQ (0), D2 = SPIWP (3), D3 = SPIHD (2).
+		 * Routing D2/D3 to SPID as well would put the same bit on three
+		 * wires.
+		 */
+		{ PIN_D2,  SPIWP_OUT_IDX  },
+		{ PIN_D3,  SPIHD_OUT_IDX  },
+	};
+	int i;
+
+	gpio = devm_ioremap(dev, GPIO_MATRIX_BASE, 0x800);
+	iomux = devm_ioremap(dev, IO_MUX_BASE, 0x200);
+	if (!gpio || !iomux)
+		return -ENOMEM;
+
+	for (i = 0; i < ARRAY_SIZE(outs); i++) {
+		iowrite32(MCU_SEL_GPIO | DRV_20MA,
+			  iomux + co5300_iomux_off(outs[i].pin));
+		iowrite32(outs[i].sig, gpio + GPIO_OUT_SEL(outs[i].pin));
+	}
+
+	/* CS (41) and RST (37) are plain GPIOs but still need their pad mux
+	 * set: GPIO41 defaults to MTDI, a JTAG signal, and CS would never move. */
+	iowrite32(MCU_SEL_GPIO | DRV_20MA, iomux + co5300_iomux_off(41));
+	iowrite32(MCU_SEL_GPIO | DRV_20MA, iomux + co5300_iomux_off(37));
+	iowrite32(MCU_SEL_GPIO | RDY_VAL, iomux + co5300_iomux_off(6));
+
+	return 0;
+}
+
+// Send: command byte, 24-bit address, optional payload. CS held throughout.
+static int co5300_send(struct co5300 *p, u8 cmd, u32 addr,
+		       const void *data, size_t len)
+{
+	size_t total = 4 + len;
+	u8 *buf;
+	int ret;
+
+	buf = kmalloc(total, GFP_KERNEL);
+	if (!buf)
+		return -ENOMEM;
+
+	buf[0] = cmd;
+	buf[1] = (addr >> 16) & 0xFF;
+	buf[2] = (addr >> 8) & 0xFF;
+	buf[3] = addr & 0xFF;
+	if (len)
+		memcpy(buf + 4, data, len);
+
+	/* CS is ACTIVE_LOW, so the gpiod value 1 means asserted (driven low). */
+	if (p->cs)
+		gpiod_set_value_cansleep(p->cs, 1);
+
+	ret = spi_write(p->spi, buf, total);
+
+	if (p->cs)
+		gpiod_set_value_cansleep(p->cs, 0);
+
+	kfree(buf);
+	if (ret)
+		pr_err("co5300: cmd 0x%02X failed: %d\n", cmd, ret);
+	return ret;
+}
+
+// A register write: the register number is the address phase.
+static int co5300_cmd(struct co5300 *p, u8 reg, const u8 *data, size_t len)
+{
+	return co5300_send(p, 0x02, (u32)reg << 8, data, len);
+}
+
+// ---- init ------------------------------------------------------------------
+//
+// The same 11 entries the working ESP-IDF firmware uses, which in turn came
+// from the factory image at file offset 0x130dd4.
+
+static const struct {
+	u8 op;
+	u8 data[4];
+	u8 len;		/* low 5 bits = parameter count, 0x80 = settle after */
+} co5300_init[] = {
+	{ 0xFE, { 0x00 }, 0x01 },
+	{ 0xC4, { 0x80 }, 0x01 },
+	{ 0x3A, { 0x55 }, 0x01 },	/* RGB565 */
+	{ 0x35, { 0x00 }, 0x01 },
+	{ 0x53, { 0x20 }, 0x01 },
+	{ 0x63, { 0xFF }, 0x01 },
+	{ 0x2A, { 0x00, 0x16, 0x01, 0xAF }, 0x04 },
+	{ 0x2B, { 0x00, 0x00, 0x01, 0xF5 }, 0x04 },
+	{ 0x11, { 0x00 }, 0x80 },	/* sleep out */
+	{ 0x29, { 0x00 }, 0x80 },	/* display on */
+	{ 0x51, { 0x00 }, 0x01 },	/* brightness; 0xFF follows */
+};
+
+static void co5300_init_panel(struct co5300 *p)
+{
+	size_t i;
+	u8 full = 0xFF;
+
+	for (i = 0; i < ARRAY_SIZE(co5300_init); i++) {
+		u8 len = co5300_init[i].len & 0x1F;
+
+		co5300_cmd(p, co5300_init[i].op, co5300_init[i].data, len);
+		if (co5300_init[i].len & 0x80)
+			msleep(120);
+	}
+
+	/*
+	 * Brightness is not optional. The table sets 0x51 to 0x00 and the
+	 * reference firmware then writes 0xFF separately; without it the panel
+	 * is initialised, receiving pixels, and showing them on a black
+	 * backplane -- which on an AMOLED looks exactly like a dead panel.
+	 */
+	co5300_cmd(p, 0x51, &full, 1);
+}
+
+// Is the controller scanning? GPIO6 pulses per refresh while it runs.
+static int co5300_te_edges(struct co5300 *p, int ms)
+{
+	int last, edges = 0, i;
+
+	if (!p->te)
+		return -1;
+
+	last = gpiod_get_value_cansleep(p->te);
+	for (i = 0; i < ms * 20; i++) {
+		int now = gpiod_get_value_cansleep(p->te);
+
+		if (now != last) {
+			edges++;
+			last = now;
+		}
+		udelay(50);
+	}
+	return edges;
+}
+
+// Push one rectangle. Window once, then stream.
+static void co5300_blit(struct co5300 *p, int x0, int y0, int x1, int y1)
+{
+	u8 win[4];
+	u8 hdr[4] = { 0x32, 0x00, 0x2C, 0x00 };
+	const u16 *src = p->fb;
+	int y;
+
+	win[0] = (x0 + PANEL_OFFSET_X) >> 8;
+	win[1] = (x0 + PANEL_OFFSET_X) & 0xFF;
+	win[2] = (x1 + PANEL_OFFSET_X) >> 8;
+	win[3] = (x1 + PANEL_OFFSET_X) & 0xFF;
+	co5300_cmd(p, 0x2A, win, 4);
+
+	win[0] = y0 >> 8; win[1] = y0 & 0xFF;
+	win[2] = y1 >> 8; win[3] = y1 & 0xFF;
+	co5300_cmd(p, 0x2B, win, 4);
+
+	/*
+	 * RAMWR and the pixel stream with CS held across both: the controller
+	 * treats a CS edge as end-of-burst and discards the rest.
+	 *
+	 * Each RGB565 value is byte-swapped because the panel wants low byte
+	 * first and the peripheral sends words high byte first. Without the
+	 * swap every colour is rotated, and a flat fill still looks right -- so
+	 * only a real image shows it.
+	 */
+	if (p->cs)
+		gpiod_set_value_cansleep(p->cs, 1);
+
+	spi_write(p->spi, hdr, 4);
+
+	for (y = y0; y <= y1; y++) {
+		size_t n = (size_t)(x1 - x0 + 1) * sizeof(u16);
+		size_t off = 0;
+		int x;
+
+		for (x = x0; x <= x1; x++)
+			((u16 *)p->tx)[x - x0] =
+				swab16(src[(size_t)y * PANEL_W + x]);
+
+		while (off < n) {
+			size_t chunk = min(n - off, p->tx_len);
+
+			spi_write(p->spi, p->tx + off, chunk);
+			off += chunk;
+		}
+	}
+
+	if (p->cs)
+		gpiod_set_value_cansleep(p->cs, 0);
+}
+
+// ---- framebuffer -----------------------------------------------------------
+
+static int co5300_fb_setcolreg(u_int regno, u_int red, u_int green, u_int blue,
+			       u_int transp, struct fb_info *info)
+{
+	return regno > 255 ? 1 : 0;
+}
+
+static const struct fb_ops co5300_fb_ops = {
+	.owner = THIS_MODULE,
+	.fb_setcolreg = co5300_fb_setcolreg,
+	.fb_fillrect = cfb_fillrect,
+	.fb_copyarea = cfb_copyarea,
+	.fb_imageblit = cfb_imageblit,
+};
+
+static int co5300_probe(struct spi_device *spi)
+{
+	struct device *dev = &spi->dev;
+	struct co5300 *p;
+	struct fb_info *info;
+	struct fb_var_screeninfo *var;
+	int ret, edges;
+
+	p = devm_kzalloc(dev, sizeof(*p), GFP_KERNEL);
+	if (!p)
+		return -ENOMEM;
+	p->spi = spi;
+	spi_set_drvdata(spi, p);
+
+	if (co5300_route_pins(dev))
+		return dev_err_probe(dev, -ENOMEM, "pin routing failed\n");
+
+	spi->mode = SPI_MODE_0;
+	spi->bits_per_word = 8;
+	spi->max_speed_hz = 20000000;	/* proven on this panel */
+	ret = spi_setup(spi);
+	if (ret)
+		return dev_err_probe(dev, ret, "spi_setup failed\n");
+
+	p->cs = devm_gpiod_get_optional(dev, "cs", GPIOD_OUT_LOW);
+	p->rst = devm_gpiod_get_optional(dev, "reset", GPIOD_OUT_HIGH);
+	p->te = devm_gpiod_get_optional(dev, "te", GPIOD_IN);
+
+	/* Reset: HIGH 200, LOW 300, HIGH 200 -- LilyGo's sequence exactly. */
+	if (p->rst) {
+		gpiod_set_value_cansleep(p->rst, 0);
+		msleep(200);
+		gpiod_set_value_cansleep(p->rst, 1);
+		msleep(300);
+		gpiod_set_value_cansleep(p->rst, 0);
+		msleep(200);
+	}
+
+	pr_info("co5300: TE edges before init = %d\n", co5300_te_edges(p, 40));
+
+	co5300_init_panel(p);
+
+	edges = co5300_te_edges(p, 40);
+	pr_info("co5300: TE edges after init = %d %s\n", edges,
+		edges == 0 ? "(controller NOT scanning)" :
+		edges < 0 ? "(no te gpio)" : "*** CONTROLLER IS SCANNING ***");
+
+	p->fb_bytes = PANEL_W * PANEL_H * (BPP / 8);
+	p->fb = vzalloc(p->fb_bytes);
+	p->tx_len = PAGE_SIZE * 2;
+	p->tx = vzalloc(p->tx_len);
+	if (!p->fb || !p->tx)
+		return -ENOMEM;
+
+	info = framebuffer_alloc(0, dev);
+	if (!info)
+		return -ENOMEM;
+	p->info = info;
+
+	info->screen_base = (char __iomem *)p->fb;
+	info->screen_size = p->fb_bytes;
+	info->fbops = &co5300_fb_ops;
+	info->fix.smem_len = p->fb_bytes;
+	info->fix.type = FB_TYPE_PACKED_PIXELS;
+	info->fix.visual = FB_VISUAL_TRUECOLOR;
+	info->fix.line_length = PANEL_W * (BPP / 8);
+
+	var = &info->var;
+	var->xres = PANEL_W;
+	var->yres = PANEL_H;
+	var->xres_virtual = PANEL_W;
+	var->yres_virtual = PANEL_H;
+	var->bits_per_pixel = BPP;
+	var->red.offset = 11; var->red.length = 5;
+	var->green.offset = 5; var->green.length = 6;
+	var->blue.offset = 0; var->blue.length = 5;
+
+	ret = register_framebuffer(info);
+	if (ret)
+		return dev_err_probe(dev, ret, "register_framebuffer failed\n");
+
+	/* Prove the panel emits. White, not black: on an AMOLED the two are not
+	 * distinguishable and a diagnostic that ends black reads as a fault. */
+	memset(p->fb, 0xFF, p->fb_bytes);
+	co5300_blit(p, 0, 0, PANEL_W - 1, PANEL_H - 1);
+
+	dev_info(dev, "%dx%d RGB565, fb0 registered\n", PANEL_W, PANEL_H);
+	return 0;
+}
+
+static void co5300_remove(struct spi_device *spi)
+{
+	struct co5300 *p = spi_get_drvdata(spi);
+
+	if (p->info) {
+		unregister_framebuffer(p->info);
+		framebuffer_release(p->info);
+	}
+	vfree(p->fb);
+	vfree(p->tx);
+}
+
+static const struct of_device_id co5300_of_match[] = {
+	{ .compatible = "lilygo,co5300" },
+	{ }
+};
+MODULE_DEVICE_TABLE(of, co5300_of_match);
+
+static struct spi_driver co5300_driver = {
+	.probe = co5300_probe,
+	.remove = co5300_remove,
+	.driver = {
+		.name = DRIVER_NAME,
+		.of_match_table = co5300_of_match,
+	},
+};
+module_spi_driver(co5300_driver);
+
+MODULE_DESCRIPTION("CO5300 AMOLED panel on the T-Watch Ultra (SPI3)");
+MODULE_LICENSE("GPL");

@@ -183,3 +183,74 @@ What then has to be added to `spi-esp32.c`:
 That is the work. It is a few hundred lines rather than a few dozen, but every
 one of the last fifteen flash cycles has been me re-deriving what
 `spi-esp32.c` and `spi-mem` already do correctly.
+
+---
+
+## Rewritten as an SPI client of spi-esp32 — and what that settled
+
+The panel driver is now a normal `spi_driver` under `&spi3`, not a platform
+driver poking registers. That produced two firm results.
+
+**1. SPI3 works, and only through the kernel driver.**
+
+```
+esp32_spi 60025000.spi: probed: bus -1, clk 80000000 Hz
+```
+
+`spi-esp32` binds to SPI3 and gets an 80 MHz clock. The earlier platform driver
+reading zeros from `0x60025000` was therefore a mapping or ordering fault in
+*that* driver, not an unreachable block. Its probe does `devm_clk_get`,
+`clk_prepare_enable`, `reset_control_deassert` and
+`devm_platform_ioremap_resource` in the right order; hand-rolling those was the
+mistake.
+
+**2. The panel still does not initialise.**
+
+```
+co5300: TE edges before init = 0
+co5300: TE edges after init = 0 (controller NOT scanning)
+co5300 spi0.0: 410x502 RGB565, fb0 registered
+```
+
+Transactions complete, `fb0` registers, and GPIO6 never pulses.
+
+Two real bugs fixed on the way, both worth keeping:
+
+  * **D2/D3 were routed to SPID.** Quad data is four *different* signals —
+    D0=SPID(1), D1=SPIQ(0), D2=SPIWP(3), D3=SPIHD(2). Routing D2 and D3 to
+    SPID put the same bit on three wires.
+  * **IO_MUX offsets above GPIO21 are not `pin*4`.** GPIO37=0x98, 38=0x9c,
+    39=0xa0 (MTCK), 40=0xa4 (MTDO), 41=0xa8 (MTDI), 42=0xac (MTMS), 45=0xb8.
+
+## The one remaining difference, and it is structural
+
+LilyGo's register write sets:
+
+```c
+t.flags = SPI_TRANS_MULTILINE_CMD | SPI_TRANS_MULTILINE_ADDR;
+t.cmd   = 0x02;
+t.addr  = cmd << 8;
+```
+
+**The command and address phases go out on multiple lines**, while the data
+phase stays single. That is not something `spi_transfer` can express, and it is
+what the current driver cannot reproduce: it sends `0x02, addr[23:16],
+addr[15:8], addr[7:0], data` as one byte stream, all single-line.
+
+A CO5300 that expects the register number delivered on four lanes will see
+nothing it recognises from that, which is consistent with TE never starting.
+
+**So the next step is `spi-mem`, and it is now the only step.** `struct
+spi_mem_op` models command, address, dummy and data as separate phases with
+independent bus widths (`op.cmd.buswidth = 4`, `op.addr.buswidth = 4`,
+`op.data.buswidth = 1` for registers and `4` for pixels). That is precisely
+this protocol. What is needed:
+
+  1. `CONFIG_SPI_MEM=y`
+  2. `spi_controller_mem_ops` on `spi-esp32`: a minimal `exec_op` that maps
+     `spi_mem_op` onto the peripheral's command/address/data phases with
+     `SPI_FCMD_QUAD` / `SPI_FADDR_QUAD` and `SPI_FWRITE_QUAD` set per phase
+  3. `co5300` rewritten to call `spi_mem_exec_op` instead of `spi_write`
+
+That is a bounded, well-specified piece of work — unlike everything since the
+first flash cycle, which has been discovering these facts one boot at a time.
