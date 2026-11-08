@@ -123,6 +123,44 @@ because each one looks like something else:
    `/etc/inittab` work with no editing: its `console::respawn:...getty` line
    then lands on the USB port.
 
+### One thing to fix after the first boot: Enter
+
+This board's console comes up with `ICRNL` **off**. Your terminal sends Enter as
+CR; canonical-mode reads need NL. With the translation off, the line discipline
+never sees a line ending, so any prompt that turns echo off — `login`, `passwd`,
+anything using `getpass` — accepts keystrokes and then waits forever on a line
+that can never end. Interactive shells hide it, because readline accepts CR
+directly; password prompts do not. The symptom is a console that looks dead at
+exactly the moments you most need it.
+
+Confirmed on hardware:
+
+```
+$ stty -a
+speed 9600 baud; line = 0;            <- termios never properly initialised
+... -inlcr -igncr -icrnl ixon ixoff   <- the culprit
+```
+
+Two ways to work around it, and one to fix it:
+
+- **Workaround, no setup:** press `Ctrl-J` (LF) instead of Enter at a prompt.
+- **Fix for the current session:** `stty icrnl`
+- **Fix permanently:** put it in an init script, which is what
+  `scripts/console-fix.sh` writes:
+
+```sh
+#!/bin/sh
+stty icrnl < /dev/console 2>/dev/null
+```
+
+Save as `/etc/init.d/S01termios`, `chmod +x`, reboot. `rcS` runs it before init
+starts the getty, so the login prompt gets the corrected flags. Verified: after
+a cold boot, typing `root` and pressing Enter reaches `Password:` instead of
+hanging.
+
+This lives on the writable `etc` partition, so an image update from upstream
+will not carry it. Re-run it after one.
+
 Upstream documents `usb-console on` as the way to enable this, which is needed
 on their devkit because there `ttyS0` is last and `/dev/console` is the UART.
 This board has no UART to fall back to, so the ordering fix is the whole job.
