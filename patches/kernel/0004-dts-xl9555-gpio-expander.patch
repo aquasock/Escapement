@@ -1,0 +1,83 @@
+From: Escapement
+Subject: [PATCH] dts: add the XL9555 GPIO expander
+
+The expander at I2C 0x20 is an XL9555, a PCA9555 clone: 16 bits, no
+auto-increment, no interrupt line on this board. `drivers/gpio/gpio-pca953x.c`
+already knows it as "nxp,pca9555" (16 bits, PCA_INT), so this needs no driver
+work at all -- just CONFIG_GPIO_PCA953X and a node.
+
+## It is not an I2C mux
+
+Worth stating because the question came up: the RTC and the PMU are peers of
+the expander on the same two wires, addressed directly at 0x51 and 0x34. The
+XL9555 routes nothing. Its job is GPIO -- it gates the display rail (P07),
+enables the haptic driver (P06), holds the touch controller out of reset (P08)
+and reads the SD card detect.
+
+## Pin map, corrected
+
+LilyGo's documentation table lists the touch reset on expander GPIO10. The
+hardware says otherwise: this project's own working firmware
+(`TinyPetz/firmware/bringup/main/board.h`) drives `EXPANDS_TOUCH_RST = 8`, and
+the register state confirms it --
+
+    0x07 (config port 1) = 0xfe   bit 0 is an output, bits 1..7 are inputs
+    0x03 (output port 1) = 0xff   P08 driven high
+
+With the linear mapping P00..P07 = gpio 0..7 and P10..P17 = gpio 8..15, the
+touch reset is **gpio 8**, i.e. port 1 bit 0. Trusting the doc table would have
+put the reset pulse on the wrong pin.
+
+## The state is inherited, not set
+
+Read on the running watch before this patch:
+
+    0x06 (config port 0) = 0x3f    P06, P07 outputs
+    0x02 (output port 0) = 0xff    both driven high
+
+That is exactly what the ESP-IDF firmware leaves behind. The expander stays
+powered across an ESP32 reset, so Linux inherits a working display-enable --
+but on a cold boot (battery pulled) the PCA9555 comes up with all pins as
+inputs, DISP_EN is not driven, and the panel would stay unpowered.
+
+The fix is not a hog: model it properly when the drivers land --
+
+    display enable  -> regulator-fixed, gpio = <&xl9555 7 GPIO_ACTIVE_HIGH>
+    touch reset     -> reset-gpios = <&xl9555 8 GPIO_ACTIVE_LOW> on the
+                       touch node, so the driver can pulse it rather than
+                       just hold it high
+
+`pca953x_probe()` writes nothing to the config registers (only `regmap` setup
+and an optional `reset-gpios`), so adding the node does not disturb whatever
+state the expander is in.
+
+--- a/arch/xtensa/boot/dts/esp32s3-devkit-c1.dts
++++ b/arch/xtensa/boot/dts/esp32s3-devkit-c1.dts
+@@ -34,10 +34,24 @@
+ 			wakeup-source;
+ 		};
+ 
++		/* XL9555: 16-bit GPIO expander, a PCA9555 clone at 0x20.
++		 * Linear pin mapping: P00..P07 = gpio 0..7, P10..P17 = 8..15.
++		 * It gates the display rail (P07), haptic enable (P06) and
++		 * holds the touch controller out of reset (P08). No interrupt
++		 * line on this board, so it is written only.
++		 */
++		xl9555: gpio@20 {
++			compatible = "nxp,pca9555";
++			reg = <0x20>;
++			gpio-controller;
++			#gpio-cells = <2>;
++		};
++
+ 		/* X-Powers AXP2101 PMU: battery, charging, and the power rails.
+-		 * Its IRQ line is GPIO7 on this board. The two power-supply
+-		 * children are what userspace sees as
+-		 * /sys/class/power_supply/{axp20x-battery,axp20x-usb}.
++		 * No interrupt: GPIO7 has no pull-up here, and a LEVEL_LOW IRQ
++		 * on it storms and hangs the boot. Without an IRQ the supplies
++		 * still register (see axp2101 local patch 0008), but there are
++		 * no VBUS hotplug events and no wake-from-sleep.
+ 		 */
+ 		pmic@34 {
+ 			compatible = "x-powers,axp2101";
