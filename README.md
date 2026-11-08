@@ -51,9 +51,21 @@ Verified by corrupting the chip on purpose: set to 20:30 while true UTC was
 19:00, corrected the *system* clock only, rebooted — and the next boot reported
 `setting system clock to 2026-11-08T19:01:00 UTC`. The chip had followed.
 
-**Does not: display anything.** No CO5300 driver exists in the port, the
-kernel has no framebuffer or VT, and core 0 does not bring up the PMU, so the
-AMOLED is not even powered. This is a headless Linux in a watch, for now.
+**Works: the display.** The CO5300 AMOLED is a `spi_mem` client on SPI2 with an
+fbdev framebuffer, 410x502 RGB565:
+
+```
+co5300: TE edges after init = 4 *** CONTROLLER IS SCANNING ***
+co5300 spi0.0: 410x502 RGB565, fb0 registered
+```
+
+Verified on hardware 2026-11-08 by drawing **eight horizontal bands** — white,
+red, green, blue, yellow, magenta, cyan, grey — and getting eight correct bands
+in the right order. The pattern matters: a flat fill renders identically whether
+the panel received all 502 rows or row 0 five hundred times, so only a pattern
+that varies along y can prove row addressing. That trap cost this project time
+once already; see `patches/kernel/display/STATUS.md` for the five driver bugs
+and the two instruments built to find them.
 
 <details>
 <summary>The short version of how it got there</summary>
@@ -79,8 +91,8 @@ The port is other people's work and the credit is theirs:
   in the first place.
 
 What is here: the hardware delta that makes it run on *this* board, the
-verification approach for a board with no serial console, and — eventually —
-the display and input drivers.
+verification approach for a board with no serial console, and the display
+driver.
 
 ## Hardware
 
@@ -90,14 +102,16 @@ LilyGo T-Watch Ultra:
 SoC      ESP32-S3, 2x Xtensa LX7, 240 MHz
 RAM      512 KiB internal + 8 MiB PSRAM, QUAD (not octal)
 Flash    16 MiB QSPI, DIO, 80 MHz
-Display  CO5300 AMOLED, 410x502, QSPI      -- no driver
+Display  CO5300 AMOLED, 410x502, QSPI      works (fb0, SPI2)
 Touch    CST9217, I2C 0x1A                 -- no driver
-PMU      AXP2101          -- not brought up by the port
-Expander XL9555           -- not brought up by the port
+PMU      AXP2101, I2C 0x34                 works (battery)
+Expander XL9555, I2C 0x20                  works (display power)
+RTC      PCF85063A, I2C 0x51               works (rtc0)
+Haptic   DRV2605, I2C 0x5A                 works (effect fires)
 ```
 
-The relevant difference from the supported board: **quad PSRAM**. Everything
-else being different is why there is no screen.
+The relevant difference from the supported board: **quad PSRAM** — that is the
+one thing that stopped the stock image booting at all.
 
 ## Building
 
@@ -209,10 +223,11 @@ cores.
 
 ## Not done
 
-- **No display.** Needs a CO5300 driver. The most promising shape given this
-  port's architecture is core 0 drawing and handing finished framebuffers over
-  the shared-memory channel that already carries wifi frames.
-- **No input.** `CONFIG_INPUT` is off in the kernel config.
+- **No input.** `CONFIG_INPUT` is off in the kernel config. The two side
+  pushers and the touch panel are all unwired in software.
+- **Display is write-only and synchronous.** Every blit sends the whole window
+  as one spi-mem op through a 64-byte FIFO, with no DMA and no double buffering.
+  It works; it is not fast.
 - **The PMU's interrupt is not wired.** The AXP2101 binds at 0x34 and loads, but
   with `interrupts = <7 LEVEL_LOW>` the boot hung — a level-triggered IRQ on a
   pin nothing pulls up storms forever. No IRQ means polling, which covers
@@ -223,9 +238,8 @@ cores.
 - **The RTC's stored time is UTC+8.** The chip counts correctly but the factory
   set it to China Standard Time. It is exactly 8 h ahead of true UTC, so it
   needs one `hwclock --set` to correct. Not a driver fault.
-- **No console.** Enabling the `ttyGS3` getty means editing `/etc/inittab` on
-  the jffs2 partition, which needs mtd-utils built from source.
-- **No PMU or expander bring-up** on core 0, so no rails, no haptic, no battery.
+- **The buttons have no names yet** beyond the kernel keycodes they emit:
+  Pusher A (top left) is `KEY_POWER`, Pusher B (bottom left) is `KEY_ENTER`.
 
 ## Recovery
 

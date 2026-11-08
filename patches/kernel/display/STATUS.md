@@ -1,6 +1,7 @@
 # CO5300 display driver — the panel is scanning
 
-State as of 2026-11-08: **the controller is initialised and scanning.**
+State as of 2026-11-08: **working.** Verified on hardware — eight bands, correct
+order, full glass.
 
 ```
 co5300: TE edges after init = 4 *** CONTROLLER IS SCANNING ***
@@ -11,10 +12,10 @@ TE edges on GPIO6 are the panel's own proof that its internal scan engine is
 running, which only happens if it accepted the init table. Before this session
 that counter read 0.
 
-What is **not** yet verified: that pixels reach the glass and look right. The
-blit returns success and the framebuffer registers, but nobody has looked at the
-screen since the fix. Next step is a human check, then a real image rather than
-a flat fill.
+Row addressing is verified, and that needed a pattern rather than a flat fill:
+eight horizontal bands came out as eight correct bands in the right order. White
+first only told us the panel emits — it cannot distinguish 502 addressed rows
+from row 0 repeated, which is a failure this project had already hit once.
 
 ## The five bugs, in the order they were found
 
@@ -104,7 +105,6 @@ is the one whose working register values can be diffed against.
 
 ## Still open
 
-  * Does the glass show the framebuffer? Unverified.
   * No double buffering, no partial blit: `co5300_blit` sends the whole window as
     one spi-mem op, which is why the transmit buffer is a full frame.
   * `esp32_spi_exec_op` is still FIFO-only, 64 bytes per chunk, no DMA. A frame
