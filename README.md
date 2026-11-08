@@ -23,8 +23,21 @@ rtc-pcf85063 0-0051: setting system clock to 2026-11-09T02:45:18 UTC
 i2c-gpio i2c0: using lines 579 (SDA) and 578 (SCL)     # pins 3 and 2
 ```
 
-The stored value is UTC+8 (the factory set the chip to China Standard Time), so
-it needs one correction — the read path is correct, the setting is not ours.
+The stored value was UTC+8 — the factory set the chip to China Standard Time,
+so it needed one correction. Reads and writes both work: the chip kept exact
+time over a 60 s sample (02:52:05 → 02:53:05), and `scripts/rtc-writeback.sh`
+closes the loop so the corrected clock is written back at shutdown.
+
+```
+time rate     60 s sample, 60 s apart, no drift
+chip write    hwclock -w -u            (BusyBox: no --set, -s/-w/--systz only)
+boot           hctosys seeds the kernel from the chip
+shutdown       /etc/init.d/S01hwclock  writes it back
+```
+
+Verified by corrupting the chip on purpose: set to 20:30 while true UTC was
+19:00, corrected the *system* clock only, rebooted — and the next boot reported
+`setting system clock to 2026-11-08T19:01:00 UTC`. The chip had followed.
 
 **Does not: display anything.** No CO5300 driver exists in the port, the
 kernel has no framebuffer or VT, and core 0 does not bring up the PMU, so the

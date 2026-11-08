@@ -87,6 +87,77 @@ vectors ptr = 0x40380000
 `0x42140000` is the kernel at flash offset `0x140000`, and `0x40380000` is what
 the kernel was built to expect. Single boot, no resets over 75 s.
 
+## The RTC: what works, and the two BusyBox traps
+
+The PCF85063A at I2C 0x51 is a real clock on this board — separate from the
+AXP2101, backed by VBACKUP, and counting while the main battery is flat.
+
+Verified end to end:
+
+```
+rate        02:52:05 -> 02:53:05 over 60 s wall time, no drift
+boot        rtc-pcf85063 0-0051: setting system clock to ... UTC   (hctosys)
+write       hwclock -w -u
+shutdown    /etc/init.d/S01hwclock, called by rcK
+```
+
+The write-back hook exists because `hctosys` only goes one way. Without it, an
+NTP correction during a session is lost and the old value returns at the next
+boot. `rcK` runs `S??*` in **reverse** order, so `S01hwclock` runs last —
+after anything that might touch the clock, before umount.
+
+Verified by deliberately breaking it: chip set to 20:30 while true UTC was
+19:00, system clock corrected, reboot with no manual `hwclock -w`, and the
+next boot reported `setting system clock to 2026-11-08T19:01:00 UTC`.
+
+### Trap 1: this is BusyBox hwclock, not util-linux
+
+```
+$ hwclock --set --date "..." --utc
+hwclock: unrecognized option `--set'
+```
+
+There is no way to write an arbitrary time to the chip. BusyBox offers only:
+
+```
+-s        RTC -> system
+-w        system -> RTC
+--systz   set the in-kernel timezone
+-u / -l   the chip holds UTC / local time
+```
+
+So the sequence is always **set the system clock, then push it down**:
+
+```sh
+date -u -s "2026-11-08 18:56:00"
+hwclock -w -u
+```
+
+### Trap 2: `-u` is not optional
+
+With neither `-u` nor `-l`, BusyBox `hwclock` reads
+`/var/lib/hwclock/adjtime` to decide what the chip means. That file does not
+exist here, so it is guessing. Always pass `-u`: the chip holds UTC, and
+timezone is userspace's business.
+
+Corollary: `date -s` takes a literal `YYYY-MM-DD hh:mm:ss`. There is no
+`@epoch` form and no `+format`, so `date -s "@$saved"` — which the shipped
+`S01clock` uses — does not work on this shell.
+
+### The factory set it to China time
+
+The chip arrived holding UTC+8. LilyGo are in Shenzhen; the RTC is battery
+backed and was set to local time at the factory with no timezone attached.
+`hctosys` then copied that number in as if it were UTC, so the kernel clock was
+also 8 hours fast. One correction fixes it, and the hook keeps it fixed.
+
+### Editing a script over the console: never send tabs
+
+Writing the init script through an interactive bash mangled it — a literal TAB
+in the heredoc body triggered readline filename completion, which inserted
+`README.txt` into the file. Indent such scripts with spaces, or the shell
+edits them for you.
+
 ## Building the kernel: three patch stacks, not one
 
 The release kernel is Linux 7.2.4 plus **three separate stacks**, and the third
