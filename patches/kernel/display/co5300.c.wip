@@ -316,6 +316,23 @@ static void co5300_route_pins(struct co5300 *p)
 	// FSPIQ is driven by PIN_D1.
 	iowrite32(PIN_D1, p->gpio + GPIO_IN_SEL(FSPIQ_IN_IDX));
 
+	/*
+	 * CS (41) and RST (37) are plain GPIOs, not SPI signals, but they still
+	 * need their IO_MUX selecting -- and this is the mistake that kept the
+	 * panel dark.
+	 *
+	 * GPIO41's default IO_MUX function is MTDI, a JTAG signal. Requesting it
+	 * as a gpiod does not change that: the pad stays on MTDI and CS never
+	 * moves on the wire, so the panel ignores every byte while the driver
+	 * reports that it drove chip select. GPIO37 has its own dedicated
+	 * register (PERIPHS_IO_MUX_GPIO37_U) and defaults to GPIO, but setting
+	 * it explicitly costs nothing and removes the doubt.
+	 */
+	iowrite32(MCU_SEL_GPIO | FUNC_OE | FUNC_DRV_20MA,
+		  p->iomux + IO_MUX_REG(41));
+	iowrite32(MCU_SEL_GPIO | FUNC_OE | FUNC_DRV_20MA,
+		  p->iomux + IO_MUX_REG(37));
+
 	// Read back what actually landed. A wrong IO_MUX offset writes a
 	// neighbouring pad and produces no error, so the only way to tell is to
 	// look.
@@ -324,6 +341,9 @@ static void co5300_route_pins(struct co5300 *p)
 		ioread32(p->gpio + GPIO_OUT_SEL(PIN_SCK)),
 		ioread32(p->iomux + IO_MUX_REG(PIN_D0)),
 		ioread32(p->gpio + GPIO_OUT_SEL(PIN_D0)),
+		ioread32(p->iomux + IO_MUX_REG(37)));
+	pr_info("co5300 pins: iomux[41]=%08x (CS, default MTDI) iomux[37]=%08x (RST)\n",
+		ioread32(p->iomux + IO_MUX_REG(41)),
 		ioread32(p->iomux + IO_MUX_REG(37)));
 }
 

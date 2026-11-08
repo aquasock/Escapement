@@ -153,3 +153,56 @@ If `cfg0` bit 7 is 1, the expander never made P07 an output and the panel has
 had no power this whole time — which would explain every symptom, including a
 silent one, and would mean `regulator-fixed` needs its gpio requested with an
 explicit direction rather than relying on the framework.
+
+---
+
+## Third pass: everything matches the reference and it is still dark
+
+Verified after seven fixes:
+
+    iomux[40]=0x9400  outsel[40]=0x65   SCK  -> FSPICLK, GPIO, OE
+    iomux[38]=0x9400  outsel[38]=0x67   D0   -> FSPID,   GPIO, OE
+    iomux[41]=0x9400                    CS   -> GPIO, OE (default was MTDI!)
+    iomux[37]=0x9400                    RST  -> GPIO, OE
+
+    display rail: cfg0=0x3f (P07 an output), out0=0xff (P07 driven high)
+
+and the init table, reset sequence, command/address widths and CS handling now
+match `TinyPetz/firmware/bringup/main/panel.c` line for line:
+
+    .command_bits = 8, .address_bits = 24, .spics_io_num = -1
+    flags = SPI_TRANS_MULTILINE_CMD | SPI_TRANS_MULTILINE_ADDR
+    cmd = 0x02, addr = opcode << 8
+    RST low 30 ms, high 150 ms
+    the same 11-entry table
+
+TE (GPIO6) still reads 0 edges.
+
+## Two honest possibilities
+
+1. The SPI transaction is still wrong in a way I cannot see from the kernel
+   side. Every write returns success and the completion bit clears, but
+   "completes" only means the peripheral finished shifting; it says nothing
+   about whether the panel understood.
+
+2. The TE measurement itself is wrong, in which case "0 edges" is not evidence
+   of anything and the panel may be initialising fine while the pixel path is
+   broken. GPIO6 as a plain input should work, but that has not been proven
+   independently.
+
+## The decisive next test
+
+Do not iterate further on the driver blind. Instead:
+
+1. Flash the ESP-IDF firmware (`TinyPetz`) back and confirm the screen still
+   works. That takes two minutes and re-establishes that the hardware, the
+   panel and the power are fine -- everything after this point is then known to
+   be a software difference, not a dying panel.
+2. Write a small ESP-IDF program that uses IDF's own SPI driver with the same
+   pin set, rather than hand-programmed registers. If the panel works through
+   IDF's SPI on those pins, then the pin routing is right and the fault is in
+   my register programming. If it does not, the fault is in the pin map or
+   power, and the kernel driver was never the problem.
+
+That is the shortest path to knowing which half is wrong, and it needs no more
+guesswork.
