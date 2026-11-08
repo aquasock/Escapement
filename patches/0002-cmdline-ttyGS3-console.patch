@@ -1,0 +1,96 @@
+From: Escapement
+Subject: [PATCH] linux_boot: give the kernel a command line this board can use
+
+Two problems, one command line.
+
+1. "quiet". The dts bootargs carry it, which drops the console log level to 4
+   and suppresses almost every kernel message. This watch has exactly one
+   output path -- ttyGS3, the S3's own USB-Serial-JTAG -- so "quiet" turns a
+   booting kernel into silence, and silence is indistinguishable from a kernel
+   that never started. Two sessions were spent reading core 1's program counter
+   over JTAG to guess whether Linux was alive, when the kernel was talking the
+   whole time.
+
+2. Console order. The dts says "console=ttyGS3 console=ttyS0,115200n8", and
+   /dev/console binds to the LAST console= on the line -- ttyS0, a UART this
+   board does not have. printk mirrors to every registered console, so the log
+   appeared on USB while init's stdin/stdout went to the dead UART. A shell was
+   running and reading from hardware that was not connected; typing into the
+   watch produced nothing because nothing was listening on the wire that had
+   the finger on it.
+
+   Putting ttyGS3 last fixes it. This is also what makes the stock /etc/inittab
+   work unmodified: it contains "console::respawn:/sbin/getty -L console 0
+   vt100", and with ttyGS3 last, /dev/console IS the USB port, so a login
+   appears with no editing of the etc partition. Upstream's documented
+   "usb-console on" step exists because on their devkit ttyS0 is last and
+   /dev/console is the UART; here there is no UART to fall back to.
+
+The firmware supplies this only when the etc partition has no /etc/cmdline, so
+a user-provided command line still wins.
+
+Verified on hardware 2026-11-08: "buildroot login:" appears on /dev/ttyACM1 at
+115200, and logging in as root reaches the password prompt.
+
+diff --git a/esp_hosted_ng/esp/esp_driver/network_adapter/main/linux_boot.c b/esp_hosted_ng/esp/esp_driver/network_adapter/main/linux_boot.c
+--- a/esp_hosted_ng/esp/esp_driver/network_adapter/main/linux_boot.c
++++ b/esp_hosted_ng/esp/esp_driver/network_adapter/main/linux_boot.c
+@@ -33,6 +33,29 @@ static const esp_partition_t *find_partition(const char *name)
+ #define CMDLINE_MAX 260
+ 
+ #ifdef CONFIG_LINUX_COMMAND_LINE
++/* Escapement: a command line for a board with no reachable console.
++ *
++ * The built-in bootargs in the dts carry "quiet", which drops the console log
++ * level to 4 and suppresses nearly every kernel message. On a board whose only
++ * output path is ttyGS3 -- the S3's own USB-Serial-JTAG -- that turns a booting
++ * kernel into silence, and silence is indistinguishable from a kernel that
++ * never started.
++ *
++ * This mirrors the dts bootargs exactly, minus "quiet", and adds loglevel=7 at
++ * the end so it takes effect whether the kernel treats this tag as a
++ * replacement for the built-in command line or as an append to it. A real
++ * /etc/cmdline still wins if one exists on the etc partition.
++ */
++static const char default_cmdline[] =
++	"earlycon=esp32s3uart,mmio32,0x60000000,115200n8,40000000 "
++	/* ttyGS3 last on purpose: /dev/console binds to the LAST console= on the
++	 * line. With ttyS0 last, init's stdin/stdout went to a UART this board
++	 * does not have, while printk still mirrored to ttyGS3 -- so the log
++	 * appeared and typing went nowhere. */
++	"console=ttyS0,115200n8 console=ttyGS3 "
++	"rw root=mtd:rootfs rootfstype=cramfs panic=10 panic_console_replay "
++	"loglevel=7";
++
+ static void parse_cmdline(const void *ptr, uint32_t size, struct bp_tag tag[])
+ {
+ 	struct jffs2_image img = {
+@@ -40,17 +63,26 @@ static void parse_cmdline(const void *ptr, uint32_t size, struct bp_tag tag[])
+ 		.sz = size,
+ 	};
+ 	uint32_t cmdline_inode = jffs2_lookup(&img, 1, "cmdline");
++	char *cmdline = (char *)tag[1].data;
+ 
+ 	if (cmdline_inode) {
+-		char *cmdline = (char *)tag[1].data;
+ 		size_t rd = jffs2_read(&img, cmdline_inode, cmdline, CMDLINE_MAX - 1);
+ 
+-		if (rd != -1) {
++		if (rd != (size_t)-1) {
+ 			tag[1].id = BP_TAG_COMMAND_LINE;
+ 			cmdline[rd] = 0;
+ 			ESP_LOGI(__func__, "found /etc/cmdline [%d] = '%s'\n", rd, cmdline);
++			return;
+ 		}
+ 	}
++
++	size_t n = strlen(default_cmdline);
++	if (n > CMDLINE_MAX - 1)
++		n = CMDLINE_MAX - 1;
++	memcpy(cmdline, default_cmdline, n);
++	cmdline[n] = 0;
++	tag[1].id = BP_TAG_COMMAND_LINE;
++	ESP_LOGI(__func__, "no /etc/cmdline, default = '%s'\n", cmdline);
+ }
+ #endif
+ 

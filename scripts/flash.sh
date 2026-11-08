@@ -40,17 +40,28 @@ if pgrep -af "cat $PORT|readplain.py|readser.py" >/dev/null 2>&1; then
 fi
 
 ESPTOOL=$(command -v esptool.py || command -v esptool || true)
+ESPTOOL_PY=$(command -v python3 || true)
 # Fall back to the toolchain build.sh installed, so flashing works straight
-# after a build without sourcing export.sh in the caller's shell.
+# after a build without sourcing export.sh in the caller's shell. Run it as a
+# module rather than by path: the venv's console scripts keep an absolute
+# shebang, which breaks the moment the build tree is moved.
 if [ -z "$ESPTOOL" ]; then
-    for e in build/idf-tools/python_env/*/bin/esptool.py; do
-        [ -x "$e" ] && ESPTOOL=$e && break
+    for py in build/idf-tools/python_env/*/bin/python; do
+        if [ -x "$py" ] && "$py" -c 'import esptool' 2>/dev/null; then
+            ESPTOOL_PY=$py; ESPTOOL=-m; break
+        fi
     done
 fi
 [ -n "$ESPTOOL" ] || die "no esptool. Run ./scripts/build.sh, or source an ESP-IDF export.sh"
 
+if [ "$ESPTOOL" = "-m" ]; then
+    esptool_cmd() { "$ESPTOOL_PY" -m esptool "$@"; }
+else
+    esptool_cmd() { "$ESPTOOL" "$@"; }
+fi
+
 flash() {
-    "$ESPTOOL" --chip esp32s3 --port "$PORT" --baud 921600 \
+    esptool_cmd --chip esp32s3 --port "$PORT" --baud 921600 \
         write_flash --flash_mode dio --flash_freq 80m --flash_size 16MB "$@"
 }
 

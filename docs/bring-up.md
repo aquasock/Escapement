@@ -87,34 +87,44 @@ vectors ptr = 0x40380000
 `0x42140000` is the kernel at flash offset `0x140000`, and `0x40380000` is what
 the kernel was built to expect. Single boot, no resets over 75 s.
 
-## How this was verified (no console exists)
+## The console: two fixes that look like something else
 
-The kernel's bootargs are `console=ttyGS3 console=ttyS0,115200n8`. This watch has
-no UART bridge, and `ttyGS3` is the S3's USB-Serial-JTAG peripheral — the same
-one the ROM is already using. After handoff the host never re-enumerates, and
-`/dev/ttyACM1` delivers 0 bytes. Enabling the firmware's own USJ console
-(`CONFIG_ESP_CONSOLE_SECONDARY_USB_SERIAL_JTAG=y`) made it worse by holding the
-peripheral; it was reverted.
+There IS a console — `ttyGS3`, the S3's USB-Serial-JTAG — and the port you
+flash is the port that prints. Two faults made it look like there wasn't one.
 
-So the state was read over **JTAG** (openocd, `board/esp32s3-builtin.cfg`),
-sampling core 1's PC after boot:
+**`quiet`.** The dts bootargs carry it, dropping the log level to 4 so almost
+nothing prints. A kernel with every message suppressed is indistinguishable
+from a kernel that never started. This cost two sessions of JTAG program-counter
+sampling to answer a question the kernel would have answered for free.
 
-```
-11  PC = 0x422f89aa     -> flash offset 0x1b89aa: `waiti 0` / `retw.n` = the idle loop
- 1  PC = 0x42646edd     -> flash offset 0x646edd, inside rootfs.cramfs
-```
+**Console order.** `console=ttyGS3 console=ttyS0,115200n8` — and `/dev/console`
+binds to the *last* console=. So `/dev/console` was `ttyS0`, the UART this board
+does not have. printk mirrors to every registered console, which is why the log
+still appeared on USB, but init's stdin/stdout went to the dead UART. A root
+shell with `init=/bin/sh` was running and reading from hardware that was not
+connected: output appeared, keystrokes went nowhere, and host writes blocked
+with `SerialTimeoutException` because the OUT endpoint had no consumer.
 
-Two conclusions, and the reasoning matters:
+The diagnostic that settled it was process of elimination backed by a fact:
+flashing works over the same USB interface, so host-to-device data is accepted
+by the hardware. The failure had to be above it. Reordering to
+`console=ttyS0,115200n8 console=ttyGS3` produced a shell immediately.
 
-- The PC **varies**, so the core is not wedged; it is idle and taking
-  interrupts for most of its time, which is what a booted system looks like.
-- The odd sample lands **inside rootfs.cramfs**, which this port executes in
-  place. Executing from the rootfs means **userspace was running.**
+That ordering is also what makes the shipped `/etc/inittab` work untouched — it
+already contains `console::respawn:/sbin/getty -L console 0 vt100`, and with
+ttyGS3 last, `/dev/console` *is* the USB port.
 
-Caveat: an earlier draft of this note claimed the identical PC across samples
-was a wedge. That was wrong — openocd's `init` resets both cores, so a repeated
-PC can just be reset state. The variation test above is the one that means
-something.
+### What this replaced
+
+Upstream documents `usb-console on` to enable a `ttyGS3` getty, needed on their
+devkit because there `ttyS0` is last and `/dev/console` is the UART. It is at
+`/usr/sbin/usb-console` here and works, but it is unnecessary once the console
+order is right, and enabling it would put two gettys on the same device.
+
+An earlier version of this note claimed a repeated PC across samples was a
+wedge. That was wrong: openocd's `init` resets both cores, so a lone repeated
+PC proves nothing. The variation test is the one that means something, and it
+is what `scripts/probe.sh` reports.
 
 ## What is NOT possible
 
@@ -132,16 +142,13 @@ something.
 PSRAM cannot be read over this JTAG path, so the printk ring buffer was not
 recoverable either way.
 
-## If a console is wanted later
+## If a console login is wanted later
 
-The reliable route is to enable the `ttyGS3` getty by editing `/etc/inittab` on
-the 448 KiB jffs2 `etc` partition (offset `0xd0000`) — `usb-console on` does it
-at runtime, but needs a shell, which is the thing we lack.
+Already satisfied: the stock `inittab` getty serves `/dev/console`, which is
+`ttyGS3` once the console order is right. No partition editing, no mtd-utils.
 
-That needs `mkfs.jffs2`/`jffs2dump` from mtd-utils, which is not installed and
-cannot be installed because `sudo` is blocked by the no-new-privs flag. It has
-to be built from source into a prefix. Several hours for no new information
-about whether Linux runs — only for a login.
+`/usr/sbin/usb-console on` exists and would add a dedicated `ttyGS3` getty, but
+with the reordering it is redundant and would put two gettys on one device.
 
 ## Recovery
 

@@ -9,8 +9,10 @@ core does.
 
 ## Status
 
-**Works: Linux boots to userspace on the watch.** Verified 2026-11-08 over
-JTAG, not by console (there is no console — see below).
+**Works: Linux boots to userspace and gives a login on the watch.**
+Verified on hardware 2026-11-08. `buildroot login:` appears on
+`/dev/ttyACM1` at 115200 and root authentication reaches its first-login
+password change.
 
 **Does not: display anything.** No CO5300 driver exists in the port, the
 kernel has no framebuffer or VT, and core 0 does not bring up the PMU, so the
@@ -95,25 +97,40 @@ image. Only the app changes, so only the app gets flashed:
 
 ## Watching it run
 
-There is no console, and this is the part that needs explaining.
+The console is `ttyGS3` — the S3's own USB-Serial-JTAG peripheral — so the port
+you flash is the port that prints:
 
-The kernel's bootargs are `console=ttyGS3 console=ttyS0,115200n8`. The watch
-has no UART bridge, so `ttyS0` is unreachable. `ttyGS3` is the S3's
-USB-Serial-JTAG peripheral — the same one the ROM uses — and after handoff the
-host never re-enumerates the device, so `/dev/ttyACM1` delivers nothing.
-
-What does work is **JTAG**. `scripts/probe.sh` attaches openocd and samples
-core 1's program counter after boot:
-
-```
-11  PC = 0x422f89aa     idle loop (`waiti 0` / `retw.n`)
- 1  PC = 0x42646edd     inside rootfs.cramfs
+```sh
+screen /dev/ttyACM1 115200
 ```
 
-The variation proves the core is live rather than wedged, and a PC inside the
-rootfs proves userspace was executing — that port XIPs userspace straight from
-cramfs. That is the whole evidence base for "it booted", and it is honest:
-a repeated PC alone proves nothing, because openocd's `init` resets both cores.
+Getting there took two fixes, both in `patches/0002`, and both worth knowing
+because each one looks like something else:
+
+1. **`quiet` was suppressing everything.** The dts bootargs carry it, dropping
+   the console log level to 4. On a board whose only output path is USB, that
+   turns a booting kernel into silence — indistinguishable from a kernel that
+   never started. Two sessions were spent sampling core 1's program counter over
+   JTAG to guess whether Linux was alive, while the kernel was talking the whole
+   time.
+
+2. **`/dev/console` was bound to the wrong device.** With
+   `console=ttyGS3 console=ttyS0,115200n8`, `/dev/console` binds to the *last*
+   one — `ttyS0`, a UART this board does not have. printk mirrors to every
+   registered console, so the log appeared on USB while init's stdin/stdout went
+   to the dead UART. A shell was running and reading from hardware that was not
+   connected. Putting `ttyGS3` last fixes it, and is also what makes the stock
+   `/etc/inittab` work with no editing: its `console::respawn:...getty` line
+   then lands on the USB port.
+
+Upstream documents `usb-console on` as the way to enable this, which is needed
+on their devkit because there `ttyS0` is last and `/dev/console` is the UART.
+This board has no UART to fall back to, so the ordering fix is the whole job.
+
+`scripts/probe.sh` still exists for when the console is unusable: it samples
+core 1's program counter over JTAG. A PC inside `rootfs.cramfs` proves userspace
+ran; a single repeated PC proves nothing, because openocd's `init` resets both
+cores.
 
 ## Not done
 

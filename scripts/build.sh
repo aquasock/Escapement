@@ -92,17 +92,24 @@ cp -n "$PROJ/new-files/esp-hosted/network_adapter/partition_table.esp32s3.16m8r"
       "$PROJ/new-files/esp-hosted/network_adapter/sdkconfig.defaults.esp32s3.16m8r" \
       "$NA/" 2>/dev/null || true
 apply_once "$HOSTED/esp_hosted_ng" "$here/patches/0001-watch-quad-psram.patch"
+apply_once "$HOSTED/esp_hosted_ng" "$here/patches/0002-cmdline-ttyGS3-console.patch"
 
 # esp_driver/CMakeLists.txt runs `git reset --hard` on every cmake call, so a
 # local commit is the only thing that survives configuration.
-if ! git -C "$HOSTED/esp_hosted_ng" log --oneline -1 | grep -q "escapement: applied"; then
-    git -C "$HOSTED/esp_hosted_ng" add -A
+say "commit locally (survives git reset --hard)"
+git -C "$HOSTED/esp_hosted_ng" add -A
+# Commit only when something is actually staged: a clean tree makes
+# `git commit` exit non-zero, and under `set -e` that aborted a good build.
+# The submodule's modified content does not count as a change worth committing.
+if ! git -C "$HOSTED/esp_hosted_ng" diff --cached --quiet; then
     env -u GIT_AUTHOR_NAME -u GIT_AUTHOR_EMAIL \
         -u GIT_COMMITTER_NAME -u GIT_COMMITTER_EMAIL \
         git -C "$HOSTED/esp_hosted_ng" \
         -c user.email="local@escapement" -c user.name="escapement" \
         commit -q -m "escapement: applied (local-only, never push)"
-    say "committed locally (survives git reset --hard)"
+    echo "committed"
+else
+    echo "nothing to commit"
 fi
 
 # The patched wifi blobs carry esp_wifi_connect_internal and friends. IDF's
