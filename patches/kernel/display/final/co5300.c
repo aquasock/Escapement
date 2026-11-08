@@ -487,9 +487,43 @@ static int co5300_probe(struct spi_mem *mem)
 	if (ret)
 		return dev_err_probe(dev, ret, "register_framebuffer failed\n");
 
-	/* Prove the panel emits. White, not black: on an AMOLED the two are not
-	 * distinguishable and a diagnostic that ends black reads as a fault. */
-	memset(p->fb, 0xFF, p->fb_bytes);
+	/*
+	 * Prove the panel emits, with structure rather than a flat fill.
+	 *
+	 * A solid colour renders identically whether the controller received all
+	 * 502 rows or received row 0 five hundred times, so it cannot tell a
+	 * working row address from a broken one. Horizontal bands stacked down
+	 * the glass vary along y and can:
+	 *
+	 *     8 equal bands, top to bottom:
+	 *         white, red, green, blue, yellow, magenta, cyan, grey
+	 *
+	 * Anything else -- one flat colour, a thin strip, a repeat of the first
+	 * band -- localises the fault to row addressing instead of leaving it
+	 * open. Colours are bright on purpose: black on an AMOLED is a
+	 * powered-off panel.
+	 */
+	{
+		static const u16 bands[8] = {
+			0xFFFF,	/* white   */
+			0xF800,	/* red     */
+			0x07E0,	/* green   */
+			0x001F,	/* blue    */
+			0xFFE0,	/* yellow  */
+			0xF81F,	/* magenta */
+			0x07FF,	/* cyan    */
+			0x8410,	/* grey    */
+		};
+		int y, x;
+
+		for (y = 0; y < PANEL_H; y++) {
+			u16 c = bands[(y * 8) / PANEL_H];
+
+			for (x = 0; x < PANEL_W; x++)
+				p->fb[(size_t)y * PANEL_W + x] = c;
+		}
+	}
+
 	co5300_blit(p, 0, 0, PANEL_W - 1, PANEL_H - 1);
 
 	dev_info(dev, "%dx%d RGB565, fb0 registered\n", PANEL_W, PANEL_H);
