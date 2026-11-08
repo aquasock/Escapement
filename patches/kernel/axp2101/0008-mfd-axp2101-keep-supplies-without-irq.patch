@@ -1,0 +1,46 @@
+From: Escapement
+Subject: [PATCH] mfd: axp20x: keep the AXP2101's supplies when no IRQ is wired
+
+Without an interrupt line, axp20x_device_probe() deliberately swaps in
+axp_regulator_only_cells, with the comment "IRQs are required by some
+drivers". For the AXP2101 that silently drops the battery and USB supplies:
+the PMIC binds, logs "AXP20X driver loaded", and /sys/class/power_supply stays
+empty. Nothing reports an error, which is what makes it hard to notice.
+
+This board cannot use the IRQ yet. GPIO7 has no pull-up configured in pinctrl
+and nothing external holds it, so a LEVEL_LOW interrupt on it storms and hangs
+the boot (see patches/kernel/0003). That leaves the PMIC without an interrupt,
+and therefore with no supplies at all.
+
+Set cells_no_irq for the AXP2101 so the full cell set is used regardless,
+matching what AXP806 already does. A sub-driver that genuinely needs an IRQ
+then fails its own probe -- a visible, contained failure -- instead of every
+supply disappearing at once with no message.
+
+Verified: after this the boot logs
+
+    axp20x-battery-power-supply axp20x-battery-power-supply: DMA mask not set
+    axp20x-i2c 0-0034: AXP20X driver loaded
+
+and still reaches buildroot login.
+
+--- a/drivers/mfd/axp20x.c
++++ b/drivers/mfd/axp20x.c
+@@ -1427,6 +1427,17 @@
+ 		axp20x->cells = axp2101_cells;
+ 		axp20x->regmap_cfg = &axp2101_regmap_config;
+ 		axp20x->regmap_irq_chip = &axp2101_regmap_irq_chip;
++		/*
++		 * Without an interrupt line axp20x_device_probe() falls back to
++		 * axp_regulator_only_cells, which drops the battery and USB
++		 * supplies entirely -- observable as an empty
++		 * /sys/class/power_supply even though the PMIC bound fine.
++		 * This board's IRQ pin is not pulled up, so no interrupt is
++		 * wired; keep the supplies and let any driver that truly needs
++		 * an IRQ fail its own probe instead of losing them all.
++		 */
++		nr_cells_no_irq = ARRAY_SIZE(axp2101_cells);
++		cells_no_irq = axp2101_cells;
+ 		break;
+ 	case AXP803_ID:
+ 		axp20x->nr_cells = ARRAY_SIZE(axp803_cells);
