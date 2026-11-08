@@ -9,10 +9,22 @@ core does.
 
 ## Status
 
-**Works: Linux boots to userspace and gives a login on the watch.**
-Verified on hardware 2026-11-08. `buildroot login:` appears on
-`/dev/ttyACM1` at 115200 and root authentication reaches its first-login
-password change.
+**Works: Linux boots to userspace, logs in, and forks.**
+Verified on hardware 2026-11-08. `buildroot login:` appears on the USB console,
+root authenticates, and an interactive bash session starts — which is the real
+test, because bash forks and this port's `fork()` is a patch stack, not an MMU.
+
+**Works: the RTC.** A PCF85063A at I2C 0x51 registers as `rtc0` and
+`CONFIG_RTC_HCTOSYS` seeds the system clock before init:
+
+```
+rtc-pcf85063 0-0051: registered as rtc0
+rtc-pcf85063 0-0051: setting system clock to 2026-11-09T02:45:18 UTC
+i2c-gpio i2c0: using lines 579 (SDA) and 578 (SCL)     # pins 3 and 2
+```
+
+The stored value is UTC+8 (the factory set the chip to China Standard Time), so
+it needs one correction — the read path is correct, the setting is not ours.
 
 **Does not: display anything.** No CO5300 driver exists in the port, the
 kernel has no framebuffer or VT, and core 0 does not bring up the PMU, so the
