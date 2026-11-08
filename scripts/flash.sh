@@ -13,8 +13,11 @@ here=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 cd "$here"
 
 PORT=${PORT:-}
-FACTORY=/home/vash/twatch-backup/twatch-factory-16MB.bin
-FACTORY_SHA=471c9a21a6d53e5cdf6dfb01949fcc2dd4f420fe1a3738631f73b600419ac2b0
+# Where this watch's own factory image lives. Yours will be somewhere else:
+# read it off the watch before flashing anything (esptool read_flash 0 0x1000000),
+# or point FACTORY at wherever you keep it.
+FACTORY=${FACTORY:-$HOME/twatch-backup/twatch-factory-16MB.bin}
+FACTORY_SHA=${FACTORY_SHA:-471c9a21a6d53e5cdf6dfb01949fcc2dd4f420fe1a3738631f73b600419ac2b0}
 APP=build/esp-hosted/esp_hosted_ng/esp/esp_driver/network_adapter/build/network_adapter.bin
 
 say() { printf '\n=== %s\n' "$*"; }
@@ -37,7 +40,14 @@ if pgrep -af "cat $PORT|readplain.py|readser.py" >/dev/null 2>&1; then
 fi
 
 ESPTOOL=$(command -v esptool.py || command -v esptool || true)
-[ -n "$ESPTOOL" ] || die "no esptool on PATH"
+# Fall back to the toolchain build.sh installed, so flashing works straight
+# after a build without sourcing export.sh in the caller's shell.
+if [ -z "$ESPTOOL" ]; then
+    for e in build/idf-tools/python_env/*/bin/esptool.py; do
+        [ -x "$e" ] && ESPTOOL=$e && break
+    done
+fi
+[ -n "$ESPTOOL" ] || die "no esptool. Run ./scripts/build.sh, or source an ESP-IDF export.sh"
 
 flash() {
     "$ESPTOOL" --chip esp32s3 --port "$PORT" --baud 921600 \
@@ -58,14 +68,14 @@ case "${1:---image}" in
     flash 0x0 "$IMG"
     ;;
 --factory)
-    [ -f "$FACTORY" ] || die "no factory image at $FACTORY"
+    [ -f "$FACTORY" ] || die "no factory image at $FACTORY (set FACTORY=/path/to/factory.bin; FACTORY_SHA too if it is a different watch)"
     say "verifying factory image"
     echo "$FACTORY_SHA  $FACTORY" | sha256sum -c - || die "factory image hash mismatch"
     say "FACTORY image -> $PORT  (restores the watch)"
     flash 0x0 "$FACTORY"
     ;;
 -h|--help)
-    sed -n '2,9p' "$0"
+    sed -n '2,9p' "$0" | sed 's/^# \{0,1\}//'
     ;;
 *)
     die "unknown option: $1"

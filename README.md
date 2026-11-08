@@ -130,10 +130,16 @@ a repeated PC alone proves nothing, because openocd's `init` resets both cores.
 The watch always takes a full factory image back. BOOT + replug reaches
 mask-ROM download mode regardless of what is on flash.
 
+`scripts/flash.sh --factory` writes it back, and refuses to unless the file is
+16 MiB and its hash matches:
+
 ```
-factory image   /home/vash/twatch-backup/twatch-factory-16MB.bin
-sha256          471c9a21a6d53e5cdf6dfb01949fcc2dd4f420fe1a3738631f73b600419ac2b0
+sha256  471c9a21a6d53e5cdf6dfb01949fcc2dd4f420fe1a3738631f73b600419ac2b0
 ```
+
+That hash is *this* watch's image. Yours will differ — read it off before
+flashing anything (`esptool.py read_flash 0 0x1000000 factory.bin`) and point
+`FACTORY` and `FACTORY_SHA` at it.
 
 If it goes wrong badly, that is the way back — not a partial reflash, since
 this image replaces the whole partition layout.

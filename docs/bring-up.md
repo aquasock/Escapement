@@ -148,9 +148,12 @@ about whether Linux runs — only for a login.
 Unchanged and re-verified this session:
 
 ```
-/home/vash/twatch-backup/twatch-factory-16MB.bin  16 MiB
+factory image  16 MiB, read off the watch before any of this was flashed
 sha256 471c9a21a6d53e5cdf6dfb01949fcc2dd4f420fe1a3738631f73b600419ac2b0
 ```
+
+`scripts/flash.sh --factory` writes it back. That hash is this watch's; a
+different unit needs its own dump.
 
 BOOT + replug always reaches mask-ROM download mode. The bootloader and
 partition table we built match the release byte-for-byte, so flashing the
