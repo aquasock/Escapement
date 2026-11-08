@@ -125,3 +125,61 @@ which it currently refuses.
 
 That is a smaller, better-understood change than continuing to reproduce
 `spi_master` by hand, and it is the shape LilyGo's own driver has.
+
+---
+
+## Attempt: switch to SPI3 and ungate it
+
+Done, and it did not work:
+
+```
+co5300: system clk_en0=6101e007 rst_en0=9efe1ff8
+```
+
+Decoding those: **SPI3 clock enabled (bit 16 = 1), SPI3 reset released (bit 16
+of the reset register = 0)** — the writes took effect. And yet:
+
+```
+before-selftest:  cmd=00000000 ctrl=00000000 clock=00000000 user=00000000 ...
+after-selftest:   cmd=00000000 ctrl=00000000 clock=00000000 user=00000000 ...
+after-first-cmds: cmd=00000000 ctrl=00000000 clock=00000000 user=00000000 ...
+```
+
+**Every SPI3 register still reads zero**, including the ones the driver writes,
+while the self-test still reports "transaction completes" — which can only mean
+the completion bit is reading zero too.
+
+So reads from `0x60025000` are not landing, even though the DT declares SPI3
+there, the clock is ungated and the block is out of reset. Possibilities:
+
+  * the base is wrong for this silicon (the dtsi was written by the port, not
+    verified against an S3 with SPI3 in use)
+  * the `ioremap` in this driver is not providing a live mapping for that block
+    the way `devm_platform_ioremap_resource` would
+  * SPI3 needs an APB-side gate the SYSTEM register does not cover
+
+Note `clk_en0` bit 6 (SPI2) reads **0** while SPI2 demonstrably works for the
+flash, so this register is not simply "1 = enabled" per peripheral and the
+decode above may itself be wrong.
+
+## The recommendation, restated and now with evidence
+
+**Write `co5300` as a normal SPI client of `spi-esp32.c`, not as a platform
+driver that pokes registers.** That driver already does `devm_clk_get`,
+`clk_prepare_enable`, `reset_control_deassert` and `devm_platform_ioremap_resource`,
+so clock, reset and mapping are correct by construction rather than by my hand.
+On SPI2 it demonstrably works; on SPI3 it would settle in one boot whether the
+block is reachable at all.
+
+What then has to be added to `spi-esp32.c`:
+
+  * `tx_nbits == SPI_NBITS_QUAD` support (it currently `WARN_ON`s and proceeds
+    single-bit) — the `SPI_FWRITE_QUAD` path, roughly 10 lines in
+    `esp32_spi_prepare_transfer`
+  * a way to express command and address phases. `spi_transfer` cannot, but
+    `spi-mem` (`spi_mem_op` with `cmd`, `addr`, `dummy`, `data` and per-phase
+    bus widths) expresses this protocol exactly, and is the idiomatic answer.
+
+That is the work. It is a few hundred lines rather than a few dozen, but every
+one of the last fifteen flash cycles has been me re-deriving what
+`spi-esp32.c` and `spi-mem` already do correctly.

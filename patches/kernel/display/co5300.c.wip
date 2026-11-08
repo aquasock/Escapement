@@ -41,6 +41,7 @@
 #include <linux/of.h>
 #include <linux/platform_device.h>
 #include <linux/reset.h>
+#include <linux/delay.h>
 #include <linux/vmalloc.h>
 
 #define DRIVER_NAME "co5300"
@@ -138,6 +139,20 @@
 // omitting it hung the boot with no message, because the hang is a spin loop
 // inside probe.
 #define SPI_CLK_GATE_REG 0xe8
+
+/*
+ * The peripheral's own clock gate (SPI_CLK_GATE_REG) is downstream of a
+ * *system-level* gate. SPI2's is on by default because the flash needs it;
+ * SPI3's is not, and reading any SPI3 register returns 0 until it is ungated.
+ * That is why switching to SPI3 produced all-zero register reads.
+ *
+ * SYSTEM_PERIP_CLK_EN0 bit 16 = SPI3 clock enable, bit 6 = SPI2.
+ * SYSTEM_PERIP_RST_EN0  bit 16 = SPI3 reset (active high: write 0 to release).
+ */
+#define SYSTEM_PERIP_CLK_EN0 0x18
+#define SYSTEM_PERIP_RST_EN0 0x20
+#define SYS_SPI3_CLK_EN      BIT(16)
+#define SYS_SPI3_RST         BIT(16)
 #define SPI_CLK_EN       BIT(0)
 #define SPI_MST_CLK_ACTIVE BIT(1)
 #define SPI_MST_CLK_SEL  BIT(2)
@@ -206,12 +221,33 @@ static int io_mux_off(int pin)
 #define MCU_SEL_GPIO     (1 << 12)
 #define FUNC_DRV_20MA    (2 << 14)
 
-#define FSPICLK_OUT_IDX  101
-#define FSPIQ_IN_IDX     102
-#define FSPIQ_OUT_IDX    102
-#define FSPID_OUT_IDX    103
-#define FSPIHD_OUT_IDX   104
-#define FSPIWP_OUT_IDX   105
+/*
+ * SPI3 signal indices, NOT SPI2's FSPI ones.
+ *
+ * LilyGo's own driver (LilyGoLib, MIT) selects the host like this:
+ *
+ *     #ifdef ARDUINO_T_LORA_PAGER
+ *     #define SPI_DEV_HOST_ID  SPI2_HOST
+ *     #else
+ *     #define SPI_DEV_HOST_ID  SPI3_HOST
+ *     #endif
+ *
+ * The T-Watch Ultra therefore drives the panel from SPI3, whose matrix signal
+ * indices (SPICLK 4, SPID 1, SPIQ 0, SPIHD 2, SPIWP 3) are completely
+ * different from SPI2's FSPI indices (101..105). Routing SPI2 signals while
+ * expecting an SPI3 peripheral -- or vice versa -- would produce exactly what
+ * we saw: every register write completes and nothing reaches the panel.
+ *
+ * The controller base is 0x60025000 for SPI3, 0x60024000 for SPI2.
+ */
+#define SPI3_BASE        0x60025000
+
+#define SPICLK_OUT_IDX   4
+#define SPIQ_IN_IDX      0
+#define SPIQ_OUT_IDX     0
+#define SPID_OUT_IDX     1
+#define SPIHD_OUT_IDX    2
+#define SPIWP_OUT_IDX    3
 
 #define PIN_SCK  40
 #define PIN_D0   38    /* FSPID */
@@ -233,6 +269,7 @@ struct co5300 {
 	void __iomem *regs;
 	void __iomem *gpio;      /* GPIO matrix */
 	void __iomem *iomux;     /* IO_MUX, a separate peripheral */
+	void __iomem *sys;       /* SYSTEM: peripheral clock and reset gates */
 	struct clk *clk;
 	struct reset_control *rst;
 	u32 speed_hz;
@@ -292,11 +329,11 @@ static int co5300_te_count(struct co5300 *p, int ms)
 static void co5300_route_pins(struct co5300 *p)
 {
 	struct { int pin, sig; bool oe; } outs[] = {
-		{ PIN_SCK, FSPICLK_OUT_IDX, true  },
-		{ PIN_D0,  FSPID_OUT_IDX,   true  },
-		{ PIN_D1,  FSPIQ_OUT_IDX,   true  },
-		{ PIN_D2,  FSPIWP_OUT_IDX,  true  },
-		{ PIN_D3,  FSPIHD_OUT_IDX,  true  },
+		{ PIN_SCK, SPICLK_OUT_IDX, true  },
+		{ PIN_D0,  SPID_OUT_IDX,   true  },
+		{ PIN_D1,  SPIQ_OUT_IDX,   true  },
+		{ PIN_D2,  SPIWP_OUT_IDX,  true  },
+		{ PIN_D3,  SPIHD_OUT_IDX,  true  },
 	};
 	int i;
 
@@ -313,7 +350,7 @@ static void co5300_route_pins(struct co5300 *p)
 	}
 
 	// FSPIQ is driven by PIN_D1.
-	iowrite32(PIN_D1, p->gpio + GPIO_IN_SEL(FSPIQ_IN_IDX));
+	iowrite32(PIN_D1, p->gpio + GPIO_IN_SEL(SPIQ_IN_IDX));
 
 	/*
 	 * CS (41) and RST (37) are plain GPIOs, not SPI signals, but they still
@@ -775,9 +812,26 @@ static int co5300_probe(struct platform_device *pdev)
 		return -ENOMEM;
 	platform_set_drvdata(pdev, p);
 
-	p->regs = devm_platform_ioremap_resource(pdev, 0);
-	if (IS_ERR(p->regs))
-		return PTR_ERR(p->regs);
+	// SPI3, not the resource the DT node claimed: the node pointed at
+	// 0x60024000 (SPI2) and the panel is on SPI3.
+	p->sys = devm_ioremap(dev, 0x600c0000, 0x100);
+	if (!p->sys)
+		return dev_err_probe(dev, -ENOMEM, "cannot map system regs\n");
+
+	// Ungate SPI3 before touching any of its registers.
+	iowrite32(ioread32(p->sys + SYSTEM_PERIP_RST_EN0) & ~SYS_SPI3_RST,
+		  p->sys + SYSTEM_PERIP_RST_EN0);
+	iowrite32(ioread32(p->sys + SYSTEM_PERIP_CLK_EN0) | SYS_SPI3_CLK_EN,
+		  p->sys + SYSTEM_PERIP_CLK_EN0);
+	udelay(10);
+
+	pr_info("co5300: system clk_en0=%08x rst_en0=%08x\n",
+		ioread32(p->sys + SYSTEM_PERIP_CLK_EN0),
+		ioread32(p->sys + SYSTEM_PERIP_RST_EN0));
+
+	p->regs = devm_ioremap(dev, SPI3_BASE, 0x100);
+	if (!p->regs)
+		return dev_err_probe(dev, -ENOMEM, "cannot map SPI3\n");
 
 	// The panel's pins are not on IO_MUX SPI2 alternates, so the matrix
 	// registers have to be reachable from here.
@@ -818,12 +872,21 @@ static int co5300_probe(struct platform_device *pdev)
 	of_property_read_u32(dev->of_node, "spi-max-frequency", &speed);
 
 	// Reset pulse, then let the controller settle.
-	// Assert, hold, release, then let the controller settle. Assert is value 1
-	// because the pin is ACTIVE_LOW.
-	co5300_rst_assert(p);
-	msleep(20);
+	/*
+	 * LilyGo's reset sequence exactly:
+	 *     pinMode(rst, OUTPUT); digitalWrite(rst, HIGH); delay(200);
+	 *     digitalWrite(rst, LOW); delay(300);
+	 *     digitalWrite(rst, HIGH); delay(200);
+	 * i.e. it starts high, pulses low for 300 ms, then releases. The earlier
+	 * version asserted first and held only 20 ms, which is not the same
+	 * waveform at all.
+	 */
 	co5300_rst_release(p);
-	msleep(120);
+	msleep(200);
+	co5300_rst_assert(p);
+	msleep(300);
+	co5300_rst_release(p);
+	msleep(200);
 
 	// Peripheral bring-up, matching esp32_spi_init() in this tree.
 	wreg(p, SPI_CLK_GATE_REG,
