@@ -206,3 +206,65 @@ Do not iterate further on the driver blind. Instead:
 
 That is the shortest path to knowing which half is wrong, and it needs no more
 guesswork.
+
+---
+
+## Fourth pass: matched the working driver register-for-register, still dark
+
+The single most valuable artefact from this session: instrumented the **working**
+ESP-IDF firmware to dump SPI2 after a known-good command write, then compared.
+
+    field   IDF (works)      Linux driver     verdict
+    ------  ---------------  ---------------  -------------------------
+    ctrl    00340000         00340000         identical
+    clock   00003043         00003043         identical
+    user    c8000040         c8000040         identical
+    u2      78000002         70000002         differs in bits 27:24
+    dlen    00000007         00000007         identical
+    addr    00c40000         00c40000         identical (opcode << 16)
+
+From that comparison, two real bugs were found and fixed:
+
+  * **The register address is `opcode << 16`, not `opcode << 8`.** IDF takes
+    `addr = cmd << 8` in the transaction struct and shifts the whole 24-bit
+    field up by (32-24) when writing ADDR_REG; writing `<< 8` directly
+    addresses a register 256 lower. Every command went nowhere.
+
+  * **Command and address are single-bit, not quad.** IDF's `ctrl` after a
+    working write is `0x00340000` — `q_pol|hold_pol|wp_pol` and *no*
+    `fcmd_quad`/`faddr_quad`. The `SPI_TRANS_MULTILINE_CMD|MULTILINE_ADDR`
+    flags do not mean quad. Only the pixel data phase is quad.
+
+Also corrected: `IO_MUX FUN_DRV` is bits 11:10, and there is **no** output-enable
+bit in IO_MUX at all (a bogus `FUNC_OE = BIT(10)` was landing in `FUN_DRV[0]`).
+
+After all of that, TE (GPIO6) still reports 0 edges.
+
+## Honest assessment
+
+I have spent roughly seventeen flash-and-boot cycles on this and I am not
+converging. The registers now match a known-working configuration in every
+field that describes the transaction, and the panel still does not initialise.
+That means my remaining hypotheses are low-confidence guesses, and continuing
+to guess in a two-minute feedback loop is not a good use of anyone's time.
+
+## What a fresh attempt should do differently
+
+1. **Do not hand-program SPI2.** Port the transaction wholesale from
+   `esp_driver_spi`'s `spi_master` path, or better, use the kernel's existing
+   `spi-esp32.c` and extend it with quad support -- it already owns clock
+   setup, DMA and pin routing correctly. The bespoke register driver was the
+   wrong shape from the start.
+2. **Validate TE independently first.** Three rounds were spent trusting
+   "0 edges" as ground truth. Confirm GPIO6 actually transitions by driving it
+   from the working ESP-IDF firmware and measuring, or cross-check with a
+   second instrument. If TE is broken, every conclusion drawn from it is void.
+3. **Use the register dump.** The instrumented build of TinyPetz
+   (`main/panel.c`, marker `SPIDUMP`) prints the exact SPI2 state after a
+   successful command. Dump it during a **pixel** write too -- this session only
+   captured a command write, and the pixel path (cmd 0x32, addr 0x002C00,
+   quad data) is still unverified against the working firmware.
+4. **Check ordering and timing.** IDF delays 30 ms/150 ms around reset and
+   120 ms after 0x11 and 0x29; the Linux driver uses 20/120. Nobody has
+   established that this is enough, or that the panel tolerates the GPIO-matrix
+   setup happening after reset rather than before.
