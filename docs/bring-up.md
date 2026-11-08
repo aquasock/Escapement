@@ -259,6 +259,85 @@ Full
 the bus is the cross-check that matters: the driver is reading the same silicon
 the same way, not producing a plausible number.
 
+## The XL9555 expander, and an unrelated surprise
+
+The expander at 0x20 is an XL9555: a PCA9555 clone, 16 bits, no
+auto-increment, no interrupt line. `gpio-pca953x` supports it as
+`nxp,pca9555`, so this was a config line and a node -- no driver work.
+
+It is **not** in the path to the RTC or PMU. Those are peers on the same two
+wires, addressed directly at 0x51 and 0x34. The expander only does GPIO.
+
+### i2cdetect lies about this device
+
+```
+i2cdetect -y -r 0        -> 20: -- -- -- -- -- ...     (absent)
+i2cget -y 0 0x20 0x00    -> 0xff                       (present)
+```
+
+The quick-write probe produces a false negative here. Always confirm a
+suspicious absence with a real register read before concluding a part is
+missing.
+
+### The documentation has the touch reset on the wrong pin
+
+LilyGo's pin table lists it as expander GPIO10. The hardware says **P08**,
+which is port 1 bit 0:
+
+```
+0x07 (config port 1) = 0xfe    bit 0 output
+0x03 (output port 1) = 0xff    driven high
+```
+
+and this project's own working firmware (`TinyPetz/.../board.h`) drives
+`EXPANDS_TOUCH_RST = 8`. With linear numbering (P00..P07 = 0..7,
+P10..P17 = 8..15) that is gpio 8. Following the doc would pulse the wrong pin.
+
+### The pins were inherited, not set
+
+Read before any Linux driver existed:
+
+```
+0x06 (config 0) = 0x3f     P06, P07 outputs
+0x02 (output 0) = 0xff     both high
+```
+
+That is the ESP-IDF firmware's state. The expander stays powered across an
+ESP32 reset, so Linux read a working display enable and did nothing. On a cold
+boot the PCA9555 powers up all-inputs, DISP_EN is undriven, and the AMOLED
+stays dark.
+
+Fixed by modelling the enable as a fixed regulator rather than a gpio hog:
+
+```dts
+display_vcc: regulator-display {
+    compatible = "regulator-fixed";
+    enable-active-high;
+    gpio = <&xl9555 7 GPIO_ACTIVE_HIGH>;   /* P07 */
+    regulator-always-on;
+    regulator-boot-on;
+};
+```
+
+Verified: `/sys/class/regulator/regulator.15` reports `name=display`,
+`state=enabled`. The expander enumerates as `gpiochip625`, 16 lines.
+
+`pca953x_probe()` writes no config registers, so adding the node does not
+disturb existing pin state -- which is why this was safe to add while the
+display was still working.
+
+### `axp20x-regulator: regulators node not found` is not a failure
+
+The log line looks like an error and is not. The driver registers its rail
+descriptors anyway, and they appear in `/sys/class/regulator` as dcdc1..5,
+aldo1..4, bldo1..2, dldo1..2 and cpusldo. It only means no `regulators{}`
+child was found in the DT, so no per-rail configuration was applied.
+
+Left as-is deliberately: those rails are already at the voltages the board
+needs, set by the PMU's own defaults. Adding a `regulators{}` block would let
+Linux reconfigure SoC power rails, where a wrong default browns out the board
+rather than failing visibly. Not worth the risk for no benefit yet.
+
 ## Building the kernel: three patch stacks, not one
 
 The release kernel is Linux 7.2.4 plus **three separate stacks**, and the third

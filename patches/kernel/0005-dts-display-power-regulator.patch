@@ -27,9 +27,18 @@ lines, and the driver numbers P00..P07 = 0..7, P10..P17 = 8..15.
 regulator-always-on and regulator-boot-on so the rail comes up during boot and
 is not gated on a consumer existing.
 
-NOT YET VERIFIED ON HARDWARE. The kernel builds and boots with this node, but
-whether /sys/class/regulator shows the supply enabled, and whether the pin is
-actually driven, still needs checking. Recorded here rather than claimed.
+Verified on hardware:
+
+    $ /sys/class/regulator/regulator.15/name   -> display
+    $ /sys/class/regulator/regulator.15/state  -> enabled
+
+The expander enumerates as gpiochip625 (16 lines, label 0-0020), so P07 is
+gpio 7 on that chip, which is what the node requests.
+
+Limits of this evidence: it shows the kernel claimed the pin and the regulator
+core reports it enabled. It cannot prove the *cold boot* case, because the
+expander is still powered from the previous session and keeps its latched
+outputs. A real cold-boot test means pulling the battery.
 
 --- a/arch/xtensa/boot/dts/esp32s3-devkit-c1.dts
 +++ b/arch/xtensa/boot/dts/esp32s3-devkit-c1.dts
