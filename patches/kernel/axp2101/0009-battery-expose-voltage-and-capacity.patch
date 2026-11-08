@@ -4,22 +4,31 @@ Subject: [PATCH] power: axp20x_battery: expose VOLTAGE_NOW and CAPACITY for AXP2
 The pending AXP2101 series exposes only configuration to userspace:
 PRESENT, ONLINE, STATUS, CONSTANT_CHARGE_CURRENT_MAX, VOLTAGE_MAX,
 CHARGE_TERM_CURRENT. There is no VOLTAGE_NOW and no CAPACITY, so a fully bound
-PMIC still cannot answer "how full is the battery" -- which is the one number a
-watch needs.
+PMIC still cannot answer "how full is the battery" -- the one number a watch
+needs.
 
-Both values are already in registers the driver touches, and both were measured
-on this board before writing this:
+Both values were measured on this board before writing this:
 
     0x34/0x35 = 0x10 0x55 -> 4181 mV   battery voltage, 14 bits, already mV
-    0xa4      = 0x64      -> 100 %     state of charge in bits 6:0
+    0xa4      = 0x64      -> 100       state of charge, bits 6:0
 
-Note there is no IIO fallback available here. The AXP20x handler reads voltage
-through iio_read_channel_processed_scale(), but drivers/iio/adc/axp20x_adc.c
-has no AXP2101 channel map, so for this variant the value comes straight out
-of the register instead.
+There is no IIO fallback for this variant: the AXP20x handler reads voltage via
+iio_read_channel_processed_scale(), but drivers/iio/adc/axp20x_adc.c has no
+AXP2101 channel map. So the voltage comes straight out of the register.
 
-CAPACITY reports -ENODATA when bit 7 (the gauge-valid flag) is clear, rather
-than a plausible-looking 0 %. The flag drops while the gauge resets.
+## The capacity validity check, and a mistake worth recording
+
+The first version of this gated CAPACITY on bit 7 of 0xA4 being set, on the
+assumption that it was a gauge-valid flag. It is not. The register reads 0x64,
+which is 100 decimal -- a value that needs only seven bits, so bit 7 is clear
+and a perfectly valid 100 % was being reported as -ENODATA.
+
+The check is by range instead: anything above 100 is not a percentage. That is
+a condition which can be observed rather than assumed, and it does not depend
+on the meaning of an undocumented bit.
+
+Verified on hardware: voltage_now reads 4181000 uV, matching the 4181 mV read
+over raw I2C before the driver claimed the bus.
 
 Not included: CURRENT_NOW and HEALTH. Neither register is in the AXP2101 map
 this driver carries, and guessing at addresses is how a driver reports
@@ -27,7 +36,21 @@ confident nonsense.
 
 --- a/drivers/power/supply/axp20x_battery.c
 +++ b/drivers/power/supply/axp20x_battery.c
-@@ -561,6 +561,42 @@
+@@ -996,6 +996,13 @@ static enum power_supply_property axp2101_battery_props[] = {
+ 	POWER_SUPPLY_PROP_CONSTANT_CHARGE_CURRENT_MAX,
+ 	POWER_SUPPLY_PROP_VOLTAGE_MAX,
+ 	POWER_SUPPLY_PROP_CHARGE_TERM_CURRENT,
++	/*
++	 * Escapement: the pending series exposes only configuration here.
++	 * A watch needs the two measurements, and both are already in
++	 * hardware registers the driver reads for other properties.
++	 */
++	POWER_SUPPLY_PROP_VOLTAGE_NOW,
++	POWER_SUPPLY_PROP_CAPACITY,
+ };
+ 
+ static enum power_supply_property axp717_battery_props[] = {
+@@ -561,6 +568,40 @@ static int axp2101_battery_get_prop(struct power_supply *psy,
  				      AXP2101_CURRENT_STEP;
  		return 0;
  
@@ -54,33 +77,19 @@ confident nonsense.
 +
 +	case POWER_SUPPLY_PROP_CAPACITY:
 +		/*
-+		 * 7-bit state of charge. Bit 7 is the gauge-valid flag, which
-+		 * clears while the gauge is resetting; report that as
-+		 * unavailable rather than a bogus 0 %.
++		 * State of charge in bits 6:0, as a plain percentage. Validity
++		 * is checked by range, not by a flag bit -- see the commit
++		 * message for why bit 7 is not one.
 +		 */
 +		ret = regmap_read(axp20x_batt->regmap,
 +				  AXP2101_BATT_PERCENT_DATA, &reg);
 +		if (ret)
 +			return ret;
-+		if (!(reg & BIT(7)))
-+			return -ENODATA;
 +		val->intval = reg & 0x7f;
++		if (val->intval > 100)
++			return -ENODATA;
 +		return 0;
 +
  	default:
  		return -EINVAL;
  	}
-@@ -1000,6 +1036,13 @@
- 	POWER_SUPPLY_PROP_CONSTANT_CHARGE_CURRENT_MAX,
- 	POWER_SUPPLY_PROP_VOLTAGE_MAX,
- 	POWER_SUPPLY_PROP_CHARGE_TERM_CURRENT,
-+	/*
-+	 * Escapement: the pending series exposes only configuration here.
-+	 * A watch needs the two measurements, and both are already in
-+	 * hardware registers the driver reads for other properties.
-+	 */
-+	POWER_SUPPLY_PROP_VOLTAGE_NOW,
-+	POWER_SUPPLY_PROP_CAPACITY,
- };
- 
- static enum power_supply_property axp717_battery_props[] = {
