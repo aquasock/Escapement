@@ -338,6 +338,74 @@ needs, set by the PMU's own defaults. Adding a `regulators{}` block would let
 Linux reconfigure SoC power rails, where a wrong default browns out the board
 rather than failing visibly. Not worth the risk for no benefit yet.
 
+## The side buttons: naming, and two separate blockers
+
+### What LilyGo call them, and why that is wrong
+
+The board has three buttons:
+
+```
+top-left     LilyGo "PWR"    AXP2101 power key    not a GPIO at all
+bottom-left  LilyGo "BOOT"   SoC GPIO0, active low
+near USB-C   LilyGo "RESET"  CHIP_EN              invisible to software
+```
+
+"BOOT" describes what GPIO0 does *during reset*; it is not what the button is
+during normal use, and it is the one a wearer reaches for first. Named by
+position instead, using the watchmaking word for a button that is not the crown:
+
+```
+Pusher A  (top-left)
+Pusher B  (bottom-left)
+Reset     (recessed, maintenance only, not in the input map)
+```
+
+Measured rather than assumed, by polling GPIO0 while pressing each in turn: the
+**bottom-left** button changed it, the top-left did not. So LilyGo's labels are
+inverted relative to a user's expectation.
+
+### Blocker 1: a level IRQ on an unpulled pin hangs the boot
+
+`interrupts = <7 IRQ_TYPE_LEVEL_LOW>` on the PMIC hung the boot at
+`AXP20x variant AXP2101 found`, with the console silent and the CPU idle between
+storms. The pinctrl block configured pull-ups for the I2C pins only, so GPIO7
+floated. Adding input-enable plus internal pull-up fixes it:
+
+```dts
+pmic_irq_pins: pmic_irq_pins {
+    pinctrl-single,pins = < PIN(7) FUN0_20MA_IE_WPU >;
+};
+```
+
+With that, both interrupt users resolve:
+
+```
+/proc/interrupts
+ 7:  esp32xx-gpio  1  pcf85063
+ 8:  esp32xx-gpio  7  axp2101_irq_chip
+```
+
+### Blocker 2: the series never declared the power-key cell
+
+`axp20x-pek` could never probe, because `axp2101_cells[]` did not list it. The
+series defines `AXP2101_IRQ_PEK_RIS_EDGE`/`_FAL_EDGE` in the header and then
+never uses them. Silent -- no error anywhere, the device simply does not exist.
+The AXP717 list next door has the cell; this one does not. Fixed in
+`patches/kernel/axp2101/0010`.
+
+### Pusher B is polled, and that is not a workaround
+
+`gpiod_to_irq()` returns `-ENXIO` for **GPIO 0** specifically. It is not a
+general failure -- GPIO1 (RTC) and GPIO7 (PMU) both get real virtual IRQs. So
+`gpio-keys-polled` at 50 ms is used for Pusher B, which is what the ESP-IDF
+firmware did too.
+
+### Pusher A cannot be held
+
+The PMIC implements long-press power-off in hardware. Software can ignore
+`PKEY_LONG` -- TinyPetz does -- but the chip cuts power regardless. Any use of
+Pusher A has to be a short press.
+
 ## Building the kernel: three patch stacks, not one
 
 The release kernel is Linux 7.2.4 plus **three separate stacks**, and the third
