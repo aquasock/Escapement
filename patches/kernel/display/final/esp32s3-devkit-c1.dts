@@ -1,0 +1,296 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
+/dts-v1/;
+#include <dt-bindings/gpio/gpio.h>
+#include <dt-bindings/interrupt-controller/irq.h>
+#include <dt-bindings/input/linux-event-codes.h>
+#include "gpio-esp32.h"
+#include "esp32s3.dtsi"
+
+/ {
+	memory@0 {
+		device_type = "memory";
+		reg = <0x3d800000 0x00800000>;
+	};
+
+	i2c0 {
+		#address-cells = <1>;
+		#size-cells = <0>;
+		compatible = "i2c-gpio";
+
+		/* T-Watch Ultra: SDA=GPIO3, SCL=GPIO2. The devkit profile this
+		 * port ships uses 6/7, which is why the kernel bus scanned empty
+		 * while six devices were answering on the other two pins.
+		 */
+		sda-gpios = <&gpio0 3 (GPIO_ACTIVE_HIGH | GPIO_OPEN_DRAIN)>;
+		scl-gpios = <&gpio0 2 (GPIO_ACTIVE_HIGH | GPIO_OPEN_DRAIN)>;
+
+		pinctrl-0 = <&i2c0_pins>;
+		pinctrl-names = "default";
+
+		rtc@51 {
+			compatible = "nxp,pcf85063a";
+			reg = <0x51>;
+			interrupt-parent = <&gpio0>;
+			interrupts = <1 IRQ_TYPE_EDGE_FALLING>;
+			wakeup-source;
+		};
+
+		/* XL9555: 16-bit GPIO expander, a PCA9555 clone at 0x20.
+		 * Linear pin mapping: P00..P07 = gpio 0..7, P10..P17 = 8..15.
+		 * It gates the display rail (P07), haptic enable (P06) and
+		 * holds the touch controller out of reset (P08). No interrupt
+		 * line on this board, so it is written only.
+		 */
+		xl9555: gpio@20 {
+			compatible = "nxp,pca9555";
+			reg = <0x20>;
+			gpio-controller;
+			#gpio-cells = <2>;
+
+			/*
+			 * P05 enables the radio module (LoRa / SX1262). It comes up
+			 * as an input, and nothing else in the tree drives it, so
+			 * the radio has never been powered while the SPI probe ran.
+			 * Hog it high so the part is alive before SPI is tested.
+			 */
+			lora-enable-hog {
+				gpio-hog;
+				gpios = <5 GPIO_ACTIVE_HIGH>;
+				output-high;
+				line-name = "lora-enable";
+			};
+		};
+
+		/* X-Powers AXP2101 PMU: battery, charging, and the power rails.
+		 * No interrupt: GPIO7 has no pull-up here, and a LEVEL_LOW IRQ
+		 * on it storms and hangs the boot. Without an IRQ the supplies
+		 * still register (see axp2101 local patch 0008), but there are
+		 * no VBUS hotplug events and no wake-from-sleep.
+		 */
+		pmic@34 {
+			compatible = "x-powers,axp2101";
+			reg = <0x34>;
+			pinctrl-0 = <&pmic_irq_pins>;
+			pinctrl-names = "default";
+			interrupt-parent = <&gpio0>;
+			interrupts = <7 IRQ_TYPE_LEVEL_LOW>;
+			interrupt-controller;
+			#interrupt-cells = <1>;
+
+			battery {
+				compatible = "x-powers,axp2101-battery-power-supply";
+			};
+
+			usb_power: usb-power {
+				compatible = "x-powers,axp2101-usb-power-supply";
+			};
+
+			/*
+			 * Only DLDO1 is listed. Everything else in the PMU stays at
+			 * its own default, which is how the board has worked so far.
+			 *
+			 * DLDO1 powers the ST25R3916 NFC reader. It comes up off, and
+			 * the evidence is unambiguous: MISO (GPIO33) reads 0 even
+			 * with its internal pull-up enabled, so something external is
+			 * holding the line low -- an unpowered chip does exactly that
+			 * through its ESD diodes. The bus and pin routing are
+			 * therefore fine; the peripheral simply has no supply.
+			 */
+			regulators {
+				nfc_vcc: dldo1 {
+					regulator-name = "dldo1";
+					regulator-min-microvolt = <3300000>;
+					regulator-max-microvolt = <3300000>;
+					regulator-always-on;
+					regulator-boot-on;
+				};
+			};
+		};
+	};
+
+	/*
+	 * Display power, as a switchable regulator on the expander.
+	 *
+	 * The panel rail is enabled by XL9555 P07 and nothing else. There is no
+	 * CO5300 driver yet, but modelling the enable here is what makes the
+	 * kernel ASSERT it. Without it the pin keeps whatever state the
+	 * previous firmware left: harmless across a warm reset, wrong on a
+	 * cold boot, where the PCA9555 powers up all-inputs and the AMOLED
+	 * stays dark.
+	 *
+	 * gpio 7 on the expander is P07 (linear numbering: P00..P07 = 0..7,
+	 * P10..P17 = 8..15).
+	 */
+	/*
+	 * The side buttons, named by position rather than by what LilyGo call
+	 * them. "BOOT" describes what GPIO0 does during reset, not what the
+	 * button is; the user presses it while wearing the watch.
+	 *
+	 * Pusher A is the top-left button. It is not a GPIO: it is the AXP2101
+	 * power key, so it arrives through axp20x-pek (see the pmic node).
+	 * Pusher B is the bottom-left button, GPIO0, active low.
+	 * The recessed button by the USB port is the SoC's chip-enable and is
+	 * not visible to software at all.
+	 */
+	gpio-keys {
+		/* polled, not interrupt: the esp32 GPIO driver returns -ENXIO
+		 * from gpiod_to_irq() for GPIO 0 (interrupts on pins 1 and 7
+		 * work, so the irq domain itself is fine). Polling at 50 ms is
+		 * what the ESP-IDF firmware does anyway.
+		 */
+		compatible = "gpio-keys-polled";
+		pinctrl-0 = <&pusher_b_pins>;
+		pinctrl-names = "default";
+		poll-interval = <50>;
+		autorepeat;
+
+		pusher-b {
+			label = "Pusher B";
+			gpios = <&gpio0 0 GPIO_ACTIVE_LOW>;
+			linux,code = <KEY_ENTER>;
+		};
+	};
+
+	display_vcc: regulator-display {
+		compatible = "regulator-fixed";
+		regulator-name = "display";
+		regulator-min-microvolt = <3300000>;
+		regulator-max-microvolt = <3300000>;
+		enable-active-high;
+		gpio = <&xl9555 7 GPIO_ACTIVE_HIGH>;
+		regulator-always-on;
+		regulator-boot-on;
+	};
+};
+
+&iomux {
+	status = "ok";
+
+	i2c0_pins: i2c0_pins {
+		pinctrl-single,pins = <
+			PIN(3) FUN0_20MA_IE_WPU			/* SDA */
+			PIN(2) FUN0_20MA_IE_WPU>;		/* SCL */
+	};
+	pusher_b_pins: pusher_b_pins {
+		pinctrl-single,pins = <
+			PIN(0) FUN0_20MA_IE_WPU>;		/* Pusher B, active low */
+	};
+	pmic_irq_pins: pmic_irq_pins {
+		pinctrl-single,pins = <
+			PIN(7) FUN0_20MA_IE_WPU>;		/* AXP2101 IRQ, open drain */
+	};
+	/* The watch's panel is on SPI2 with its own pin set: SCK 40, data
+	 * D0..D3 on 38, 39, 42, 45. FUN_SEL(4) is the SPI2 function. CS is a
+	 * plain GPIO (41) driven by the panel driver, not a peripheral CS.
+	 */
+	spi2_pins: spi2_pins {
+		pinctrl-single,pins = <
+			PIN(40) (FUN_SEL(4) | FUN_DRV_20MA)	/* SCK */
+			PIN(38) (FUN_SEL(4) | FUN_DRV_20MA)	/* D0 */
+			PIN(39) (FUN_SEL(4) | FUN_DRV_20MA)	/* D1 */
+			PIN(42) (FUN_SEL(4) | FUN_DRV_20MA)	/* D2 */
+			PIN(45) (FUN_SEL(4) | FUN_DRV_20MA)>;	/* D3 */
+	};
+	uart0_pins: uart0_pins {
+		pinctrl-single,pins = <
+			PIN(43) FUN0_20MA			/* U0TXD */
+			PIN(44) FUN0_20MA_IE_WPU>;		/* U0RXD */
+	};
+};
+
+&gpio0 {
+	status = "ok";
+};
+
+&uart0 {
+	pinctrl-0 = <&uart0_pins>;
+	pinctrl-names = "default";
+	status = "ok";
+};
+
+/* SPI2 carries the panel. The controller does bind esp32-spi now: the command,
+ * address and data phases are expressed as a spi_mem_op, which spi_transfer
+ * cannot describe.
+ */
+&spi2 {
+	status = "okay";
+
+	/*
+	 * SPI2 is what the working ESP-IDF firmware uses for this panel, and its
+	 * peripheral is the one those register dumps came from. Its IO_MUX pins
+	 * are GPIO 9..14, so the panel's 38..45 have to be routed through the
+	 * GPIO matrix -- which is why the pin numbers live here and esp32-spi
+	 * does the routing itself. (The devkit profile's spi2_pins node muxed
+	 * these pads to FUN_SEL(4), which is not an SPI alternate on them.)
+	 */
+	espressif,clk-pin = <40>;
+	espressif,d0-pin = <38>;
+	espressif,d1-pin = <39>;
+	espressif,d2-pin = <42>;
+	espressif,d3-pin = <45>;
+
+	panel@0 {
+		compatible = "lilygo,co5300";
+		reg = <0>;
+		spi-max-frequency = <20000000>;
+		/*
+		 * Quad data. These two properties are what make the SPI core set
+		 * SPI_TX_QUAD in spi->mode, which spi_mem_check_op then requires
+		 * before it will accept a 4-lane phase. Without them a quad op is
+		 * rejected with -EOPNOTSUPP before it reaches the controller.
+		 */
+		spi-tx-bus-width = <4>;
+		spi-rx-bus-width = <4>;
+
+		/*
+		 * CS is deliberately NOT "cs-gpios".
+		 *
+		 * spi_mem_exec_op() only calls the controller's ->exec_op when the
+		 * device has no chip-select GPIO:
+		 *
+		 *   if (ctlr->mem_ops && ctlr->mem_ops->exec_op &&
+		 *       !spi_get_csgpiod(mem->spi, 0))
+		 *
+		 * With cs-gpios present it silently falls back to building
+		 * spi_transfers, which esp32-spi forces to single-bit -- so the
+		 * quad path never ran. A different property name keeps CS under
+		 * this driver's control without triggering that fallback, which
+		 * is the same arrangement LilyGo use (spics_io_num = -1).
+		 */
+		lilygo,cs-gpios = <&gpio0 41 GPIO_ACTIVE_LOW>;
+		reset-gpios = <&gpio0 37 GPIO_ACTIVE_LOW>;
+		te-gpios = <&gpio0 6 GPIO_ACTIVE_HIGH>;
+	};
+};
+
+
+
+&spi3 {
+	status = "disabled";
+};
+
+/ {
+	spi_probe: spi-probe {
+		compatible = "escapement,spi-probe";
+		status = "disabled";
+		/* NFC supply: DLDO1. Named here so the probe can assert it
+		 * explicitly instead of assuming the PMU left it on. */
+		vdd-supply = <&nfc_vcc>;
+	};
+
+};
+
+&acm {
+	status = "ok";
+};
+
+&ipc {
+	wifi@1 {
+		compatible = "esp,esp32-wifi-shmem";
+		reg = <1>;
+	};
+};
+
+&intc {
+	reg = <0x600c2800 0x800>;
+};

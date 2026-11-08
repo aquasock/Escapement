@@ -1,270 +1,120 @@
-# CO5300 display driver — work in progress, does not work yet
+# CO5300 display driver — the panel is scanning
 
-The watch currently runs the kernel from before this work. Do not flash the
-display kernel: it hangs the boot.
-
-## Why a platform driver and not an SPI client
-
-The CO5300 protocol is an 8-bit command phase, a 24-bit address phase and a
-4-bit data phase, chip select held low across all three. `spi_transfer` has no
-representation for that, so a normal SPI client driver cannot build these
-transactions. `drivers/spi/spi-esp32.c` in this tree is also hard-limited:
-
-```c
-mode = max_t(unsigned int, t->rx_nbits, t->tx_nbits);
-WARN_ON(mode != SPI_NBITS_SINGLE);
-```
-
-It advertises quad in `mode_bits` but warns and proceeds single-bit. So the
-driver programs the SPI2 registers directly, which is what the ESP-IDF
-firmware does too.
-
-## What exists
-
-`co5300.c` — platform driver, ~500 lines: SPI2 register access, the init table
-transcribed from the working firmware, an fbdev framebuffer, and a blit path.
-Builds clean and links. Config and DT are in place:
-
-    panel@60024000 { compatible = "lilygo,co5300"; ... }
-
-## Where it fails
+State as of 2026-11-08: **the controller is initialised and scanning.**
 
 ```
-co5300: SPI transaction never completed
+co5300: TE edges after init = 4 *** CONTROLLER IS SCANNING ***
+co5300 spi0.0: 410x502 RGB565, fb0 registered
 ```
 
-Every transaction times out waiting for `SPI_USR` to clear. The first version
-had no bound on that wait and hung the boot with no message at all — which is
-why the wait is now capped and reports.
+TE edges on GPIO6 are the panel's own proof that its internal scan engine is
+running, which only happens if it accepted the init table. Before this session
+that counter read 0.
 
-Two things are already fixed and worth keeping:
+What is **not** yet verified: that pixels reach the glass and look right. The
+blit returns success and the framebuffer registers, but nobody has looked at the
+screen since the fix. Next step is a human check, then a real image rather than
+a flat fill.
 
-  * **The SPI clock gate.** Without
-    `SPI_CLK_GATE_REG = SPI_CLK_EN | SPI_MST_CLK_ACTIVE | SPI_MST_CLK_SEL`
-    the peripheral never clocks. Omitting it produced the silent hang.
-  * **A bounded wait**, so a misprogrammed peripheral fails loudly instead of
-    spinning inside probe.
+## The five bugs, in the order they were found
 
-What is still wrong is the transaction setup itself — most likely the
-`SPI_CTRL_REG` quad bits (`SPI_FCMD_QUAD`/`SPI_FADDR_QUAD`) or the way the
-command and address phases are armed relative to `SPI_USER_REG`. Those bit
-positions were taken from ESP-IDF's `spi_ll.h`, not verified against this
-kernel's own header, and a wrong bit there would look exactly like this.
+Each one alone produced "every write succeeds, nothing happens".
 
-## The next step, concretely
+**1. `exec_op` ignored `op->data.dir`.** `buf.in` and `buf.out` are a union, so
+an output transfer aliased its own source as the read-back buffer, and exec_op
+then copied the FIFO back over the caller's data. For the init table — in
+read-only XIP flash — that is an immediate store fault:
 
-Do not debug the full panel path. First write a **minimal single transaction**
-that does one 8-bit command with no data and polls a status bit the peripheral
-must report — or better, use the existing working `esp32-spi` driver to prove
-the registers are reachable at all by making the panel respond to a simple
-software-reset command over 1-bit SPI. Once one transaction completes, the rest
-is arithmetic.
+```
+Unhandled load/store exception in kernel
+pc: 42327f45   s8i a6, a5, 0        <- store byte
+excvaddr: 42342729 = co5300_init+1  <- into the const table
+```
 
-## Reference material, already extracted
+**2. The bus clock was never programmed on the spi-mem path.**
+`SPI_CLOCK_REG` was written only from `prepare_transfer`, which exec_op never
+calls. Split out into `esp32_spi_set_clock()` and called from both.
 
-From `TinyPetz/firmware/bringup/main/panel.c`, which works on this hardware:
+**3. Command and address were sent on four lanes.** ESP-IDF's
+`SPI_TRANS_MULTILINE_CMD`/`MULTILINE_ADDR` are ignored unless a
+`SPI_TRANS_MODE_?IO` flag is also set, and the working firmware sets neither for
+register writes. Dumping its peripheral settles it:
 
-    CS 41, SCK 40, D0 38, D1 39, D2 42, D3 45, RST 37, TE 6
-    0x2A = 00 16 01 AF      columns 22..431
-    0x2B = 00 00 01 F5      rows 0..501
-    0x3A = 55               RGB565
-    init: 11 commands, extracted from the factory image at 0x130dd4
-    CS low for the whole stream; RAMWR once per window; RGB565 byte-swapped
+```
+firmware  ctrl=00340000     fcmd_quad and faddr_quad both clear
+ours was  ctrl=00000240     quad command, quad address, nothing else
+```
 
-That firmware is the ground truth. Its own notes warn that a failed transfer
-returns ESP_OK silently, so on ESP-IDF the same bug would have looked like a
-blank panel rather than an error.
+Command and address are now single-lane everywhere; only the pixel payload is
+quad.
 
----
+**4. The pins were never routed.** Neither SPI bus on this SoC reaches the
+watch's panel pins through IO_MUX: SPI3 has no IO_MUX pins at all, and FSPI's
+are GPIO 9..14. The panel is on 38..45, so it needs the GPIO matrix — which
+`esp32_spi` did not implement. The pad stayed in its reset function and carried
+nothing.
 
-## Second pass: six bugs found, panel still dark
+Two details that cost extra time here:
 
-The driver now builds, boots, registers `fb0`, runs every transaction without
-error — and the panel does not light. The controller is not scanning:
-GPIO6 (the tearing-effect pin) shows **0 edges** before and after init, which
-from the bring-up notes separates "panel dead" from "panel alive but fed bad
-pixels". It is the former.
+  * The signal indices in the older notes (`SPICLK 4, SPID 1, SPIQ 0, SPIHD 2,
+    SPIWP 3`) belong to the **flash/cache peripheral**, not SPI3. SPI3 is
+    66..70; FSPI is 101..105.
+  * Pins 32 and above have their own enable register. Writing `BIT(pin & 31)`
+    to `GPIO_ENABLE_W1TS` enabled GPIO 6, 7, 8, 10 and 13 — unrelated pads —
+    while the panel pins stayed undriven. High-bank pins need
+    `GPIO_ENABLE1_W1TS`.
 
-Bugs found and fixed this pass, in the order they surfaced. Each was invisible
-from the kernel side, which is why the diagnostics were worth writing.
+**5. co5300 undid the routing, and the TE pad was off by one.** After the fix
+above the bus clocked (proved by a self-test reading the clock pad's own input
+buffer: 912 edges), and the panel still did not respond — because
+`co5300_route_pins()` rewrote the same `OUT_SEL` registers *without* the
+output-enable bit, switching the pads back off. Removed; `esp32_spi` owns those
+pins now.
 
-**1. Every SPI_CTRL quad bit was wrong.** `fcmd_quad` I had at 11, actual 9;
-`faddr_quad` 14 vs 6; `faddr_dual` 13 vs 5; `fread_quad` 20 vs 15. Transcribed
-from memory of ESP-IDF's helpers instead of decoded from `spi_struct.h`. The
-kernel's own `spi-esp32.c` had `q_pol`/`d_pol`/`hold_pol` right, which is
-exactly why the others looked trustworthy.
+The TE pad masked the whole thing: `iomux_off()` fell back to `pin * 4`, so the
+input-enable meant for GPIO6 landed on GPIO5. TE read a constant 0 and the
+driver reported "controller NOT scanning" whether or not it was. The generic
+case is `0x04 + pin*4`.
 
-**2. FIFO overrun.** `FIFO_WORDS 64` — the FIFO is `W0..W15`, sixteen 32-bit
-words. The pixel loop wrote one 16-bit pixel per slot at a 2-byte stride, ran
-past the end, and overwrote the control registers at 0xe0/0xe8. The register
-dump caught it: `clock` read `0xffff` where `0x3043` had been written.
+## Instruments worth keeping
 
-**3. No pin routing at all.** The panel's pins have no SPI2 alternate function
-in IO_MUX — GPIO38's only SPI function is `FSPIWP` at sel 2, and
-39/40/42/45 expose nothing but plain GPIO. The devkit's pins 10–13 *do* have
-SPI2 at sel 4, which is where the copied `FUN_SEL(4)` came from. Everything
-must go through the GPIO matrix.
+**The clock self-test** in `esp32_spi` (`esp32_spi_clk_selftest`) answers "does
+the peripheral reach the pad" without any device answering. A pad's input buffer
+reads its own driven level, so it counts transitions on the clock pin during a
+2 MHz transfer:
 
-**4. The SPI clock gate.** Without
-`SPI_CLK_GATE_REG = CLK_EN | MST_CLK_ACTIVE | MST_CLK_SEL` the peripheral never
-clocks, `SPI_USR` never clears, and the first version spun forever inside probe
-with no message at all.
+```
+clk pin 40: 912 edges in 962 samples, usr_cleared=1 dma_raw=00001000
+            -- SPI clock REACHES the pad
+```
 
-**5. Register data phase width.** The reference sends command parameters
-single-bit and only pixels quad — it sets `MULTILINE_CMD|MULTILINE_ADDR` but not
-`MODE_QIO` on a register write. Sending parameters quad puts a wrong value in
-every register. Also: the pixel stream opens with command **0x32** and address
-**0x002C00**, not 0x2C — 0x02 is single-line write, 0x32 is the quad write.
+It must run **after** `esp32_spi_init()`. Called earlier it reports a stall,
+because that function is what enables the peripheral's clock gate.
 
-**6. `MCU_SEL` not shifted.** `MCU_SEL_GPIO` was `1` instead of `1 << 12`, so
-every panel pad stayed in its IO_MUX default function (MTDO stayed MTDO) while
-the matrix output selector pointed the SPI signal at it. Readback made it
-obvious: `iomux[40]` read back `0x8401` — precisely the value written, with
-`MCU_SEL` still 0.
+**The register dump** in `exec_op` prints the same fields as the SPIDUMP block in
+TinyPetz `main/panel.c`. Diffing the two is the fastest way to find a
+misprogrammed field, and it is what identified bug 3.
 
-After fix 6 the readback is `iomux[40]=0x9400 outsel[40]=0x65` — MCU_SEL is
-GPIO and the output selector names FSPICLK. Correct, and the panel is still
-dark.
+## Bus choice: SPI2, not SPI3
 
-## What is left
+The panel is on SPI2. LilyGo's own library uses SPI3 for this board, and the
+earlier work followed it, but the ESP-IDF firmware that provably drives this
+glass uses SPI2, and both buses behave identically once routing is correct. SPI2
+is the one whose working register values can be diffed against.
 
-Two candidates, neither yet tested:
+## Still open
 
-  * **Display power may not actually be asserted.** The rail is XL9555 P07,
-    driven through `regulator-fixed`. The regulator framework reports
-    `enabled`, but that only proves `regulator_enable()` was called — not that
-    `pca953x` made P07 an *output* (the expander powers up all-inputs, and an
-    output-register write to a pin still configured as input does nothing).
-    This is the single most likely remaining cause and the cheapest to check.
+  * Does the glass show the framebuffer? Unverified.
+  * No double buffering, no partial blit: `co5300_blit` sends the whole window as
+    one spi-mem op, which is why the transmit buffer is a full frame.
+  * `esp32_spi_exec_op` is still FIFO-only, 64 bytes per chunk, no DMA. A frame
+    is 6432 chunks of register pokes.
+  * Brightness is fixed at 0xFF after init.
 
-  * **Reset may not be toggling.** `iomux[37]` reads `0x0a00`: input-enable
-    set, `MCU_SEL` 0. For most S3 pads sel 0 is the GPIO default so this is
-    probably fine, but it has not been confirmed that GPIO37 actually moves.
+## A flat fill proves nothing
 
-## The next concrete step
-
-Stop guessing at the SPI protocol; it is now built to match the reference
-line for line. Determine whether the panel is powered:
-
-    i2cget -y -f 0 0x20 0x06     # config: bit 7 must be 0 (output)
-    i2cget -y -f 0 0x20 0x02     # output: bit 7 must be 1 (high)
-
-If `cfg0` bit 7 is 1, the expander never made P07 an output and the panel has
-had no power this whole time — which would explain every symptom, including a
-silent one, and would mean `regulator-fixed` needs its gpio requested with an
-explicit direction rather than relying on the framework.
-
----
-
-## Third pass: everything matches the reference and it is still dark
-
-Verified after seven fixes:
-
-    iomux[40]=0x9400  outsel[40]=0x65   SCK  -> FSPICLK, GPIO, OE
-    iomux[38]=0x9400  outsel[38]=0x67   D0   -> FSPID,   GPIO, OE
-    iomux[41]=0x9400                    CS   -> GPIO, OE (default was MTDI!)
-    iomux[37]=0x9400                    RST  -> GPIO, OE
-
-    display rail: cfg0=0x3f (P07 an output), out0=0xff (P07 driven high)
-
-and the init table, reset sequence, command/address widths and CS handling now
-match `TinyPetz/firmware/bringup/main/panel.c` line for line:
-
-    .command_bits = 8, .address_bits = 24, .spics_io_num = -1
-    flags = SPI_TRANS_MULTILINE_CMD | SPI_TRANS_MULTILINE_ADDR
-    cmd = 0x02, addr = opcode << 8
-    RST low 30 ms, high 150 ms
-    the same 11-entry table
-
-TE (GPIO6) still reads 0 edges.
-
-## Two honest possibilities
-
-1. The SPI transaction is still wrong in a way I cannot see from the kernel
-   side. Every write returns success and the completion bit clears, but
-   "completes" only means the peripheral finished shifting; it says nothing
-   about whether the panel understood.
-
-2. The TE measurement itself is wrong, in which case "0 edges" is not evidence
-   of anything and the panel may be initialising fine while the pixel path is
-   broken. GPIO6 as a plain input should work, but that has not been proven
-   independently.
-
-## The decisive next test
-
-Do not iterate further on the driver blind. Instead:
-
-1. Flash the ESP-IDF firmware (`TinyPetz`) back and confirm the screen still
-   works. That takes two minutes and re-establishes that the hardware, the
-   panel and the power are fine -- everything after this point is then known to
-   be a software difference, not a dying panel.
-2. Write a small ESP-IDF program that uses IDF's own SPI driver with the same
-   pin set, rather than hand-programmed registers. If the panel works through
-   IDF's SPI on those pins, then the pin routing is right and the fault is in
-   my register programming. If it does not, the fault is in the pin map or
-   power, and the kernel driver was never the problem.
-
-That is the shortest path to knowing which half is wrong, and it needs no more
-guesswork.
-
----
-
-## Fourth pass: matched the working driver register-for-register, still dark
-
-The single most valuable artefact from this session: instrumented the **working**
-ESP-IDF firmware to dump SPI2 after a known-good command write, then compared.
-
-    field   IDF (works)      Linux driver     verdict
-    ------  ---------------  ---------------  -------------------------
-    ctrl    00340000         00340000         identical
-    clock   00003043         00003043         identical
-    user    c8000040         c8000040         identical
-    u2      78000002         70000002         differs in bits 27:24
-    dlen    00000007         00000007         identical
-    addr    00c40000         00c40000         identical (opcode << 16)
-
-From that comparison, two real bugs were found and fixed:
-
-  * **The register address is `opcode << 16`, not `opcode << 8`.** IDF takes
-    `addr = cmd << 8` in the transaction struct and shifts the whole 24-bit
-    field up by (32-24) when writing ADDR_REG; writing `<< 8` directly
-    addresses a register 256 lower. Every command went nowhere.
-
-  * **Command and address are single-bit, not quad.** IDF's `ctrl` after a
-    working write is `0x00340000` — `q_pol|hold_pol|wp_pol` and *no*
-    `fcmd_quad`/`faddr_quad`. The `SPI_TRANS_MULTILINE_CMD|MULTILINE_ADDR`
-    flags do not mean quad. Only the pixel data phase is quad.
-
-Also corrected: `IO_MUX FUN_DRV` is bits 11:10, and there is **no** output-enable
-bit in IO_MUX at all (a bogus `FUNC_OE = BIT(10)` was landing in `FUN_DRV[0]`).
-
-After all of that, TE (GPIO6) still reports 0 edges.
-
-## Honest assessment
-
-I have spent roughly seventeen flash-and-boot cycles on this and I am not
-converging. The registers now match a known-working configuration in every
-field that describes the transaction, and the panel still does not initialise.
-That means my remaining hypotheses are low-confidence guesses, and continuing
-to guess in a two-minute feedback loop is not a good use of anyone's time.
-
-## What a fresh attempt should do differently
-
-1. **Do not hand-program SPI2.** Port the transaction wholesale from
-   `esp_driver_spi`'s `spi_master` path, or better, use the kernel's existing
-   `spi-esp32.c` and extend it with quad support -- it already owns clock
-   setup, DMA and pin routing correctly. The bespoke register driver was the
-   wrong shape from the start.
-2. **Validate TE independently first.** Three rounds were spent trusting
-   "0 edges" as ground truth. Confirm GPIO6 actually transitions by driving it
-   from the working ESP-IDF firmware and measuring, or cross-check with a
-   second instrument. If TE is broken, every conclusion drawn from it is void.
-3. **Use the register dump.** The instrumented build of TinyPetz
-   (`main/panel.c`, marker `SPIDUMP`) prints the exact SPI2 state after a
-   successful command. Dump it during a **pixel** write too -- this session only
-   captured a command write, and the pixel path (cmd 0x32, addr 0x002C00,
-   quad data) is still unverified against the working firmware.
-4. **Check ordering and timing.** IDF delays 30 ms/150 ms around reset and
-   120 ms after 0x11 and 0x29; the Linux driver uses 20/120. Nobody has
-   established that this is enough, or that the panel tolerates the GPIO-matrix
-   setup happening after reset rather than before.
+From this project's original bring-up notes, and worth repeating because it is
+the next test to run: a solid colour renders identically whether the panel
+received 502 rows or received row 0 five hundred times. Any test meant to
+validate row addressing needs vertical structure — bands, a border, a gradient
+along y.

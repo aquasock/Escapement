@@ -26,7 +26,8 @@ set -euo pipefail
 here=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 cd "$here"
 
-B=build
+# Absolute: several steps cd into the kernel tree and then refer to these.
+B=$here/build
 K=$B/kernel/linux-7.2.4
 PROJ=$B/Linux-on-esp32-S3
 FORK=$PROJ/experiments/mmu-poc/fork
@@ -40,7 +41,7 @@ die() { printf 'escapement: %s\n' "$*" >&2; exit 1; }
 [ -x "$TC/bin/xtensa-esp32s3-linux-uclibcfdpic-gcc" ] \
     || die "no toolchain. Run ./scripts/build-toolchain.sh first (docs/toolchain.md)."
 export XTENSA_GNU_CONFIG=$B/toolchain/xtensa-dynconfig/esp32s3.so
-export PATH=$here/$TC/bin:$PATH
+export PATH=$TC/bin:$PATH
 CROSS=xtensa-esp32s3-linux-uclibcfdpic-
 
 # ---- source ----------------------------------------------------------------
@@ -77,6 +78,17 @@ for f in "$here"/patches/kernel/0001-*.patch; do
     git apply --whitespace=nowarn "$f" 2>/dev/null || true
 done
 cd "$here"
+# ---- ours: the drivers that are still under active change -------------------
+#
+# These three files are edited in place faster than a patch series can keep up
+# with, so they are kept as whole-file copies and installed after the patch
+# stacks. Everything else in patches/kernel is a real patch.
+say "display driver sources"
+cp "$here"/patches/kernel/display/final/spi-esp32.c "$K/drivers/spi/spi-esp32.c"
+cp "$here"/patches/kernel/display/final/co5300.c "$K/drivers/video/fbdev/co5300.c"
+cp "$here"/patches/kernel/display/final/esp32s3-devkit-c1.dts \
+   "$K/arch/xtensa/boot/dts/esp32s3-devkit-c1.dts"
+
 # The config patch edits the *seed config*, not the kernel tree -- buildroot
 # copies it in. Applying it here to the tree is a no-op by design.
 (cd "$PROJ" && git apply --whitespace=nowarn "$here/patches/kernel/0002-"*.patch 2>/dev/null || true)
