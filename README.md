@@ -14,6 +14,18 @@ Verified on hardware 2026-11-08. `buildroot login:` appears on the USB console,
 root authenticates, and an interactive bash session starts — which is the real
 test, because bash forks and this port's `fork()` is a patch stack, not an MMU.
 
+**Works: the PMU.** The AXP2101 at I2C 0x34 loads and reports the battery:
+
+```
+capacity    = 100
+voltage_now = 4182000      uV
+status      = Full
+```
+
+No Linux driver for the AXP2101 exists — not here, not in mainline — so
+`patches/kernel/axp2101/` carries the pending upstream series plus two local
+fixes. See "The PMU" in the bring-up notes.
+
 **Works: the RTC.** A PCF85063A at I2C 0x51 registers as `rtc0` and
 `CONFIG_RTC_HCTOSYS` seeds the system clock before init:
 
@@ -203,8 +215,11 @@ cores.
 - **No input.** `CONFIG_INPUT` is off in the kernel config.
 - **The PMU's interrupt is not wired.** The AXP2101 binds at 0x34 and loads, but
   with `interrupts = <7 LEVEL_LOW>` the boot hung — a level-triggered IRQ on a
-  pin nothing pulls up storms forever. No IRQ means polling, which is fine for
-  battery state and useless for wake-from-sleep.
+  pin nothing pulls up storms forever. No IRQ means polling, which covers
+  battery state and rules out wake-from-sleep and hotplug events.
+- **`axp20x-usb` does not register.** Only the battery supply appears. The USB
+  power-supply driver wants the two VBUS interrupts, which are the ones we
+  cannot provide.
 - **The RTC's stored time is UTC+8.** The chip counts correctly but the factory
   set it to China Standard Time. It is exactly 8 h ahead of true UTC, so it
   needs one `hwclock --set` to correct. Not a driver fault.

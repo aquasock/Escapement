@@ -158,6 +158,107 @@ in the heredoc body triggered readline filename completion, which inserted
 `README.txt` into the file. Indent such scripts with spaces, or the shell
 edits them for you.
 
+## The PMU: four things that each looked like something else
+
+The AXP2101 at I2C 0x34 is the watch's power manager: battery, charging, and
+nine regulators. Confirmed present before any driver work, with the BusyBox i2c
+tools over the bus the RTC patch fixed:
+
+```
+0x03     = 0x4a     chip ID: AXP2101
+0x34/0x35= 0x10 0x55  -> 4181 mV
+0xa4     = 0x64     -> 100 %
+```
+
+### 1. There is no driver, and that is different from the RTC
+
+`rtc-pcf85063` already existed; the RTC needed one config line. The AXP2101 is
+not in `drivers/mfd/axp20x-i2c.c` — which knows axp152/192/202/209/221/223/313a/
+323/717/803/806/15060 — and is not in mainline either. There was nothing to
+enable. `patches/kernel/axp2101/` carries Olivier Louvignes' pending 7-patch
+series (2026-10-23), retrieved partly from Patchwork and partly from the
+marc.info archive, since Patchwork had only ingested 5 of the 7.
+
+One local adaptation: the series expects `regmap_set_bits()` in
+`axp20x_power_off()`, where this kernel has `regmap_write()`. Safe, because in
+both existing cases the series sets `shutdown_bit = AXP20X_OFF` — the same value
+the old code wrote — so the forms agree for every pre-existing variant.
+
+### 2. A level-triggered IRQ on an unpulled pin hung the boot
+
+The first DTS version wired the PMIC's interrupt:
+
+```dts
+interrupts = <7 IRQ_TYPE_LEVEL_LOW>;
+```
+
+The boot stopped dead at `AXP20x variant AXP2101 found` and never reached init;
+the console went silent with the CPU in `platform_idle` between storms. The same
+run also produced `i2c-0: sendbytes: NAK bailout` and a failed RTC probe.
+
+The pinctrl block configures pull-ups for the I2C pins (3 and 2) and nothing
+else, so GPIO7 floats. A floating line read as asserted re-fires forever, and
+that interrupt storm starves both the console and the **bit-banged** I2C bus.
+
+This is the important one: the NAKs looked like an I2C problem and were not.
+`i2c-gpio` at 100 kHz drives all six devices fine; it was being starved.
+Hardware I2C would not have fixed this.
+
+Dropping the interrupt made everything work, and polling is enough for battery
+state. It does rule out wake-from-sleep and VBUS hotplug events, which is why
+`axp20x-usb` never registers — that driver wants the two VBUS interrupts.
+
+### 3. Without an IRQ the MFD silently drops the supplies
+
+With the interrupt gone, the PMIC bound and logged `AXP20X driver loaded` — and
+`/sys/class/power_supply/` was **empty**, with no error anywhere.
+
+The cause is in `axp20x_device_probe()`:
+
+```c
+if (axp20x->irq <= 0) {
+    /* "IRQs are required by some drivers" */
+    axp20x->cells = axp_regulator_only_cells;
+}
+```
+
+`axp_regulator_only_cells` contains one cell. Battery and USB vanish, silently.
+The series never set `cells_no_irq` for the AXP2101, so it fell into this trap;
+AXP806 sets it and does not. Local fix `0008` sets it too, so a sub-driver that
+genuinely needs an IRQ fails its own probe visibly instead of all of them
+disappearing at once.
+
+### 4. The series exposes configuration, not measurements
+
+The patch set's property list has PRESENT, ONLINE, STATUS,
+CONSTANT_CHARGE_CURRENT_MAX, VOLTAGE_MAX and CHARGE_TERM_CURRENT — no
+`VOLTAGE_NOW`, no `CAPACITY`. A fully bound PMIC still could not answer "how
+full is the battery".
+
+Local fix `0009` adds both, reading `0x34/0x35` (14 bits, already millivolts) and
+`0xa4` (bits 6:0). There is no IIO route for this variant: the AXP20x handler
+uses `iio_read_channel_processed_scale()`, but `axp20x_adc.c` has no AXP2101
+channel map.
+
+**And a mistake worth keeping:** the first version gated `capacity` on bit 7 of
+`0xa4` being set, assuming a gauge-valid flag. It is not. The register reads
+`0x64`, which is **100 decimal** — seven bits, so bit 7 is clear, and a valid
+100 % was reported as `-ENODATA`. The check is by range now (>100 is not a
+percentage), which does not depend on guessing at an undocumented bit.
+
+```
+$ cat /sys/class/power_supply/axp20x-battery/capacity
+100
+$ cat .../voltage_now
+4182000
+$ cat .../status
+Full
+```
+
+`voltage_now` matching the 4181 mV read over raw I2C before the driver claimed
+the bus is the cross-check that matters: the driver is reading the same silicon
+the same way, not producing a plausible number.
+
 ## Building the kernel: three patch stacks, not one
 
 The release kernel is Linux 7.2.4 plus **three separate stacks**, and the third
