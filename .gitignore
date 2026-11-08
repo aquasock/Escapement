@@ -1,0 +1,6 @@
+# Sources and toolchains: several GB, all reproducible from the pinned
+# revisions in scripts/build.sh.
+build/
+
+# Upstream release blobs. scripts/fetch-images.sh downloads and verifies them.
+images/*.bin
