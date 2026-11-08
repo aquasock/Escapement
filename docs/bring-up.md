@@ -87,6 +87,49 @@ vectors ptr = 0x40380000
 `0x42140000` is the kernel at flash offset `0x140000`, and `0x40380000` is what
 the kernel was built to expect. Single boot, no resets over 75 s.
 
+## Building the kernel: three patch stacks, not one
+
+The release kernel is Linux 7.2.4 plus **three separate stacks**, and the third
+is easy to miss because the first two produce a kernel that builds and boots:
+
+1. the port's 62 board patches (`new-files/board/.../patches/linux`)
+2. Escapement's own (`patches/kernel`)
+3. the **fork backend** (`experiments/mmu-poc/fork`, nine patches)
+
+Missing stack 3 is not a compile error. The kernel builds, boots, brings up the
+RTC, and reaches a login prompt — and then falls over the moment an interactive
+shell starts:
+
+```
+Caught unhandled exception in 'bash' (pid = 194, pc = 0x3df30388)
+EXCCAUSE is 2
+bash could not fork with 4432 KiB free; switching this session to dash.
+```
+
+That was the cost of building with only stacks 1 and 2. NOMMU has no MMU to give
+a child its own address space, so the memory-banking patches **are** the fork
+implementation; without them `fork()` cannot work at all. Busybox `sh` hides it
+because it uses `vfork`; bash does not, so the failure appears exactly at login.
+
+The tell is the version string:
+
+```
+7.2.4-forkbank          <- correct
+7.2.4-g<hash>-dirty     <- fork backend missing
+```
+
+`build-kernel.sh` sets `CONFIG_XTENSA_NOMMU_FORK=y` and
+`CONFIG_LOCALVERSION="-forkbank"` and refuses to finish unless the built image
+reports the `-forkbank` string.
+
+### One config deviation worth knowing
+
+`CONFIG_RTC_CLASS=y` pulls in `CONFIG_RTC_NVMEM` (it defaults to `RTC_CLASS`),
+which selects the whole NVMEM framework. The board seed ships `CONFIG_NVMEM`
+off and the PCF85063A uses none of it, so both are pinned off. The project's
+own `check-kernel-config.py` catches this class of drift and is run as a build
+gate.
+
 ## The console: two fixes that look like something else
 
 There IS a console — `ttyGS3`, the S3's USB-Serial-JTAG — and the port you

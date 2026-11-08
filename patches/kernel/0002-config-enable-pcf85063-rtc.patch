@@ -23,7 +23,7 @@ Those are a later pass.
 
 --- a/new-files/board/espressif/esp32s3/devkit_c1_16m_linux.config
 +++ b/new-files/board/espressif/esp32s3/devkit_c1_16m_linux.config
-@@ -110,6 +110,14 @@
+@@ -110,6 +110,18 @@ CONFIG_HW_RANDOM_ESP32=y
  CONFIG_I2C=y
  CONFIG_I2C_CHARDEV=y
  CONFIG_I2C_GPIO=y
@@ -35,6 +35,10 @@ Those are a later pass.
 +CONFIG_RTC_HCTOSYS=y
 +CONFIG_RTC_HCTOSYS_DEVICE="rtc0"
 +CONFIG_RTC_DRV_PCF85063=y
++# RTC_NVMEM defaults to RTC_CLASS and pulls in the whole NVMEM framework.
++# The PCF85063A has no nvmem this driver uses, and the board config ships
++# with CONFIG_NVMEM off, so keep it off rather than growing the kernel.
++# CONFIG_RTC_NVMEM is not set
  CONFIG_SPI=y
  CONFIG_SPI_ESP32=y
  CONFIG_PINCTRL=y
