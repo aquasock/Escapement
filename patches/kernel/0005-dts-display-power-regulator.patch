@@ -1,0 +1,66 @@
+From: Escapement
+Subject: [PATCH] dts: assert display power from the expander
+
+The panel rail is enabled by XL9555 P07 and nothing else. Until now Linux read
+that pin's state and left it alone, which works only because the ESP-IDF
+firmware drove it before handing over -- the expander stays powered across an
+ESP32 reset. On a cold boot (battery pulled) the PCA9555 powers up with every
+pin an input, DISP_EN is not driven, and the AMOLED stays dark.
+
+Modelling it as a regulator-fixed is what makes the kernel assert it. There is
+no CO5300 driver yet, so nothing consumes the supply; the point is the enable.
+
+    display_vcc: regulator-display {
+        compatible = "regulator-fixed";
+        regulator-name = "display";
+        regulator-min-microvolt = <3300000>;
+        regulator-max-microvolt = <3300000>;
+        enable-active-high;
+        gpio = <&xl9555 7 GPIO_ACTIVE_HIGH>;
+        regulator-always-on;
+        regulator-boot-on;
+    };
+
+gpio 7 on the expander is P07 -- the chip reported as gpiochip625 with 16
+lines, and the driver numbers P00..P07 = 0..7, P10..P17 = 8..15.
+
+regulator-always-on and regulator-boot-on so the rail comes up during boot and
+is not gated on a consumer existing.
+
+NOT YET VERIFIED ON HARDWARE. The kernel builds and boots with this node, but
+whether /sys/class/regulator shows the supply enabled, and whether the pin is
+actually driven, still needs checking. Recorded here rather than claimed.
+
+--- a/arch/xtensa/boot/dts/esp32s3-devkit-c1.dts
++++ b/arch/xtensa/boot/dts/esp32s3-devkit-c1.dts
+@@ -66,6 +66,30 @@
+ 			};
+ 		};
+ 	};
++
++	/*
++	 * Display power, as a switchable regulator on the expander.
++	 *
++	 * The panel rail is enabled by XL9555 P07 and nothing else. There is no
++	 * CO5300 driver yet, but modelling the enable here is what makes the
++	 * kernel ASSERT it. Without it the pin keeps whatever state the
++	 * previous firmware left: harmless across a warm reset, wrong on a
++	 * cold boot, where the PCA9555 powers up all-inputs and the AMOLED
++	 * stays dark.
++	 *
++	 * gpio 7 on the expander is P07 (linear numbering: P00..P07 = 0..7,
++	 * P10..P17 = 8..15).
++	 */
++	display_vcc: regulator-display {
++		compatible = "regulator-fixed";
++		regulator-name = "display";
++		regulator-min-microvolt = <3300000>;
++		regulator-max-microvolt = <3300000>;
++		enable-active-high;
++		gpio = <&xl9555 7 GPIO_ACTIVE_HIGH>;
++		regulator-always-on;
++		regulator-boot-on;
++	};
+ };
+ 
+ &iomux {
