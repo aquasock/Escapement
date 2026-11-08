@@ -1,0 +1,279 @@
+// spi-probe.c - does SPI2 work at all on this watch?
+//
+// Written because the CO5300 panel is write-only: it never tells you whether
+// it received anything, so a driver can run every transaction "successfully"
+// against a panel that is not listening. Debugging eight register-level faults
+// with no feedback signal was the wrong way to work.
+//
+// The SX1262 LoRa radio on this board answers. It has a BUSY pin, a RESET pin,
+// and GetStatus returns a byte describing its chip mode. That gives three
+// independent pieces of evidence where the panel gives none:
+//
+//   1. BUSY moves after reset      -> the chip is powered and alive
+//   2. GetStatus returns non-0xFF  -> MISO works, so the bus is bidirectional
+//   3. the mode bits are plausible -> the whole transaction was framed right
+//
+// If this passes, the GPIO-matrix routing and the SPI2 register programming in
+// co5300.c are correct and the panel's problem is in its own protocol. If it
+// fails, the fault is in the bus and the panel was never the issue.
+//
+// Deliberately shares nothing with co5300.c: if both used the same helper, a
+// bug in the helper would hide from both.
+
+#include <linux/bitfield.h>
+#include <linux/delay.h>
+#include <linux/io.h>
+#include <linux/module.h>
+#include <linux/of.h>
+#include <linux/platform_device.h>
+
+#define DRIVER_NAME "spi-probe"
+
+// ---- panel bus is SPI2 at 0x60024000; this test uses the same peripheral ----
+#define SPI_CMD_REG      0x00
+#define SPI_USR          BIT(24)
+#define SPI_UPDATE       BIT(23)
+#define SPI_ADDR_REG     0x04
+#define SPI_CTRL_REG     0x08
+#define SPI_CLOCK_REG    0x0c
+#define SPI_USER_REG     0x10
+#define SPI_USER1_REG    0x14
+#define SPI_USER2_REG    0x18
+#define SPI_MS_DLEN_REG  0x1c
+#define SPI_W0_REG       0x98
+#define SPI_W8_REG       0xb8
+#define SPI_SLAVE_REG    0xe0
+#define SPI_SOFT_RESET   BIT(27)
+#define SPI_CLK_GATE_REG 0xe8
+
+#define SPI_USR_MOSI     BIT(27)
+#define SPI_USR_MISO     BIT(28)
+#define SPI_USR_ADDR     BIT(30)
+#define SPI_USR_COMMAND  BIT(31)
+#define SPI_CS_HOLD      BIT(6)
+
+#define SPI_USR_ADDR_BITLEN    GENMASK(31, 27)
+#define SPI_USR_COMMAND_VALUE  GENMASK(15, 0)
+#define SPI_USR_COMMAND_BITLEN GENMASK(31, 28)
+#define SPI_MS_DATA_BITLEN     GENMASK(17, 0)
+
+#define SPI_CLK_EN        BIT(0)
+#define SPI_MST_CLK_ACTIVE BIT(1)
+#define SPI_MST_CLK_SEL   BIT(2)
+
+// ---- GPIO matrix and IO_MUX ----
+#define GPIO_OUT_SEL(n)  (0x554 + (n) * 4)
+#define GPIO_IN_SEL(m)   (0x154 + (m) * 4)
+#define GPIO_IN_REG      0x3c
+#define GPIO_OUT_W1TS    (0x08)
+#define GPIO_OUT_W1TC    (0x0c)
+#define GPIO_ENABLE_W1TS (0x24)
+#define GPIO_ENABLE_W1TC (0x28)
+
+#define RDY_VAL          BIT(9)        // FUN_IE
+#define MCU_SEL_GPIO     (1 << 12)     // bits 14:12
+#define DRV_20MA         (2 << 10)     // bits 11:10
+
+#define FSPICLK_OUT_IDX  101
+#define FSPIQ_IN_IDX     102
+#define FSPIQ_OUT_IDX    102
+#define FSPID_OUT_IDX    103
+
+// ---- SX1262 ----
+#define PIN_SCK   35
+#define PIN_MOSI  34
+#define PIN_MISO  33
+#define PIN_CS    36
+#define PIN_RST   47
+#define PIN_BUSY  48
+
+#define SX126X_GET_STATUS 0xC0
+#define SX126X_SET_STDBY_RC 0x80
+
+static int io_mux_off(int pin)
+{
+	// Pins 39..45 are the JTAG/flash pads and are not at n*4. Pins 46..48
+	// likewise. Values from io_mux_reg.h.
+	switch (pin) {
+	case 33: return 0x88;
+	case 34: return 0x8c;
+	case 35: return 0x90;
+	case 47: return 0xc0;
+	case 48: return 0xc4;
+	default: return pin * 4;
+	}
+}
+
+struct probe {
+	void __iomem *spi;
+	void __iomem *gpio;
+	void __iomem *iomux;
+};
+
+static inline void sw(struct probe *p, int off, u32 v) { iowrite32(v, p->spi + off); }
+static inline u32 sr(struct probe *p, int off) { return ioread32(p->spi + off); }
+
+static void pin_out(struct probe *p, int pin, int sig)
+{
+	iowrite32(MCU_SEL_GPIO | DRV_20MA, p->iomux + io_mux_off(pin));
+	iowrite32(sig, p->gpio + GPIO_OUT_SEL(pin));
+	iowrite32(BIT(pin), p->gpio + GPIO_ENABLE_W1TS);
+}
+
+static void pin_gpio_out(struct probe *p, int pin)
+{
+	iowrite32(MCU_SEL_GPIO | DRV_20MA, p->iomux + io_mux_off(pin));
+	iowrite32(BIT(pin), p->gpio + GPIO_ENABLE_W1TS);
+}
+
+static void pin_gpio_in(struct probe *p, int pin)
+{
+	iowrite32(MCU_SEL_GPIO | RDY_VAL, p->iomux + io_mux_off(pin));
+	iowrite32(BIT(pin), p->gpio + GPIO_ENABLE_W1TC);
+}
+
+static void set_pin(struct probe *p, int pin, int v)
+{
+	iowrite32(BIT(pin), p->gpio + (v ? GPIO_OUT_W1TS : GPIO_OUT_W1TC));
+}
+
+static int get_pin(struct probe *p, int pin)
+{
+	return !!(ioread32(p->gpio + GPIO_IN_REG) & BIT(pin));
+}
+
+static void run(struct probe *p)
+{
+	int g;
+
+	sw(p, SPI_CMD_REG, SPI_UPDATE);
+	for (g = 0; g < 20000 && (sr(p, SPI_CMD_REG) & SPI_UPDATE); g++)
+		cpu_relax();
+	sw(p, SPI_CMD_REG, SPI_USR);
+	for (g = 0; g < 20000 && (sr(p, SPI_CMD_REG) & SPI_USR); g++)
+		cpu_relax();
+	if (g >= 20000)
+		pr_err("spi-probe: transaction never completed\n");
+}
+
+// SX1262 single-byte command with one dummy byte, returning the reply.
+static u8 sx_xfer(struct probe *p, u8 op)
+{
+	u32 bus = 40000000;	// XTAL, close enough for 1 MHz
+	u32 n = 40;
+
+	// 1 MHz: PL022-style divider is not right here; the peripheral derives
+	// SCLK from APB. Keep it slow -- this is a liveness test, not a
+	// performance one.
+	sw(p, SPI_CLOCK_REG, FIELD_PREP(GENMASK(5, 0), n - 1) |
+			     FIELD_PREP(GENMASK(11, 6), (n - 1) / 2) |
+			     FIELD_PREP(GENMASK(17, 12), n - 1));
+
+	sw(p, SPI_USER2_REG, FIELD_PREP(SPI_USR_COMMAND_VALUE, op) |
+			     FIELD_PREP(SPI_USR_COMMAND_BITLEN, 7));
+	sw(p, SPI_USER1_REG, 0);
+	sw(p, SPI_CTRL_REG, 0x00340000);
+	sw(p, SPI_USER_REG, SPI_USR_COMMAND | SPI_USR_MOSI | SPI_USR_MISO |
+			    SPI_CS_HOLD);
+	sw(p, SPI_MS_DLEN_REG, FIELD_PREP(SPI_MS_DATA_BITLEN, 7));
+	sw(p, SPI_W0_REG, 0x00);
+
+	run(p);
+	(void)bus;
+	return sr(p, SPI_W0_REG) & 0xFF;
+}
+
+static int spi_probe_probe(struct platform_device *pdev)
+{
+	struct device *dev = &pdev->dev;
+	struct probe *p;
+	int busy_hi = 0, busy_lo = 0, i;
+	u8 st;
+
+	p = devm_kzalloc(dev, sizeof(*p), GFP_KERNEL);
+	if (!p)
+		return -ENOMEM;
+	platform_set_drvdata(pdev, p);
+
+	p->spi = devm_ioremap(dev, 0x60024000, 0x100);
+	p->gpio = devm_ioremap(dev, 0x60004000, 0x800);
+	p->iomux = devm_ioremap(dev, 0x60009000, 0x200);
+	if (!p->spi || !p->gpio || !p->iomux)
+		return -ENOMEM;
+
+	// Route the shared bus: SCK 35, MOSI 34, MISO 33.
+	pin_out(p, PIN_SCK, FSPICLK_OUT_IDX);
+	pin_out(p, PIN_MOSI, FSPID_OUT_IDX);
+	pin_out(p, PIN_MISO, FSPIQ_OUT_IDX);
+	iowrite32(PIN_MISO, p->gpio + GPIO_IN_SEL(FSPIQ_IN_IDX));
+
+	// Control lines.
+	pin_gpio_out(p, PIN_CS);
+	pin_gpio_out(p, PIN_RST);
+	pin_gpio_in(p, PIN_BUSY);
+
+	set_pin(p, PIN_CS, 1);		// CS idle high
+
+	// Peripheral bring-up.
+	sw(p, SPI_CLK_GATE_REG, SPI_CLK_EN | SPI_MST_CLK_ACTIVE | SPI_MST_CLK_SEL);
+	sw(p, SPI_SLAVE_REG, SPI_SOFT_RESET);
+	sw(p, SPI_SLAVE_REG, 0);
+
+	pr_info("spi-probe: BUSY before reset = %d (expect 0 or 1, then it moves)\n",
+		get_pin(p, PIN_BUSY));
+
+	// Reset the radio: SX1262 wants NRESET low for ~100 us, then high.
+	set_pin(p, PIN_RST, 0);
+	udelay(200);
+	set_pin(p, PIN_RST, 1);
+	msleep(20);
+
+	// Sample BUSY for a while. It goes high while the chip boots and drops
+	// when it is ready -- that transition is proof the part is powered and
+	// running, independent of SPI.
+	for (i = 0; i < 200; i++) {
+		if (get_pin(p, PIN_BUSY))
+			busy_hi++;
+		else
+			busy_lo++;
+		udelay(200);
+	}
+	pr_info("spi-probe: BUSY samples after reset: high=%d low=%d  -> %s\n",
+		busy_hi, busy_lo,
+		(busy_hi && busy_lo) ? "CHIP ALIVE (busy toggled)" :
+		busy_lo ? "stuck low" : "stuck high");
+
+	set_pin(p, PIN_CS, 0);
+	st = sx_xfer(p, SX126X_GET_STATUS);
+	set_pin(p, PIN_CS, 1);
+
+	pr_info("spi-probe: GetStatus returned 0x%02X  mode=%u  -> %s\n",
+		st, (st >> 4) & 0x07,
+		(st == 0x00 || st == 0xFF) ? "NO RESPONSE (MISO dead or no module)"
+					   : "SPI BIDIRECTIONAL");
+
+	set_pin(p, PIN_CS, 0);
+	st = sx_xfer(p, SX126X_GET_STATUS);
+	set_pin(p, PIN_CS, 1);
+	pr_info("spi-probe: second read 0x%02X (a repeat confirms it is not noise)\n", st);
+
+	return 0;
+}
+
+static void spi_probe_remove(struct platform_device *pdev) { }
+
+static const struct of_device_id spi_probe_of[] = {
+	{ .compatible = "escapement,spi-probe" },
+	{ }
+};
+MODULE_DEVICE_TABLE(of, spi_probe_of);
+
+static struct platform_driver spi_probe_driver = {
+	.probe = spi_probe_probe,
+	.remove = spi_probe_remove,
+	.driver = { .name = DRIVER_NAME, .of_match_table = spi_probe_of },
+};
+module_platform_driver(spi_probe_driver);
+
+MODULE_DESCRIPTION("SPI liveness probe against the T-Watch Ultra's SX1262");
+MODULE_LICENSE("GPL");
