@@ -122,3 +122,58 @@ worthless.
 The simplest external check, if a wire is ever convenient: bridge GPIO34 (MOSI)
 to GPIO33 (MISO) and run the loopback again. That removes the pad-driving
 question from the equation entirely, because the pad is then only ever an input.
+
+---
+
+## spi-mem implemented end to end — six more bugs, still dark
+
+Added `exec_op` to `spi-esp32` and rewrote `co5300` as a `spi_mem_driver`. The
+transaction shape now matches LilyGo's exactly, confirmed in the trace:
+
+```
+esp32_spi 60025000.spi: exec_op reached:
+    cmd 0x02 b/w 4, addr b/w 4, data b/w 1 len 1
+```
+
+Six more real bugs found, all of which had to be fixed to get that far:
+
+1. **Stack buffers are rejected by spi_mem.** `spi_mem_check_op` refuses any
+   buffer that lives on the stack (it must be DMA-able). My window and init
+   payloads were locals, so every one returned `-EINVAL`. They are heap or
+   static now.
+
+2. **`spi->mode = SPI_MODE_0` wiped the quad bits.** `spi_check_buswidth_req`
+   reads `mem->spi->mode`, which carries `SPI_TX_QUAD` from the DT's
+   `spi-tx-bus-width`. Assigning the mode outright cleared them and every
+   multi-lane phase was refused with `-EOPNOTSUPP`.
+
+3. **`cs-gpios` silently disables the native path.**
+   `spi_mem_exec_op` only calls the controller's `exec_op` when the device has
+   no CS GPIO; otherwise it falls back to emulated `spi_transfer`, which
+   `esp32-spi` forces to single-bit. Renamed the property to
+   `lilygo,cs-gpios` so the driver holds CS itself, exactly as LilyGo's
+   `spics_io_num = -1` does.
+
+4. **Init commands bypassed spi-mem entirely.** `co5300_cmd` still called the
+   old `spi_write` path, which sends `0x02` plus the address as *data*. The
+   exec_op trace proved it: the first op to arrive was the 0x32 RAMWR, not the
+   init table's 0xFE.
+
+5. **A NULL dereference crashed the boot.** The scratch buffer was allocated
+   after `init_panel()` used it.
+
+6. **Missing defines in `spi-esp32`.** No `SPI_ADDR_REG`, no
+   `USR_ADDR_BITLEN`/`USR_COMMAND_*` fields, no `FCMD_QUAD`/`FADDR_QUAD` — the
+   driver had no command or address phase support at all.
+
+## Where it ends tonight
+
+With all six fixed the correct transaction is issued and the panel still does
+not scan (TE = 0), and the last build panics during init (`exitcode=0x9`), so
+the watch is restored to the pre-display kernel and is working normally.
+
+The remaining unknown is inside `esp32_spi_exec_op` itself: it is newly written
+and has never been validated against a device that answers. The next step is
+not to guess again — it is to exercise `exec_op` against the **SD card**
+(`mmc_spi`, CS 21) or the SX1262, where a reply is observable, before pointing
+it at the write-only panel.
