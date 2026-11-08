@@ -1,0 +1,75 @@
+From: Escapement
+Subject: [PATCH] dts: add the AXP2101 PMU, with its battery and USB supplies
+
+The watch's PMU is an X-Powers AXP2101 at I2C 0x34. It is not an AXP20x the
+kernel already knows: `drivers/mfd/axp20x-i2c.c` lists axp152/192/202/209/221/
+223/313a/323/717/803/806/15060 and nothing else, and mainline has no axp2101
+either. patches/kernel/axp2101/ carries the pending "Add support for the
+X-Powers AXP2101 PMIC" series (Olivier Louvignes, 2026-10-23) that adds the
+variant; this patch gives it something to bind to.
+
+Confirmed on the hardware first, with the BusyBox i2c tools over the bus that
+patches/kernel/0001 fixed:
+
+    0x03 = 0x4a      chip ID: AXP2101
+    0x34/0x35        battery voltage, 4181 mV
+    0xa4 = 0x64      fuel gauge, 100 %
+
+The two child nodes are what userspace sees; without them the PMIC binds but
+exposes no supplies:
+
+    /sys/class/power_supply/axp20x-battery
+    /sys/class/power_supply/axp20x-usb
+
+## No interrupt node, deliberately
+
+The first version wired the PMIC's IRQ line (GPIO7) as
+`interrupts = <7 IRQ_TYPE_LEVEL_LOW>`. It hung the boot: the log stopped at
+"AXP20x variant AXP2101 found" and never reached init, and the console went
+silent with the CPU sitting in platform_idle between storms.
+
+The cause is a level-triggered interrupt on a pin that nothing pulls up. The
+pinctrl block configures pull-ups for the I2C pins (3 and 2) and nothing else,
+so GPIO7 floats; a floating line read as asserted re-fires forever, and that
+storm is what starved both the console and the bit-banged I2C bus -- the same
+run also produced `i2c-0: sendbytes: NAK bailout` and a failed RTC probe.
+
+Dropping the interrupt makes everything work:
+
+    axp20x-i2c 0-0034: AXP20X variant AXP2101 found
+    axp20x-i2c 0-0034: AXP20X driver loaded
+    axp20x-regulator axp20x-regulator.0: regulators node not found
+
+Polling is sufficient for battery and charge state, which is what userspace
+reads from sysfs anyway. Re-adding the IRQ needs the pin pulled up first, and
+is only worth doing for wake-from-sleep.
+
+`regulators node not found` is expected: no regulators node is supplied, so the
+regulator driver unloads and the PMU provides only the two supplies.
+--- a/arch/xtensa/boot/dts/esp32s3-devkit-c1.dts
++++ b/arch/xtensa/boot/dts/esp32s3-devkit-c1.dts
+@@ -33,6 +33,24 @@
+ 			interrupts = <1 IRQ_TYPE_EDGE_FALLING>;
+ 			wakeup-source;
+ 		};
++
++		/* X-Powers AXP2101 PMU: battery, charging, and the power rails.
++		 * Its IRQ line is GPIO7 on this board. The two power-supply
++		 * children are what userspace sees as
++		 * /sys/class/power_supply/{axp20x-battery,axp20x-usb}.
++		 */
++		pmic@34 {
++			compatible = "x-powers,axp2101";
++			reg = <0x34>;
++
++			battery {
++				compatible = "x-powers,axp2101-battery-power-supply";
++			};
++
++			usb_power: usb-power {
++				compatible = "x-powers,axp2101-usb-power-supply";
++			};
++		};
+ 	};
+ };
+ 

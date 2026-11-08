@@ -201,6 +201,10 @@ cores.
   port's architecture is core 0 drawing and handing finished framebuffers over
   the shared-memory channel that already carries wifi frames.
 - **No input.** `CONFIG_INPUT` is off in the kernel config.
+- **The PMU's interrupt is not wired.** The AXP2101 binds at 0x34 and loads, but
+  with `interrupts = <7 LEVEL_LOW>` the boot hung — a level-triggered IRQ on a
+  pin nothing pulls up storms forever. No IRQ means polling, which is fine for
+  battery state and useless for wake-from-sleep.
 - **The RTC's stored time is UTC+8.** The chip counts correctly but the factory
   set it to China Standard Time. It is exactly 8 h ahead of true UTC, so it
   needs one `hwclock --set` to correct. Not a driver fault.
