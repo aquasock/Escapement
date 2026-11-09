@@ -66,6 +66,18 @@ right slots  x 365 .. 409
 above and 9 below. **All fourteen slots are 100 % unclipped** — checked cell by
 cell against the chamfer inequalities above.
 
+### The strip is wider than the slot grid
+
+The slot grid is rows 97..411, but the strip itself runs from row **89** (the
+first row where both sides are full width) down to row **444**, where fb0 ends.
+That margin is real and has to be painted: a strip background written only
+across the slots leaves unpainted bands above slot 0 and below slot 6, which is
+visibly wrong and was mistaken for a driver fault during implementation.
+
+So each strip is painted in two layers — a background over the whole extent
+`x 0..44` or `x 365..409`, `y 89..444`, then tile art over the 45x45 slots on
+top. That also gives apps a place to put something that is not a tile.
+
 Slots tile edge to edge with no gutter. Icon artwork carries its own padding,
 which is the usual convention and avoids a background sliver between tiles.
 

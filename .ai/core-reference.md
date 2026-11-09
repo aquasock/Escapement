@@ -130,6 +130,8 @@ Topic IDs are the `record_id` prefix. An entry reserves a name; it does not clai
 | Why are taps at the top of a bar ignored? | TCH | TCH-004 |
 | Can userspace draw on /dev/fb0? | LCD | LCD-001 |
 | Why does a thin fill draw nothing while a thick one works? | LCD | LCD-002 |
+| Does a 45x45 window draw, or is it too narrow? | LCD | LCD-008 |
+| Why did a white test pattern come out pink? | LCD | LCD-008 |
 | Why does a coloured fill report success and change nothing? | LCD | LCD-003 |
 | Why is one pixel missing from the left and top edges? | LCD | LCD-004 |
 | How fast can a frame be pushed to the panel? | LCD | LCD-005 |
@@ -184,6 +186,7 @@ LCD-004: "One pixel is lost at the left and top edges of the visible glass and n
 LCD-005: "A 320x400 RGB565 frame costs about 190 ms in SPI transfers, roughly 19 ms per 40-row band; frame rate is bounded by the display path, not the CPU, giving about 5 fps practical ceiling"
 LCD-006: "A whole frame cannot be a single transfer: spi-mem refuses a data-only op with no command, and the controller treats a CS edge as end-of-burst"
 LCD-007: "The glass is 410x502 with 45-degree chamfers; the largest unclipped rectangle is 320x412 and fb0 is 320x400 at (45,45), leaving a 57-row strip below it that the touch buttons are painted into"
+LCD-008: "45x45 windows are honoured, so the edge API needs no full-width fallback; and in RGB565 green is a 6-bit field, so RGB565(31,31,31) is pink (0xFBFF) and white needs 63 (0xFFFF)"
 TCH-001: "The touch controller is a CST9217 at I2C 0x1A (register 0x0000 reads 0xCA, the family checkcode); 0x5A is the DRV2605 haptic driver, whose register 0x00 reads 0xE0 (DEVICE_ID bits), and only 0x1A completes the CST92xx unlock handshake"
 TCH-002: "A reset CST9217 is in command mode and reports nothing: write 0xD1=0x01, then 0xD1=0x1E twice, require byte 1 of a read of 0x0002 to be 0x1E, then write 0xD1=0x09 for normal mode"
 TCH-003: "Report block at 0xD000 is 15 bytes and the transfer must be all 15 even though only 7 are decoded; byte 0 = 0x06 for a down event and 0xAB means no new report; x=(b1<<4)|(b3>>4), y=(b2<<4)|(b3&0x0F); a short read leaves the ack mid-block so a held touch freezes"
@@ -466,6 +469,20 @@ EXT-001: "The SPLB32 Tamagotchi core runs at 4.05x realtime headless on this boa
     - "userspace/tbtns.c: the y_strip default and the note explaining the five-row gap"
     - "TinyPetz firmware/bringup/main/touch.c: TOUCH_CAL_YS and the stated fit residual"
   verification: "Measured on hardware: in a ten-tap run with the threshold at 445, two taps produced no press and their decoded values were ctrl_y 442 and 443 while both x values were solidly inside a band. Re-running with the threshold at 440, the same blind spot did not recur."
+
+- record_id: LCD-008
+  kind: DISPLAY
+  topic_id: LCD
+  title: "A 45x45 window is honoured, and an RGB565 colour needs 63 in the green field to be white"
+  status: VERIFIED
+  verified_date: 2026-11-09
+  statement: "LCD-002 established that a window one pixel wide or tall draws nothing while a 432x31 strip draws, leaving the threshold between those unmeasured. It is now measured at the useful end: 45x45 windows draw correctly, and so do 45x315, 410x45 and 410x57. Separately, in RGB565 the red and blue fields are 5 bits (0-31) but green is 6 bits (0-63), so RGB565(31, 31, 31) is full red, HALF green and full blue -- which is pink, not white. 0xFBFF, not 0xFFFF."
+  consequence: "The narrow-window limit does not bite the edge API: 45 px tiles are fine, so the full-width band fallback in docs/panel-api.md is not needed and the reserved regions can be written directly. The colour trap is the dangerous one, because it produces a plausible-looking wrong answer rather than a failure. A test pattern built with RGB565(31, 31, 31) for its white markers drew pink, and that was read as a driver fault on the glass before the arithmetic was checked -- the API was correct throughout. Any colour constant in a drawing test must be checked against the field widths before the result means anything."
+  sources:
+    - "userspace/panel-test.c: the WHITE/BLACK/RED/GREEN/BLUE constants and the note on why green needs 63"
+    - "patches/kernel/display/final/co5300.c: CO5300_IOC_WRITE_RECT, which is what was exercised"
+    - "LCD-002 for the degenerate-window result this extends"
+  verification: "Verified on the glass, which is the only admissible evidence for this panel. Solid primaries drawn one per region read back as red on the left, green on the right and blue at the bottom, with the top strip white only after the green field was corrected to 63 -- it read pink before. Tile, tall-strip and full-width rectangles all drew at the coordinates requested, with fb0 untouched."
 
 - record_id: PMU-001
   kind: PMU

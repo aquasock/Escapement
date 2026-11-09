@@ -180,13 +180,21 @@ Deliberately out of scope, so the primitive stays one primitive:
 
 ## Implementation risk, stated plainly
 
-**The 45x45 window shape is untested.** `LCD-002` established that a 1 px window
-draws nothing while a 432x31 strip draws. Nothing has yet established where
-between those two the limit lies. A 45x45 tile is far from degenerate, so it is
-expected to work, but "expected" is not evidence and the panel is write-only, so
-only looking at the glass settles it.
+**Resolved: 45x45 windows are honoured.** This section originally said the shape
+was untested, because `LCD-002` only established that a 1 px window draws
+nothing while a 432x31 strip draws. Implementation measured it: 45x45, 45x315,
+410x45 and 410x57 all draw correctly, verified on the glass. The full-width band
+fallback below is therefore not needed, and the reserved regions can be written
+directly. It is kept documented because it remains the answer if a future panel
+revision behaves differently.
 
-Two fallbacks if narrow windows misbehave, in order of preference:
+The reverse risk did materialise, in the test tool rather than the driver: a
+pattern whose "white" markers were `RGB565(31, 31, 31)` drew pink, because green
+is a 6-bit field and 31 is half brightness. That was read as a driver fault on
+the glass before the arithmetic was checked. Any colour constant in a drawing
+test must be checked against the field widths first (`LCD-008`).
+
+Fallbacks if narrow windows ever misbehave, in order of preference:
 
 1. **Full-width band composition.** Build the band in RAM from `p->fb` plus the
    tile, so every transfer is the 432-wide shape that is already proven. Costs

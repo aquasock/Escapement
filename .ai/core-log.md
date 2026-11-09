@@ -192,3 +192,42 @@ Implementation begins with the mutex and the two ioctls in `co5300.c`, which cha
 - User Test: N/A
 
 ---
+
+## 7 COMMIT Unreleased 2026-11-09T14:06:40-07:00
+
+#### Coming From:
+
+Unreleased 0d25388
+
+#### Purpose:
+
+Implement the panel API decided in docs/panel-api.md and prove on the glass that it draws where it says.
+
+#### Outcome:
+
+`co5300.c` now carries the mutex and the two ioctls from the specification, and the four reserved regions were painted and read back on the hardware. The panel mutex is taken at all five entry points -- fillrect, copyarea, imageblit, write and the ioctl -- so fbcon and userspace cannot interleave a window setup with another window's pixel stream, and the ioctl deliberately does not take console_lock to avoid inverting the fbcon lock order. `CO5300_IOC_GET_GEOM` answers from the running kernel with `panel 410x502, fb0 320x400 at (45,45), offset 22, abi 1`, so no userspace program has to hardcode geometry, and it doubles as a feature test because an older kernel returns ENOTTY. `CO5300_IOC_WRITE_RECT` takes panel coordinates and host-order RGB565 and byte-swaps in the driver. The argument validation was moved out into `co5300_rect.h` so it can be exercised on the build host, and `scripts/co5300-selftest.py` now drives 43 cases -- legal tiles and strips, degenerate sizes, reserved and flags misuse, a stride smaller than the width, out-of-panel bounds, and the fb0 overlap guard including the exact boundary rows and columns -- with all 14 side slots confirmed accepted; `build-kernel.sh` runs it as a build gate. The chief risk carried into this cycle was resolved in the useful direction: 45x45 windows are honoured, as are 45x315, 410x45 and 410x57, so the full-width band fallback in the spec is not needed. One defect in this cycle was the diagnostic rather than the driver, and it is worth recording because it produced a confident wrong answer: the test pattern's white markers were written as `RGB565(31, 31, 31)`, and in RGB565 green is a 6-bit field, so 31 is half brightness and the result is `0xFBFF` -- pink. The user reported all four edges pink and a pink sliver under the green bar, which read as a pixel-path fault; the arithmetic showed the API had been correct throughout and the tool had never drawn white. Colours are now named constants with a comment on the field widths, and a solid-primary mode exists so a region's colour can be read without interpreting stripes. A second defect was genuine but is in the test harness, not the driver: `panel-test -R` and `-1` segfaulted intermittently, roughly half of runs, with no output and no kernel oops in dmesg. It was bisected against rect size -- 45x45, 45x315, 410x45, 410x57 each ran 10 to 15 times with no failure, and the crashing modes then ran 24 consecutive times with no failure on the current build -- so it could not be reproduced and its cause is not established. It is recorded as an open, unreproduced fault rather than closed. The paint path itself is proven: the four regions land at the coordinates asked with fb0 untouched. Two operational facts surfaced. The esp-hosted link dropped mid-cycle with `process_rx_buf: bad if_type 6` and would not recover by restarting networking -- `ping` to its own gateway failed with the interface still addressed -- and only a reboot restored it; `scripts/watch-deploy.sh` gained a USB transport for exactly that case, sending chunked base64 over the console, because netcat is not available on that channel at all. The build was flashed to 0x140000 after a full 16 MiB backup, and the kernel booted with the console, PMU and RTC intact. The core-syntax audit passed: the `.ai/` diff was inspected, `.ai/core.md` was not modified, entry 7 was validated against the template with six sections in canonical order, sequential numbering from 6, an ISO-8601 timestamp carrying the America/Phoenix offset, prose-only Outcome and Next Steps, eligible Files Modified, and Status values within the allowed set.
+
+#### Next Steps:
+
+The API is implemented and proven, so the consumers can be built. The next cycle is the top-bar status daemon: read `/sys/class/power_supply` and the WiFi state and draw into the five fully usable cells with `CO5300_IOC_WRITE_RECT`, which needs no further kernel work. Two facts must be respected from that work: each strip is painted in two layers, a background over rows 89..444 and tile art over the 45x45 slots, or unpainted margins appear; and every colour constant must be checked against RGB565's field widths before a test result means anything. The intermittent segfault in `panel-test` is still open and unreproduced and should be chased before the harness is trusted for anything subtle. The esp-hosted `process_rx_buf: bad if_type 6` fault is now clearly worth its own cycle rather than being a nuisance: it drops the network hard enough that only a reboot recovers it, which costs a deploy channel mid-work. BLE media keys, firmware-side bond persistence and any wake-from-sleep path remain deferred by user decision.
+
+#### Files Modified:
+
+- patches/kernel/display/final/co5300.c
+- patches/kernel/display/final/co5300_rect.h
+- userspace/panel-test.c
+- scripts/co5300-selftest.py
+- scripts/build-kernel.sh
+- scripts/build-userspace.sh
+- scripts/watch-deploy.sh
+- docs/panel-api.md
+- docs/panel-reservations.md
+- .gitignore
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: PASS
+
+---

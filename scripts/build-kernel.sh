@@ -123,6 +123,9 @@ cp "$here"/patches/kernel/axp2101/final/axp20x.h \
 
 cp "$here"/patches/kernel/display/final/spi-esp32.c "$K/drivers/spi/spi-esp32.c"
 cp "$here"/patches/kernel/display/final/co5300.c "$K/drivers/video/fbdev/co5300.c"
+# The panel API's structs and bounds check, shared with scripts/co5300-selftest.py.
+cp "$here"/patches/kernel/display/final/co5300_rect.h \
+   "$K/drivers/video/fbdev/co5300_rect.h"
 cp "$here"/patches/kernel/display/final/esp32s3-devkit-c1.dts \
    "$K/arch/xtensa/boot/dts/esp32s3-devkit-c1.dts"
 
@@ -187,6 +190,12 @@ grep -q '^CONFIG_XTENSA_NOMMU_FORK=y' .config || die "fork backend not enabled"
 grep -q '^CONFIG_LOCALVERSION="-forkbank"' .config || die "LOCALVERSION not set"
 grep -q '^CONFIG_VECTORS_ADDR=0x40380000' .config || die "CONFIG_VECTORS_ADDR moved"
 grep -q '^CONFIG_RTC_DRV_PCF85063=y' .config || die "RTC driver missing"
+
+# The panel API's argument validation is pure arithmetic and lives in
+# co5300_rect.h so it can be exercised here rather than discovered on the glass.
+# A rejected rect is a caller bug; a silently accepted one that lands on the
+# console is worse.
+python3 "$here/scripts/co5300-selftest.py" || die "panel rect validation failed"
 
 size=$(stat -c %s arch/xtensa/boot/xipImage)
 [ "$size" -le $((0x400000)) ] || die "xipImage $size exceeds the 4 MiB linux partition"

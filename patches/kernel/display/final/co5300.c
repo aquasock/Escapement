@@ -28,6 +28,7 @@
 #include <linux/delay.h>
 #include <linux/fb.h>
 #include <linux/gpio/consumer.h>
+#include <linux/mutex.h>
 #include <linux/property.h>
 #include <linux/module.h>
 #include <linux/of.h>
@@ -38,6 +39,28 @@
 #include <linux/uaccess.h>
 
 #define DRIVER_NAME "co5300"
+
+/*
+ * Panel API: writing rectangles into the strips around fb0.
+ *
+ * Decided and specified in docs/panel-api.md; this is the implementation.
+ *
+ * The shape of the decision, and why it is an ioctl on /dev/fb0 rather than a
+ * new device node: fb0 already exists and is already openable by the programs
+ * that need this. A new node would need an mdev rule, and mdev rules are exactly
+ * the /etc state a full-image flash destroys (FLS-003) -- it would have to be
+ * recreated by hand after every reflash. The fbdev core forwards unrecognised
+ * ioctls here, so no core change is needed.
+ */
+#include <linux/ioctl.h>
+#include "co5300_rect.h"
+
+/* The rect structs and the bounds check live in co5300_rect.h so the
+ * arithmetic can be tested on a build host; see scripts/co5300-selftest.py. */
+#define CO5300_IOC_WRITE_RECT \
+	_IOW(CO5300_IOC_MAGIC, 1, struct co5300_rect)
+#define CO5300_IOC_GET_GEOM \
+	_IOR(CO5300_IOC_MAGIC, 2, struct co5300_geom)
 
 #define PANEL_W 410
 #define PANEL_H 502
@@ -89,6 +112,17 @@ struct co5300 {
 	struct fb_info *info;
 	u16 *fb;
 	size_t fb_bytes;
+
+	/*
+	 * Serialises every panel operation. The panel has no memory of its own and
+	 * takes no commands out of order: two concurrent callers would interleave
+	 * one window setup with another's pixel stream. fbcon serialises itself
+	 * with console_lock, but that does not exclude a userspace ioctl, so this
+	 * is what serialises fbcon against userspace. Taken at the entry points
+	 * (the four fbcon ops and the ioctl) rather than inside the blit helpers,
+	 * so a multi-band operation is one critical section.
+	 */
+	struct mutex lock;
 
 	u16 *tx;
 	size_t tx_len;
@@ -395,6 +429,54 @@ static void co5300_blit(struct co5300 *p, int x0, int y0, int x1, int y1)
 		pr_err("co5300: pixel stream %zu bytes -> %d\n", npix * 2, rc);
 }
 
+/*
+ * Send one band of pixels that are already in p->tx, in PANEL coordinates.
+ *
+ * This is the transfer half of the panel API, factored out so the caller owns
+ * the decision of what goes in the buffer. It is the same window, RAMWR and
+ * single-op stream as co5300_blit(), with panel coordinates instead of fb0
+ * coordinates -- nothing here is offset by FB_X/FB_Y, and PANEL_OFFSET_X is
+ * added because the controller's RAM starts 22 columns left of the visible
+ * glass.
+ *
+ * The caller must have byte-swapped the pixels: the panel takes the low byte
+ * first and the peripheral shifts the high byte out first (LCD-003).
+ */
+static int co5300_send_band(struct co5300 *p, int x0, int y0, int x1, int y1)
+{
+	u8 *win = p->small;
+	size_t npix = (size_t)(x1 - x0 + 1) * (size_t)(y1 - y0 + 1);
+	int rc;
+
+	if (!p->tx || npix * 2 > p->tx_len)
+		return -ENOMEM;
+
+	win[0] = (x0 + PANEL_OFFSET_X) >> 8;
+	win[1] = (x0 + PANEL_OFFSET_X) & 0xFF;
+	win[2] = (x1 + PANEL_OFFSET_X) >> 8;
+	win[3] = (x1 + PANEL_OFFSET_X) & 0xFF;
+	co5300_cmd(p, 0x2A, win, 4);
+
+	win[0] = y0 >> 8; win[1] = y0 & 0xFF;
+	win[2] = y1 >> 8; win[3] = y1 & 0xFF;
+	co5300_cmd(p, 0x2B, win, 4);
+
+	co5300_op(p, 0x02, 0x002C00, NULL, 0, 1);
+
+	if (p->cs)
+		gpiod_set_value_cansleep(p->cs, 1);
+
+	rc = co5300_xfer(p, 0x32, 1, 0x002C00, 1, p->tx, npix * 2, 4);
+
+	if (p->cs)
+		gpiod_set_value_cansleep(p->cs, 0);
+
+	if (rc)
+		pr_err("co5300: rect %zu bytes -> %d\n", npix * 2, rc);
+
+	return rc;
+}
+
 
 // ---- panel-space drawing ---------------------------------------------------
 
@@ -643,30 +725,40 @@ static void co5300_flush(struct fb_info *info, const struct fb_fillrect *r)
 
 static void co5300_fillrect(struct fb_info *info, const struct fb_fillrect *rect)
 {
+	struct co5300 *p = info->par;
+
+	mutex_lock(&p->lock);
 	cfb_fillrect(info, rect);
 	co5300_flush(info, rect);
+	mutex_unlock(&p->lock);
 }
 
 static void co5300_copyarea(struct fb_info *info, const struct fb_copyarea *area)
 {
+	struct co5300 *p = info->par;
 	struct fb_fillrect r = {
 		.dx = area->dx, .dy = area->dy,
 		.width = area->width, .height = area->height,
 	};
 
+	mutex_lock(&p->lock);
 	cfb_copyarea(info, area);
 	co5300_flush(info, &r);
+	mutex_unlock(&p->lock);
 }
 
 static void co5300_imageblit(struct fb_info *info, const struct fb_image *image)
 {
+	struct co5300 *p = info->par;
 	struct fb_fillrect r = {
 		.dx = image->dx, .dy = image->dy,
 		.width = image->width, .height = image->height,
 	};
 
+	mutex_lock(&p->lock);
 	cfb_imageblit(info, image);
 	co5300_flush(info, &r);
+	mutex_unlock(&p->lock);
 }
 
 /*
@@ -752,9 +844,150 @@ static ssize_t co5300_write(struct fb_info *info, const char __user *buf,
 	if (y1 > FB_H - 1)
 		y1 = FB_H - 1;
 
+	mutex_lock(&p->lock);
 	co5300_blit(p, 0, (int)y0, FB_W - 1, (int)y1);
+	mutex_unlock(&p->lock);
 
 	return count;
+}
+
+/*
+ * CO5300_IOC_WRITE_RECT - put an RGB565 rectangle from userspace onto the glass
+ * in panel coordinates, outside fb0.
+ *
+ * The overlap test against fb0 is not a politeness check. It is the mechanism
+ * behind "edge updates never disturb the console": a userspace bug must not be
+ * able to paint over the console, and this is four comparisons in the driver
+ * rather than a convention that every future caller has to remember.
+ *
+ * Rects larger than the transmit buffer are split into row bands, each band a
+ * complete window and a complete transfer, which is the same shape
+ * co5300_paint_frame() uses and the only proven way to cover more than one
+ * buffer (LCD-006).
+ */
+static int co5300_do_write_rect(struct fb_info *info, struct co5300_rect __user *urect)
+{
+	struct co5300 *p = info->par;
+	struct co5300_rect r;
+	size_t stride, band, rows, done;
+	int rc = 0;
+
+	if (copy_from_user(&r, urect, sizeof(r)))
+		return -EFAULT;
+
+	/*
+	 * All argument validation lives in co5300_rect_check(), shared with the
+	 * host-side test. It covers degenerate size, non-zero reserved/flags, a
+	 * stride smaller than the width, out-of-panel bounds, and overlap with
+	 * fb0 -- the last being the mechanism that stops userspace painting over
+	 * the console.
+	 */
+	{
+		struct co5300_limits L = {
+			.panel_w = PANEL_W, .panel_h = PANEL_H,
+			.fb_x = FB_X, .fb_y = FB_Y,
+			.fb_w = FB_W, .fb_h = FB_H,
+		};
+		int v = co5300_rect_check(&r, &L);
+
+		if (v)
+			return v;
+	}
+
+	/*
+	 * max rows that fit the transmit buffer at this width. p->tx_len is a
+	 * whole frame, so a 45x45 tile or even a full-width bottom strip is one
+	 * band; the loop exists so a caller cannot ask for something that would
+	 * overrun it.
+	 */
+	band = p->tx_len / ((size_t)r.w * 2);
+	if (band < 1)
+		return -EINVAL;
+
+	for (done = 0; done < r.h; done += rows) {
+		size_t i;
+		u16 *src = (u16 __user *)(uintptr_t)r.pixels;
+
+		rows = r.h - done;
+		if (rows > band)
+			rows = band;
+
+		/*
+		 * Copy the band into the transmit buffer, byte-swapping each pixel
+		 * on the way in. The panel takes the low byte of each RGB565 pixel
+		 * first while the SPI peripheral shifts the high byte out first, so
+		 * an unswapped stream rotates every colour -- invisible for black,
+		 * wrong for everything else (LCD-003). Swapping here rather than
+		 * asking callers to pre-swap is what stops that bug recurring.
+		 *
+		 * Rows are read individually against `stride`, so a caller can hand
+		 * over a tile from a larger sprite sheet without repacking it.
+		 */
+		for (i = 0; i < rows; i++) {
+			const u16 __user *line = src + (done + i) * stride;
+			u16 *dst = p->tx + i * (size_t)r.w;
+			size_t k;
+
+			if (copy_from_user(dst, line,
+					   (size_t)r.w * sizeof(u16))) {
+				rc = -EFAULT;
+				goto out;
+			}
+			for (k = 0; k < r.w; k++)
+				dst[k] = swab16(dst[k]);
+		}
+
+		rc = co5300_send_band(p, (int)r.x, (int)r.y + (int)done,
+				      (int)r.x + (int)r.w - 1,
+				      (int)r.y + (int)done + (int)rows - 1);
+		if (rc)
+			goto out;
+	}
+
+out:
+	return rc;
+}
+
+static int co5300_ioctl(struct fb_info *info, unsigned int cmd, unsigned long arg)
+{
+	struct co5300 *p = info->par;
+	void __user *uarg = (void __user *)arg;
+	int rc;
+
+	switch (cmd) {
+	case CO5300_IOC_GET_GEOM: {
+		struct co5300_geom g;
+
+		memset(&g, 0, sizeof(g));
+		g.panel_w = PANEL_W;
+		g.panel_h = PANEL_H;
+		g.fb_x = FB_X;
+		g.fb_y = FB_Y;
+		g.fb_w = FB_W;
+		g.fb_h = FB_H;
+		g.offset_x = PANEL_OFFSET_X;
+		g.version = CO5300_ABI_VERSION;
+
+		if (copy_to_user(uarg, &g, sizeof(g)))
+			return -EFAULT;
+		return 0;
+	}
+
+	case CO5300_IOC_WRITE_RECT:
+		/*
+		 * Deliberately does NOT take console_lock. fbcon holds it for its
+		 * own ops; taking it here would invert that ordering and add a
+		 * deadlock class for no additional safety. The panel mutex is what
+		 * serialises fbcon against userspace.
+		 */
+		mutex_lock(&p->lock);
+		rc = co5300_do_write_rect(info, uarg);
+		mutex_unlock(&p->lock);
+		return rc;
+
+	default:
+		return -ENOTTY;
+	}
 }
 
 static const struct fb_ops co5300_fb_ops = {
@@ -764,6 +997,7 @@ static const struct fb_ops co5300_fb_ops = {
 	.fb_copyarea = co5300_copyarea,
 	.fb_imageblit = co5300_imageblit,
 	.fb_write = co5300_write,
+	.fb_ioctl = co5300_ioctl,
 };
 
 static int co5300_probe(struct spi_mem *mem)
@@ -781,6 +1015,9 @@ static int co5300_probe(struct spi_mem *mem)
 	p->spi = spi;
 	p->mem = mem;
 	spi_set_drvdata(spi, p);
+
+	/* Every panel operation is serialised against userspace by this. */
+	mutex_init(&p->lock);
 
 	if (co5300_route_pins(dev))
 		return dev_err_probe(dev, -ENOMEM, "pin routing failed\n");

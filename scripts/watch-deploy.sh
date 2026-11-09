@@ -2,7 +2,8 @@
 # Deploy a userspace binary to the watch's /home, verified by sha256.
 #
 #   ./scripts/watch-deploy.sh tbtns
-#   ./scripts/watch-deploy.sh blekbd
+#   ./scripts/watch-deploy.sh --usb tbtns      force the USB console
+#   ./scripts/watch-deploy.sh --telnet tbtns   force telnet
 #
 # /home is the writable jffs2 partition; the rootfs is a read-only cramfs, so
 # this is where binaries live. Deployment is netcat because the shell channels
@@ -25,6 +26,17 @@
 # Exit status is non-zero if the hash on the watch does not match the local file.
 set -euo pipefail
 
+# Transport: telnet by default because it is faster, USB console as the
+# fallback. The USB path is not a nicety -- the esp-hosted link drops often
+# enough that a deploy will eventually fail mid-transfer, and when it does the
+# console is the only channel left. It also cannot be reached by netcat at all,
+# so the file goes over as chunked base64.
+TRANSPORT=auto
+case "${1:-}" in
+    --usb)    TRANSPORT=usb;    shift ;;
+    --telnet) TRANSPORT=telnet; shift ;;
+esac
+
 here=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 cd "$here"
 
@@ -41,6 +53,52 @@ tmp=$(mktemp)
 
 cleanup() { rm -f "$tmp"; }
 trap cleanup EXIT
+
+# --- transport selection ---------------------------------------------------
+# A closed port answers fast; a dead link times out. Either way, fall back.
+if [ "$TRANSPORT" = auto ]; then
+    if timeout 5 bash -c "exec 3<>/dev/tcp/$HOST/23" 2>/dev/null; then
+        TRANSPORT=telnet
+    else
+        TRANSPORT=usb
+    fi
+fi
+
+if [ "$TRANSPORT" = usb ]; then
+    echo "deploying $NAME -> /home/$NAME over the USB console (sha256 ${want:0:12}...)"
+
+    # Base64 in chunks. The console is a tty with a ~4 KiB input queue, so a
+    # single command carrying the whole file is truncated silently -- the
+    # symptom is a transfer that never ends rather than an error.
+    need_pw=${WATCH_PASS_FILE:-$HOME/.config/escapement/watch-pass}
+    [ -f "$need_pw" ] || { echo "escapement: USB deploy needs WATCH_PASS_FILE" >&2; exit 1; }
+
+    remote_usb() { WATCH_PASS_FILE="$need_pw" ./scripts/watch-exec.py "$1"; }
+
+    remote_usb "rm -f /tmp/$NAME.b64 /home/$NAME.new" >/dev/null 2>&1 || true
+
+    base64 -w0 "$SRC" | fold -w 900 > "$tmp.chunks"
+    n=0
+    while IFS= read -r chunk; do
+        remote_usb "printf '%s' '$chunk' >> /tmp/$NAME.b64" >/dev/null 2>&1
+        n=$((n + 1))
+    done < "$tmp.chunks"
+
+    echo "  sent $n chunk(s)"
+
+    remote_usb "base64 -d /tmp/$NAME.b64 > /home/$NAME.new && chmod +x /home/$NAME.new && rm -f /tmp/$NAME.b64 && mv /home/$NAME.new /home/$NAME && echo ESCHASH \$(sha256sum /home/$NAME)" > "$tmp" 2>&1
+
+    have=$(grep -oE 'ESCHASH [0-9a-f]{64}' "$tmp" | awk '{print $2}' | tail -1)
+    if [ "$have" != "$want" ]; then
+        echo "escapement: USB transfer did not verify" >&2
+        echo "  want $want" >&2
+        echo "  got  ${have:-<none>}" >&2
+        tail -5 "$tmp" | sed 's/^/  /' >&2
+        exit 1
+    fi
+    echo "deployed /home/$NAME over USB, sha256 verified"
+    exit 0
+fi
 
 echo "deploying $NAME -> /home/$NAME (port $port, sha256 ${want:0:12}...)"
 

@@ -53,7 +53,8 @@ case "${1:-}" in
 *)
     "$CC" -Os -Wall -Wextra -o userspace/blekbd userspace/blekbd.c
     "$CC" -Os -Wall -Wextra -o userspace/tbtns userspace/tbtns.c
-    ls -l userspace/blekbd userspace/tbtns
+    "$CC" -Os -Wall -Wextra -o userspace/panel-test userspace/panel-test.c
+    ls -l userspace/blekbd userspace/tbtns userspace/panel-test
     printf '\ndeploy them to the watch; see the header of this script.\n'
     ;;
 esac
