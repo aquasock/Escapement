@@ -461,12 +461,88 @@ Two details the firmware/daemon split makes easy to get wrong:
 
 Both were caught by the self-test rather than on the watch.
 
-## Where this leaves it
+## IT TYPES
 
-Working and verified on hardware: the firmware boots with the watchdog armed,
-scans in bounded windows, detects BLE HID keyboards, connects, pairs, discovers
-the HID service, and logs every step to `/dev/esp-log`. The daemon runs on the
-watch, owns `/dev/esp-ble`, parses descriptors correctly, and requests hunts.
+*2026-11-09.* A Logitech BLE keyboard types into a shell on the watch's own
+AMOLED console. Verified by typing `ls` and reading the command and its output
+off the watch screen, with `key KEY_L down` / `KEY_S` / `KEY_ENTER` in the
+daemon log and zero unmapped usages.
 
-Not yet verified end to end: a real keypress reaching the console. That needs
-the keyboard in Bluetooth pairing mode, which is a physical action.
+The thing that unlocked it was reading TinyTang's BL616 port instead of
+continuing to hand-roll. Its `hid_setup_reports()` writes **0** to HID Protocol
+Mode — boot protocol — and that single choice cascades into everything else:
+
+    boot protocol  ->  8-byte report, no report ID, no report map to read
+    report protocol ->  report-ID'd reports + a 934-byte map to interpret
+
+Report protocol is what was implemented first, and it cannot work here. The map
+is read over ATT, one 22-byte chunk per round trip at MTU 23; 43 trips, one mbuf
+each, and the pool is exhausted. Every subscribe then fails with
+`BLE_HS_ENOMEM (6)` and the keyboard drops the link (`HCI 0x16`) before one key
+arrives. Boot protocol needs none of it.
+
+**What boot protocol costs:** media/consumer keys. They only exist on the
+consumer-page reports, which report protocol exposes. Typing was the
+requirement, so this is the right way round. Adding them back means a second
+report characteristic and the map read, done serially and with the mbuf budget
+understood.
+
+### The five defects between "connected" and "types"
+
+Each was individually fatal, each looked like something else:
+
+1. **Unbounded scan** starved core 0's idle task -> task watchdog reset loop.
+   Bounded windows (30 ms in 120 ms, 15 s per hunt, 8 s gap).
+2. **No bond store initialised.** `ble_store_config_init()` is the
+   application's job; without it `ble_gap_security_initiate()` returns
+   `ENOTSUP`, the link never encrypts, and a HID keyboard refuses every ATT
+   operation with `0x05 insufficient authentication`.
+3. **Report protocol** -> 934-byte map read -> mbuf exhaustion -> link dropped.
+   Replaced with boot protocol.
+4. **Descriptor walks bounded by the service end**, not the next
+   characteristic, so all six reports returned the same CCCD (0x0045) and five
+   were never really subscribed.
+5. **The daemon created its uinput device only on the report-map path.** Boot
+   protocol sends no map, so the device was never created, every decode was
+   written to fd `-1`, and typing failed *silently*. This is the one that
+   produced a false success: a `HELLO` file appeared and looked like proof, but
+   it had been typed into `screen` over the serial console, not over Bluetooth.
+   `/proc/bus/input/devices` showing only `gpio-keys` is what caught it.
+
+Lesson worth keeping: **verify the input device exists, not just that a file
+appeared.** A write to a closed fd is not an error anywhere downstream.
+
+### Two more, found by testing rather than by the hardware
+
+- **Bonding is off, deliberately.** This board cannot keep a bond — an NVS write
+  aborts, because parking the other core for a flash-cache disable is
+  impossible when that core runs Linux. With bonding on, the sequence across a
+  reboot is: the keyboard remembers us, we have forgotten it, encryption fails,
+  and the keyboard — bonded to a host that cannot resolve it — stops
+  advertising until it is re-paired by hand. Bonding off still encrypts, which
+  is all HID requires, and leaves nothing to go stale.
+- **A tty input queue is ~4 KiB**, so a single write truncates long command
+  lines; the symptom is a command that never finishes, not an error.
+
+## Deployment: it survives a reboot
+
+- `/home/blekbd` — the daemon (jffs2, writable; the rootfs is a read-only
+  cramfs with no buildroot tree here).
+- `/etc/init.d/S48blekbd` — starts it, after `S46blewifi` because both want
+  `/dev/esp-ble` and the driver allows one opener. The daemon retries on
+  `EBUSY` for up to 120 s rather than dying, which it used to do silently.
+
+Verified by rebooting the watch: the daemon starts, the input device appears,
+WiFi comes up with its address, and `loadavg 0.25`. The keyboard itself sleeps
+when idle — pressing a key wakes and reconnects it, as with any BLE keyboard.
+
+## Build and deploy
+
+    ./scripts/build-userspace.sh              # cross-compile
+    ./scripts/build-userspace.sh --selftest   # host test of the HID decoder
+    ./scripts/blekbd-selftest.py frames.bin   # generate a frame fixture
+
+The self-test feeds a recorded descriptor and report stream through exactly the
+decode path the device uses, and prints the keys it would inject. It caught two
+bugs before hardware: the one-byte bit-offset shift when report IDs are in use,
+and array fields indexing through the logical minimum rather than from zero.

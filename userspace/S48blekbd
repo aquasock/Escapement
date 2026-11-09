@@ -1,0 +1,63 @@
+#!/bin/sh
+#
+# S48blekbd - start the BLE keyboard daemon.
+#
+# The firmware finds a Bluetooth LE keyboard, pairs with it, and forwards its
+# boot-protocol reports over /dev/esp-ble. This daemon reads that pipe, decodes
+# the HID report, and injects the keys through /dev/uinput -- which is what makes
+# them reach the virtual terminal and therefore this console.
+#
+# Runs after S46blewifi on purpose. Both want /dev/esp-ble and the driver allows
+# only one opener. S46blewifi exits immediately once WiFi is configured, so in
+# the normal case the pipe is free by now. When it is not -- a board still being
+# provisioned -- the daemon retries rather than giving up, because otherwise the
+# keyboard would be silently dead for the whole session.
+#
+# Lives on /etc (jffs2, writable) and the binary on /home, because the rootfs is
+# a read-only cramfs with no buildroot tree in this checkout.
+
+DAEMON=/home/blekbd
+PIDFILE=/var/run/blekbd.pid
+LOG=/home/blekbd.log
+
+case "$1" in
+start)
+	[ -x "$DAEMON" ] || exit 0
+	printf 'Starting BLE keyboard: '
+	# Launched explicitly rather than with start-stop-daemon -b, because -b
+	# sends the child's output to /dev/null and the -v key log is the only
+	# evidence available for a daemon that injects into a console nobody is
+	# watching.
+	"$DAEMON" -v > "$LOG" 2>&1 &
+	echo $! > "$PIDFILE"
+	sleep 1
+	if kill -0 "$(cat "$PIDFILE")" 2>/dev/null; then
+		echo "OK"
+	else
+		echo "FAIL"
+		rm -f "$PIDFILE"
+	fi
+	;;
+status)
+	if start-stop-daemon -K -t -q -p "$PIDFILE"; then
+		echo 'BLE keyboard: running'
+	else
+		echo 'BLE keyboard: not running'
+	fi
+	;;
+stop)
+	printf 'Stopping BLE keyboard: '
+	start-stop-daemon -K -q -p "$PIDFILE"
+	rm -f "$PIDFILE"
+	echo "OK"
+	;;
+restart|reload)
+	"$0" stop
+	sleep 1
+	"$0" start
+	;;
+*)
+	echo "Usage: $0 {start|stop|restart|status}"
+	exit 1
+	;;
+esac

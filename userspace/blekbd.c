@@ -63,6 +63,7 @@
 #define STATE_READY		2
 
 #define MAP_MAX		1024
+#define BOOT_KBD_LEN	8
 #define MAX_FIELDS	256
 #define MAX_USAGES	16
 
@@ -483,6 +484,22 @@ static void parse_report_map(const uint8_t *d, int len)
 	say("blekbd: report descriptor parsed: %d field(s)", nfields);
 
 	if (verbose) {
+		int off;
+
+		for (off = 0; off < len; off += 16) {
+			char line[100];
+			int n = 0, k;
+
+			n += snprintf(line + n, sizeof(line) - n,
+				      "blekbd:   %04x:", off);
+			for (k = 0; k < 16 && off + k < len; k++)
+				n += snprintf(line + n, sizeof(line) - n,
+					      " %02x", d[off + k]);
+			say("%s", line);
+		}
+	}
+
+	if (verbose) {
 		for (i = 0; i < nfields; i++) {
 			struct field *f = &fields[i];
 
@@ -627,8 +644,10 @@ static void set_key(unsigned short code, int down)
 
 	held[code] = down ? 1 : 0;
 	name = key_name(code);
-	if (dry_run)
-		say("blekbd:   %s %s", name ? name : "key", 
+	/* Logged whenever -v is on, not only in dry-run: this line is the only
+	 * direct evidence that a decoded key reached the input device. */
+	if (verbose)
+		say("blekbd:   key %s %s", name ? name : "(unnamed)",
 		    down ? "down" : "up");
 	if (ufd > 0)
 		emit(ufd, EV_KEY, code, down ? 1 : 0);
@@ -688,6 +707,51 @@ static void handle_report(const uint8_t *data, int len)
 	}
 
 	memset(want, 0, sizeof(want));
+
+	/*
+	 * Fallback: the standard boot keyboard layout, used when the report map
+	 * did not arrive or did not describe this report.
+	 *
+	 * The firmware fetches only the first part of the descriptor -- enough
+	 * for the keyboard collection, which is all typing needs -- and that read
+	 * can be cut short. Rather than make typing depend on a 934-byte ATT
+	 * transfer over a shared radio, decode the one layout that is fixed by
+	 * the HID specification: byte 0 modifiers, byte 1 reserved, then six
+	 * usage slots. With report IDs in use the ID is byte 0 and the layout
+	 * shifts by one.
+	 */
+	if (nfields == 0 || len == BOOT_KBD_LEN) {
+		int base = 0;
+		int nslots;
+
+		if (len == BOOT_KBD_LEN) {
+			/* Boot protocol: no report ID, the layout is fixed. */
+			base = 0;
+		} else if (len == BOOT_KBD_LEN + 1 && data[0] == 1) {
+			/* Same layout behind a report ID, seen when a device
+			 * ignores boot protocol. */
+			base = 1;
+		} else {
+			return;		/* not a keyboard report */
+		}
+
+		nslots = len - base - 2;
+		if (nslots > 6)
+			nslots = 6;
+
+		for (i = 0; i < 8; i++)
+			if (data[base] & (1 << i))
+				want[hid_kbd_to_key[0xE0 + i]] = 1;
+
+		for (i = 0; i < nslots; i++) {
+			unsigned short k = hid_kbd_to_key[data[base + 2 + i]];
+
+			if (k)
+				want[k] = 1;
+		}
+
+		goto emit;
+	}
 
 	for (i = 0; i < nfields; i++) {
 		struct field *f = &fields[i];
@@ -749,6 +813,7 @@ static void handle_report(const uint8_t *data, int len)
 		}
 	}
 
+emit:
 	/* Releases first, then presses. */
 	for (i = 0; i < 256; i++)
 		if (held[i] && !want[i])
@@ -810,6 +875,24 @@ static void consume_frames(void)
 			len = rx_buf[pos + 2];
 			if (avail < (size_t)(3 + len))
 				break;
+
+			/* The input device is created on the first report, not on
+			 * the report map.
+			 *
+			 * It used to be created in the map path only, which silently
+			 * stopped working the moment the firmware switched to boot
+			 * protocol -- boot protocol sends no map, so ufd stayed -1
+			 * and every decode was handed to a device that did not
+			 * exist. Reports arrived, keys were parsed, and nothing was
+			 * ever typed. A missing uinput fd is not an error anywhere
+			 * downstream, which is why it failed invisibly.
+			 */
+			if (ufd < 0) {
+				ufd = uinput_open();
+				if (ufd < 0)
+					say("blekbd: cannot create the input "
+					    "device; keys will not be typed");
+			}
 
 			handle_report(rx_buf + pos + 3, len);
 			pos += 3 + len;
@@ -899,15 +982,54 @@ int main(int argc, char **argv)
 		return 0;
 	}
 
-	pfd = open(DEV_PIPE, O_RDWR);
-	if (pfd < 0) {
-		perror("open " DEV_PIPE);
-		say("Is the firmware running, and is something else "
-		    "(ble-wifi-setup) holding the pipe?");
-		return 1;
+	/*
+	 * The pipe takes a single reader, and something else legitimately holds it
+	 * for a while: /usr/sbin/ble-wifi-setup runs the WiFi provisioning dialog
+	 * on the same device. At boot, S46blewifi starts before this and has to be
+	 * allowed to finish or give up.
+	 *
+	 * So retry instead of exiting. Exiting on EBUSY looked acceptable and was
+	 * not: the daemon was started once, lost the race, and the keyboard stayed
+	 * dead for the whole session with no sign of why.
+	 */
+	{
+		int waited = 0;
+
+		for (;;) {
+			pfd = open(DEV_PIPE, O_RDWR);
+			if (pfd >= 0)
+				break;
+
+			if (errno != EBUSY || waited >= 120) {
+				perror("open " DEV_PIPE);
+				say("Is the firmware running, and is something "
+				    "else (ble-wifi-setup) holding the pipe?");
+				return 1;
+			}
+
+			if (!waited)
+				say("blekbd: %s busy, waiting for it to be "
+				    "released", DEV_PIPE);
+			sleep(2);
+			waited += 2;
+		}
+
+		if (waited)
+			say("blekbd: got %s after %d s", DEV_PIPE, waited);
 	}
 
 	say("blekbd: reading %s", DEV_PIPE);
+
+	/* Create the input device up front as well. Waiting for the first
+	 * report would work, but a device that exists before the keyboard is
+	 * even connected is one less thing between a keypress and a character,
+	 * and it makes "is it there?" answerable at any time. */
+	if (ufd < 0) {
+		ufd = uinput_open();
+		if (ufd < 0)
+			say("blekbd: %s unavailable; keys will be decoded but "
+			    "not typed", DEV_UINPUT);
+	}
 
 	/* Ask the firmware for a discovery window now, and again periodically
 	 * while no keyboard is attached -- the firmware's scans are bounded. */

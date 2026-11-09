@@ -94,6 +94,21 @@ time.
 
 </details>
 
+**Works: a Bluetooth LE keyboard types into the console.** The ESP32-S3 finds
+a Logitech BLE keyboard, pairs, and forwards its boot-protocol reports to
+Linux, where a small daemon turns them into input events. Typing `ls` on the
+keyboard runs `ls` in a shell on the AMOLED — verified on hardware 2026-11-09 by
+reading the command and its output off the watch's own screen.
+
+The HID host runs in the firmware, not in Linux: the kernel's `CONFIG_BT_HIDP`
+is Bluetooth *Classic* only, HID-over-GATT lives in BlueZ, and BlueZ cannot run
+on this NOMMU board.
+
+Getting there meant five separate defects, each fatal on its own, and the last
+one failed *silently* in a way that looked like success. The whole story,
+including the false positive and why boot protocol rather than report protocol
+is the only workable choice here, is in `docs/bluetooth-keyboard.md`.
+
 ## Attribution
 
 This project is watch bring-up and hard-won configuration, not a kernel port.
@@ -241,9 +256,19 @@ cores.
 
 ## Not done
 
-- **No input into the console.** The two side pushers emit keycodes
-  (`KEY_POWER`, `KEY_ENTER`) but nothing consumes them, so the on-screen
-  console is output only. Typing still happens on the USB port.
+- **The console has no local input of its own.** The two side pushers emit
+  keycodes (`KEY_POWER`, `KEY_ENTER`) but nothing consumes them. Typing is via
+  the Bluetooth keyboard, or the USB port.
+- **BLE media keys do nothing.** Boot protocol carries only the 8-byte keyboard
+  report, so volume and browser keys never reach the host. They live on the
+  consumer-page reports that report protocol exposes — and report protocol is
+  what exhausted the ATT buffers and broke the link. Adding them back needs a
+  second subscription and the report map read, done serially.
+- **No bond is kept, so the keyboard re-pairs every time it reconnects.** The firmware
+  cannot write flash after Linux starts (an NVS write parks the other core,
+  which is running Linux, and aborts), so there is nowhere to store the keys.
+  Re-pairing is automatic and takes a fraction of a second; it is only visible
+  as a brief delay.
 - **The console is slow to repaint.** Every fbcon drawing op goes straight to
   the panel as one spi-mem op through a 64-byte FIFO, with no DMA and no dirty
   region tracking. Correct first; fast later.
