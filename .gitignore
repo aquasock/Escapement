@@ -5,9 +5,11 @@ build/
 # Upstream release blobs. scripts/fetch-images.sh downloads and verifies them.
 images/*.bin
 
-# Built by scripts/build-userspace.sh; deploy /home/blekbd on the watch.
+# Built by scripts/build-userspace.sh; deploy /home/blekbd and /home/tbtns
+# on the watch with scripts/watch-deploy.sh.
 userspace/blekbd
 userspace/blekbd.strip
+userspace/tbtns
 
 # Runtime session state. .codewhale/handoff.md is tracked deliberately, so the
 # next agent can find the baton from a clean clone; the rest is per-session.

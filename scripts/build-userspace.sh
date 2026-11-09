@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
-# Build the userspace side of the BLE keyboard: userspace/blekbd.
+# Build the userspace programs: userspace/blekbd and userspace/tbtns.
 #
-#   ./scripts/build-userspace.sh            build
+#   ./scripts/build-userspace.sh            build both
 #   ./scripts/build-userspace.sh --selftest build for the host and run the
-#                                           report-descriptor test
+#                                           report-descriptor and touch-band
+#                                           tests
 #
-# The binary is deployed to the watch's writable jffs2 partition (/home),
+# The binaries are deployed to the watch's writable jffs2 partition (/home),
 # because the rootfs is a read-only cramfs and there is no buildroot tree in
 # this checkout to rebuild it:
 #
@@ -41,14 +42,18 @@ case "${1:-}" in
     say() { printf '\n=== %s\n' "$*"; }
     say "host build"
     cc -O1 -Wall -Wextra -o /tmp/blekbd_host userspace/blekbd.c
+    cc -O1 -Wall -Wextra -o /tmp/tbtns_host userspace/tbtns.c
     say "generate frames"
     python3 scripts/blekbd-selftest.py /tmp/blekbd-frames.bin
     say "decode"
     /tmp/blekbd_host -f /tmp/blekbd-frames.bin -v
+    say "touch bands"
+    python3 scripts/tbtns-selftest.py /tmp/tbtns_host
     ;;
 *)
     "$CC" -Os -Wall -Wextra -o userspace/blekbd userspace/blekbd.c
-    ls -l userspace/blekbd
-    printf '\ndeploy it to the watch; see the header of this script.\n'
+    "$CC" -Os -Wall -Wextra -o userspace/tbtns userspace/tbtns.c
+    ls -l userspace/blekbd userspace/tbtns
+    printf '\ndeploy them to the watch; see the header of this script.\n'
     ;;
 esac

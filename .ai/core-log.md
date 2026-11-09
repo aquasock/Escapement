@@ -62,3 +62,39 @@ Nothing remains on this cycle. The next engineering work is still touch input, w
 - User Test: PASS
 
 ---
+
+## 3 COMMIT Unreleased 2026-11-09T12:55:56-07:00
+
+#### Coming From:
+
+Unreleased f32fb12
+
+#### Purpose:
+
+Give the watch local touch input: three buttons painted in the strip below fb0, each reporting as an ordinary on/off key like the two side pushers.
+
+#### Outcome:
+
+The strip below the console is now red, green and blue thirds painted full width by `co5300_paint_frame()` inside its existing full-band loop, so each transfer keeps the shape the controller is known to honour, and each third reports as `BTN_0`, `BTN_1` and `BTN_2` on a uinput device named `touch-buttons`. Verified on hardware 2026-11-09: thirteen presses in the order green, red, blue, green decoded to the matching bands with a release after each, and the raw kernel stream read back from `/dev/input/event3` as `type=1 code=256 value=1`, `SYN_REPORT`, `value=0` for red, then 257 for green and 258 for blue. The input half is a userspace daemon, `userspace/tbtns.c`, not a kernel driver, and that was the deciding design call: the running kernel already provides `/dev/i2c-0`, `/dev/uinput` and the XL9555 as a gpiochip, so there is no `CONFIG_INPUT_TOUCHSCREEN`, no device-tree node, and moving a band boundary is a command-line flag instead of a rebuild and a flash. Only the painting required a kernel change, and only because the strip lies outside fb0. Getting there meant establishing the controller from scratch, since no CST9217 driver exists in 7.2.4 and the tree's only Hynitron support matches `hynitron,cst340`: the part is at I2C 0x1A and `0x5A` is the DRV2605 haptic driver, which an early single-register probe had wrongly identified as touch -- the discriminator is the CST92xx unlock handshake, not a register read. A freshly reset part sits in command mode answering transactions and reporting nothing, so it needs `0xD1=0x01`, `0xD1=0x1E` twice, byte 1 of `0x0002` reading back `0x1E`, then `0xD1=0x09`. And the freshness test that matters is the one mainline's own CST3xx driver uses: a block whose byte 0 is `0xAB` is not a report, which is why an untouched screen can otherwise present a frozen block as a phantom press. Three findings are recorded rather than smoothed over. Reads of this device on the bit-banged bus fail often -- roughly two in eight, against forty consecutive clean reads from the PCF85063A and the AXP2101 on the same pins at the same clock -- so a failed read skips the poll and lets the release timeout decide, because treating it as a release would make the buttons flicker. A very quick tap can therefore fall between polls and be missed; a deliberate press always lands, and the user confirmed the buttons work. And `tbtns` cannot pulse the controller's hardware reset, because `pca953x` owns 0x20 and a plain `I2C_SLAVE` returns `EBUSY`; the software bring-up has worked on every boot but the hardware path is unused. Two diagnostics were built rather than eyeballed: `scripts/tbtns-selftest.py` drives a `-C` classify mode on the build host to check the band arithmetic, which is the only part of this that can be wrong invisibly, and `scripts/watch-deploy.sh` wraps the netcat deploy after three separate hand-run transfer failures -- a backgrounded `nc` dying of SIGHUP, a port probe being consumed as the transfer, and `ETXTBSY` from moving a running binary. The cycle also corrected a project fact: `FB_Y` is 45, not the 46 that README and LCD-007 both stated, which the driver's own probe line `ring cols 66/387 rows 44/445` settles and which the buttons inherit by deriving from the macro. An unrelated observation is logged but not chased: esp-hosted prints `process_rx_buf: bad if_type 6` to the console every few seconds, which is what scrolled past the user during testing and briefly looked like evidence that touch was working. The core-syntax audit passed: the `.ai/` diff was inspected, `.ai/core.md` was not modified, entry 3 was validated against the template with six sections in canonical order, sequential numbering from 2, an ISO-8601 timestamp carrying the America/Phoenix offset, prose-only Outcome and Next Steps, eligible Files Modified, and Status values within the allowed set.
+
+#### Next Steps:
+
+The three buttons are functional and the user accepted them. The next improvement to this work, if it is wanted, is the missed fast tap: polling at roughly 60 ms with an unreliable ack means a quick flick can fall between samples, and the two candidate fixes are a shorter poll interval or retrying the ack until it succeeds rather than once. After that, the next capability gap remains the console repaint ceiling of about 5 fps, which has a concrete lead in LCD-005 -- fewer, larger transfers through a persistent RAMWR window. The `process_rx_buf: bad if_type 6` console spam from esp-hosted is worth a cycle of its own because it currently pollutes the display during any test. BLE media keys, firmware-side bond persistence and any wake-from-sleep path remain deferred by user decision.
+
+#### Files Modified:
+
+- patches/kernel/display/final/co5300.c
+- userspace/tbtns.c
+- scripts/build-userspace.sh
+- scripts/tbtns-selftest.py
+- scripts/watch-deploy.sh
+- .gitignore
+- README.md
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: PASS
+
+---

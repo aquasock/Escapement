@@ -67,7 +67,14 @@
  * PANEL_OFFSET_X on top for the controller's own column offset.
  */
 #define FB_X		((PANEL_W - PANEL_SAFE_W) / 2)	/* 45 */
-#define FB_Y		((PANEL_H - PANEL_SAFE_H) / 2)	/* 46 */
+/*
+ * 45, not 46: (502 - 412) / 2 is 45. An earlier comment here said 46 and the
+ * project documentation repeated it, but the running driver is the authority --
+ * the probe log prints the ring at "rows 44/445", and those are FB_Y-1 and
+ * FB_Y+FB_H, which only reconcile with FB_Y = 45. fb0 therefore covers rows
+ * 45..444 and the strip below it starts at 445.
+ */
+#define FB_Y		((PANEL_H - PANEL_SAFE_H) / 2)	/* 45 */
 #define FB_W		PANEL_SAFE_W			/* 320 */
 #define FB_H		400				/* 25 rows of 16 */
 #define BPP 16
@@ -395,6 +402,58 @@ static void co5300_blit(struct co5300 *p, int x0, int y0, int x1, int y1)
 				 (((g) & 0x3f) << 5) | ((b) & 0x1f)))
 #define COL_BLACK	0x0000
 #define COL_RED		RGB565(31, 0, 0)
+#define COL_GREEN	RGB565(0, 63, 0)
+#define COL_BLUE	RGB565(0, 0, 31)
+
+/*
+ * Three touch buttons across the bottom strip.
+ *
+ * The strip is everything the framebuffer does not cover below it:
+ *
+ *   panel 502 rows - fb0 at y 45..444 = 57 rows spare, y 445..501
+ *
+ * Split into thirds of the 410 px visible glass. The split is deliberately
+ * coarse: the CST9217's reported Y is least accurate at the bottom of the
+ * glass, so these are regions, not targets. A third is 137 px and the measured
+ * Y error is a handful of pixels, so the boundaries are not where a finger can
+ * be unlucky.
+ *
+ * Coordinates here are CONTROLLER columns, which is what the band loop indexes:
+ * the controller's RAM starts PANEL_OFFSET_X (22) columns left of the visible
+ * glass, so visible panel x maps to controller x + 22, and the visible glass
+ * occupies controller columns 22..431.
+ *
+ *
+ *   22 .............. 156  red
+ *  157 ... 158         black separator (BTN_SEP)
+ *  159 .............. 292  green
+ *  293 ... 294         black separator (BTN_SEP)
+ *  295 .............. 431  blue
+ *
+ * Which is 135 / 134 / 137 visible pixels per button, against a finger contact
+ * patch of roughly 40 px. The separators are there so the three regions read as
+ * three buttons rather than one striped bar.
+ *
+ * The strip is painted across the FULL controller width, not just the visible
+ * 410, so that it also covers the red ring's bottom edge (drawn at y 445 from
+ * controller columns 65..388). Otherwise the ring would leave two red dots
+ * either side of the button row.
+ *
+ * The bottom corners of the glass are 45-degree chamfers, so the outermost sliver
+ * of each end button is off the glass. Painting the full width is still correct:
+ * the alternative leaves a dead corner that looks like a driver fault.
+ */
+#define BTN_Y0		(FB_Y + FB_H)		/* 445, first row below fb0 */
+#define BTN_Y1		(PANEL_H - 1)		/* 501, last row of the glass */
+#define BTN_CTRL_X0	0			/* full controller width */
+#define BTN_CTRL_X1	(PANEL_OFFSET_X + PANEL_W - 1)	/* 431 */
+#define BTN_SEP		2			/* black px between buttons */
+
+/* Controller-column band for button n (0..2), for userspace to mirror. */
+#define BTN_EDGE0	(PANEL_OFFSET_X)					/* 22  */
+#define BTN_EDGE1	(BTN_EDGE0 + PANEL_W / 3)			/* 158 */
+#define BTN_EDGE2	(BTN_EDGE0 + 2 * (PANEL_W / 3))		/* 294 */
+#define BTN_EDGE3	(BTN_CTRL_X1)					/* 431 */
 
 /*
  * Ring thickness, in pixels.
@@ -486,6 +545,30 @@ static int co5300_paint_frame(struct co5300 *p, int l, int r, int t, int b)
 					line[x] = swab16(COL_RED);
 				for (x = r; x <= r + RING_T - 1; x++)
 					line[x] = swab16(COL_RED);
+			}
+
+			/*
+			 * Touch buttons, on top of everything: the strip sits below
+			 * fb0, where the ring's bottom edge also is, so painting last
+			 * is what keeps the row clean.
+			 */
+			if (yy >= BTN_Y0 && yy <= BTN_Y1) {
+				for (x = BTN_CTRL_X0; x <= BTN_CTRL_X1; x++) {
+					u16 c;
+
+					if (x <= BTN_EDGE1 - BTN_SEP)
+						c = COL_RED;
+					else if (x <= BTN_EDGE1)
+						c = COL_BLACK;
+					else if (x <= BTN_EDGE2 - BTN_SEP)
+						c = COL_GREEN;
+					else if (x <= BTN_EDGE2)
+						c = COL_BLACK;
+					else
+						c = COL_BLUE;
+
+					line[x] = swab16(c);
+				}
 			}
 		}
 

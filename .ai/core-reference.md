@@ -19,6 +19,7 @@ record_kinds:
   - SOC         # ESP32-S3 silicon: memory, PSRAM, cores, USB-Serial-JTAG
   - BOARD       # T-Watch Ultra: pins, fitted parts, I2C, power rails
   - DISPLAY     # CO5300 AMOLED controller and the fbdev driver contract
+  - TOUCH       # CST9217 capacitive controller: address, unlock handshake, report block
   - PMU         # AXP2101 power management: supplies, registers, interrupts
   - RTC         # PCF85063A real-time clock
   - KERNEL      # the Linux port: NOMMU, fork, vectors, cached windows
@@ -67,6 +68,10 @@ Topic IDs are the `record_id` prefix. An entry reserves a name; it does not clai
 - topic_id: LCD
   name: "CO5300 AMOLED and fbdev"
   description: "The panel's controller: SPI framing, window addressing, the byte order the pixel stream needs, which windows it honours, and what the fbdev driver does and does not implement for userspace."
+
+- topic_id: TCH
+  name: "CST9217 capacitive touch"
+  description: "The touch controller at I2C 0x1A: its address against its neighbours, the unlock handshake that gets it scanning, the report block layout and freshness marker, and the measured read reliability on the bit-banged bus."
 
 - topic_id: PMU
   name: "AXP2101 power management"
@@ -118,6 +123,10 @@ Topic IDs are the `record_id` prefix. An entry reserves a name; it does not clai
 | Which PMU interrupt pin is it, and why did it storm? | BRD | BRD-002 |
 | What does the power rail map look like? | BRD | BRD-003 |
 | Which SPI bus is the panel on, and what else exists? | BRD | BRD-004 |
+| Where is the touch controller, and what is at 0x5A? | TCH | TCH-001 |
+| Why does the touch controller answer but never report? | TCH | TCH-002 |
+| Why does an untouched screen read as a phantom press? | TCH | TCH-003 |
+| Why are touch reads unreliable when the RTC is fine? | TCH | TCH-003 |
 | Can userspace draw on /dev/fb0? | LCD | LCD-001 |
 | Why does a thin fill draw nothing while a thick one works? | LCD | LCD-002 |
 | Why does a coloured fill report success and change nothing? | LCD | LCD-003 |
@@ -173,7 +182,10 @@ LCD-003: "Pixel data must be byte-swapped (swab16) because the panel takes the l
 LCD-004: "One pixel is lost at the left and top edges of the visible glass and none at the right and bottom, so equal drawn thickness is not equal visible thickness"
 LCD-005: "A 320x400 RGB565 frame costs about 190 ms in SPI transfers, roughly 19 ms per 40-row band; frame rate is bounded by the display path, not the CPU, giving about 5 fps practical ceiling"
 LCD-006: "A whole frame cannot be a single transfer: spi-mem refuses a data-only op with no command, and the controller treats a CS edge as end-of-burst"
-LCD-007: "The glass is 410x502 with 45-degree chamfers; the largest unclipped rectangle is 320x412 and fb0 is 320x400 at (45,46), so the border lies outside the framebuffer entirely"
+LCD-007: "The glass is 410x502 with 45-degree chamfers; the largest unclipped rectangle is 320x412 and fb0 is 320x400 at (45,45), leaving a 57-row strip below it that the touch buttons are painted into"
+TCH-001: "The touch controller is a CST9217 at I2C 0x1A (register 0x0000 reads 0xCA, the family checkcode); 0x5A is the DRV2605 haptic driver, whose register 0x00 reads 0xE0 (DEVICE_ID bits), and only 0x1A completes the CST92xx unlock handshake"
+TCH-002: "A reset CST9217 is in command mode and reports nothing: write 0xD1=0x01, then 0xD1=0x1E twice, require byte 1 of a read of 0x0002 to be 0x1E, then write 0xD1=0x09 for normal mode"
+TCH-003: "Report block at 0xD000 is 7 bytes: byte 0 = 0x06 for a down event and 0xAB means no new report; x=(b1<<4)|(b3>>4), y=(b2<<4)|(b3&0x0F); reads of this device fail often (about 2 in 8) while the RTC and PMU on the same bus are 40/40"
 
 PMU-001: "AXP2101 capacity is register 0xa4 bits 6:0 (0x64 = 100, above 100 = not settled); voltage is registers 0x34/0x35, 14 bits, already in mV, and the power_supply property is uV so multiply by 1000"
 PMU-002: "The AXP2101 has no mainline driver, so it lives in patches/kernel/axp2101/; a non-recursive patch glob plus '|| true' silently dropped the series and a rebuild produced a kernel with no PMU driver and no error"
@@ -388,16 +400,57 @@ EXT-001: "The SPLB32 Tamagotchi core runs at 4.05x realtime headless on this boa
 - record_id: LCD-007
   kind: DISPLAY
   topic_id: LCD
-  title: "The glass is 410x502 with 45-degree chamfers; the largest unclipped rectangle is 320x412 and fb0 is 320x400 at (45,46)"
+  title: "The glass is 410x502 with 45-degree chamfers; the largest unclipped rectangle is 320x412 and fb0 is 320x400 at (45,45)"
   status: VERIFIED
   verified_date: 2026-11-09
-  statement: "The panel's addressable area is 410 by 502 pixels, windowed at column 22 because the controller's RAM is wider than the visible glass. Its corners are chamfered at 45 degrees rather than rounded, so the largest rectangle guaranteed to render in full is 320x412, being the panel inset by 45 pixels on each side. fb0 is set to 320x400 and placed at offset (45,46), giving fbcon 40 columns by 25 rows of the VGA 8x16 cell with no driver-side arithmetic."
-  consequence: "The area outside fb0 — 45 pixels wide, 46 above and 56 below — is not part of the framebuffer, so neither fbcon nor userspace can draw there. It exists only in the panel's own RAM and can only be painted by the driver at probe time, in panel coordinates."
+  statement: "The panel's addressable area is 410 by 502 pixels, windowed at column 22 because the controller's RAM is wider than the visible glass. Its corners are chamfered at 45 degrees rather than rounded, so the largest rectangle guaranteed to render in full is 320x412, being the panel inset by 45 pixels on each side. fb0 is set to 320x400 and placed at offset (45,45), giving fbcon 40 columns by 25 rows of the VGA 8x16 cell with no driver-side arithmetic."
+  consequence: "The area outside fb0 — 45 pixels wide, 45 above and 57 below — is not part of the framebuffer, so neither fbcon nor userspace can draw there. It exists only in the panel's own RAM and can only be painted by the driver at probe time, in panel coordinates. The 57-row strip below fb0 is what the three touch buttons are painted into."
   sources:
     - "patches/kernel/display/final/co5300.c: PANEL_W/PANEL_H/PANEL_OFFSET_X/PANEL_SAFE_INSET and the FB_X/FB_Y derivation"
     - "docs/panel-geometry.md: the measurement method and numbers"
     - "kernel log: 'Console: switching to colour frame buffer device 40x25' and 'co5300 spi0.0: 410x502 RGB565, fb0 registered'"
-  verification: "Confirmed on hardware by the console geometry itself and by painting the surrounding border in panel coordinates, which only works if the pad between fb0 and the visible edge is real."
+  verification: "Confirmed on hardware by the console geometry itself and by painting the surrounding border in panel coordinates, which only works if the pad between fb0 and the visible edge is real. Revised 2026-11-09 (core-log entry 3): FB_Y is 45, not the 46 this record previously stated. (502 - 412) / 2 is 45, and the driver's own probe line 'co5300: frame painted rc=0, ring cols 66/387 rows 44/445' only reconciles with FB_Y = 45, since those are FB_Y - 1 and FB_Y + FB_H. The running driver was always correct; this record and the README repeated a wrong comment."
+
+- record_id: TCH-001
+  kind: TOUCH
+  topic_id: TCH
+  title: "The touch controller is a CST9217 at I2C 0x1A; 0x5A on the same bus is the DRV2605 haptic driver"
+  status: VERIFIED
+  verified_date: 2026-11-09
+  statement: "The capacitive controller answers at I2C address 0x1A on the shared bit-banged bus. Register 0x0000 reads 0xCA, the CST92xx checkcode prefix (the family's checkcode format is 0xCACA____). A second device on the same bus answers at 0x5A, and its register 0x00 reads 0xE0 -- bits 7:5 of that byte are the DRV2605 DEVICE_ID field, which is 0b111 for that part. 0x5A is therefore the haptic driver and has nothing to do with touch, even though the vendor header for the CST92xx family lists 0x5A as its address."
+  consequence: "Probing 0x5A for touch yields a device that acknowledges and returns plausible-looking bytes, which is how an earlier attempt concluded the touch part was at 0x5A. The discriminator is the unlock handshake, not a single register read: a CST92xx acknowledges the handshake by returning 0x1E in byte 1 of a read of 0x0002, and 0x5A does not. Any future probe of this bus should use that handshake rather than a register read."
+  sources:
+    - "on the watch: `i2ctransfer -y 0 w2@0x1a 0x00 0x02 r4` returns 0x07 0x1e 0x00 0x00; the same operation at 0x5A returns 0x00 0x00 0x01 0x01"
+    - "TinyPetz firmware/bringup/main/touch.c: the note that the part answers at 0x1A and that another device at 0x5A was being mistaken for it"
+    - "BRD-001 for the bus and the other addresses on it"
+  verification: "Verified on hardware: the 0x1A handshake succeeded on every attempt while 0x5A never returned 0x1E in byte 1. An earlier single-register read of 0x5A returned 0xE0 and was wrongly read as a touch answer; the DRV2605 DEVICE_ID field is what it actually is."
+
+- record_id: TCH-002
+  kind: TOUCH
+  topic_id: TCH
+  title: "A freshly reset CST9217 is in command mode and must be unlocked and put in normal mode before it reports anything"
+  status: VERIFIED
+  verified_date: 2026-11-09
+  statement: "After reset the controller sits in command mode, where register reads succeed and return zeros but it is not scanning the glass. It has to be brought up in this order: write 0xD1 = 0x01 (command mode), write 0xD1 = 0x1E twice (unlock), read 0x0002 for four bytes and require byte 1 to be 0x1E as an acknowledgement, then write 0xD1 = 0x09 (normal mode). Reading 0x0002 after the sequence returns 0x00 0x09, which is the mode byte confirming normal mode."
+  consequence: "Skipping any of this produces a controller that answers every transaction perfectly and never reports a touch, which looks exactly like a working sensor nobody has touched. The acknowledgement read must be checked rather than assumed, because a controller that did not unlock ignores the mode write silently."
+  sources:
+    - "TinyPetz firmware/bringup/main/touch.c: touch_init() and its setMode sequence, following LilyGo TouchDrvCST92xx in SensorLib"
+    - "on the watch: the sequence issued with i2ctransfer, then `i2ctransfer -y 0 w2@0x1a 0x00 0x02 r4` returning 0x00 0x09 0x00 0x00"
+  verification: "Verified on hardware by running the sequence over /dev/i2c-0 with i2ctransfer and observing the acknowledgement and the 0x09 mode read, then reading a live down report from the button strip."
+
+- record_id: TCH-003
+  kind: TOUCH
+  topic_id: TCH
+  title: "A touch report starts with 0x06; a 0xAB in byte 0 means no report, and reads on this bus fail often"
+  status: VERIFIED
+  verified_date: 2026-11-09
+  statement: "The report block at 0xD000 is seven bytes: byte 0 is the event (0x06 down), bytes 1..3 carry nibble-packed 12-bit coordinates as x = (b1 << 4) | (b3 >> 4) and y = (b2 << 4) | (b3 & 0x0F), byte 5 is the finger count and byte 6 is the freshness marker 0xAB. A report whose byte 0 is 0xAB is not a report at all -- it is the controller saying it has nothing new -- and mainline's own CST3xx driver uses exactly that test: it rejects a block when buf[6] != 0xAB or buf[0] == 0xAB. Separately, reads of this device on the bit-banged bus fail frequently: 40 consecutive reads of the PCF85063A and of the AXP2101 both succeeded, while the same operation against the touch part succeeded roughly two times in eight, returning all-0xFF or a truncated block."
+  consequence: "Two separate mistakes cost a round each. Treating 0xAB-prefixed blocks as fresh produces phantom presses from an untouched screen, because the frozen block still contains plausible coordinates. Treating a failed read as a release produces flickering buttons, so a failed transfer must skip the poll and let the release timeout decide. The unreliability is specific to this device, not the bus: the RTC and PMU on the same pins at the same clock are perfect. That is consistent with the controller sitting on the display flex beside the 20 MHz SPI bus while the other two are on the main board."
+  sources:
+    - "build/kernel/linux-7.2.4/drivers/input/touchscreen/hynitron_cstxxx.c: CST3XX_TOUCH_DATA_CHK_VAL 0xab, and cst3xx_read_touch() rejecting on buf[6] != 0xab || buf[0] == 0xab"
+    - "TinyPetz firmware/bringup/main/touch.c: the event codes and the nibble-packed decode"
+    - "on the watch: 40-read control runs against 0x51 and 0x34 versus the same against 0x1A"
+  verification: "Verified on hardware: with a finger held on the middle bar the block read 0x06 0x0a 0x1e 0xb6 0x00 0x01 0xab on all 25 samples, decoding to raw x=171 y=486; with nothing touching the glass the same read returned either all-0xFF or the same 0xAB-prefixed block repeatedly. The reliability comparison is 40/40 for both control devices against 2-in-8 for the touch part."
 
 - record_id: PMU-001
   kind: PMU

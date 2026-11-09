@@ -105,11 +105,45 @@ That is the VGA 8x16 font — the IBM PC text font, 8 px wide in a 9 px cell —
 which is what "the official console font" means in practice. The kernel picks
 it by default.
 
-The framebuffer is **320x400**, not the whole glass, placed at offset (45, 46).
+The framebuffer is **320x400**, not the whole glass, placed at offset (45, 45).
 The panel's corners are 45-degree chamfers, so the largest unclipped rectangle
 is 320x412 (`docs/panel-geometry.md` has the measurement). Keeping fb0 to the
-console area means fbcon does the column/row arithmetic itself and the 45/46 px
-border stays outside the framebuffer, reserved for notification strips.
+console area means fbcon does the column/row arithmetic itself and the 45 px
+border stays outside the framebuffer, reserved for notification strips. That
+leaves 57 rows below fb0, which is where the touch buttons live.
+
+**Works: three touch buttons below the console.** The bottom strip outside fb0
+is painted red | green | blue, full width, and each third is a real input
+device:
+
+```
+/sys/class/input/inputN/name    touch-buttons
+/dev/input/event3               EV_KEY 256 (BTN_0) | 257 (BTN_1) | 258 (BTN_2)
+```
+
+Verified on hardware 2026-11-09 by pressing each bar and reading the raw event
+stream back: `type=1 code=256 value=1`, `SYN_REPORT`, `value=0` for red, the
+same with 257 for green and 258 for blue, 13 presses and 13 releases in the
+order they were made. They behave exactly like the two side pushers — three
+on/off switches, no pointer.
+
+This is a **userspace** daemon (`userspace/tbtns.c`), not a kernel driver. The
+running kernel already provides everything needed — `/dev/i2c-0`, `/dev/uinput`,
+and the XL9555 as a gpiochip — so there is no `CONFIG_INPUT_TOUCHSCREEN`, no
+device-tree touch node, and changing a band boundary is a flag rather than a
+rebuild and a flash. The bars are drawn by the driver (`co5300_paint_frame()`),
+because the strip is outside fb0 and only the driver can paint there.
+
+Two things about the CST9217 at I2C 0x1A that cost time and are worth knowing:
+`0x5A` on the same bus is the DRV2605 haptic driver, not touch, and the report
+block must start with `0x06` — a `0xAB` in byte 0 means "no new report" and will
+otherwise read as a phantom press at a fixed coordinate. Reads of this one part
+are also unreliable on the bit-banged bus (roughly 2 in 8, against 40/40 for the
+RTC and PMU on the same pins), so a failed read skips the poll and the release
+timeout decides — treating it as a release would make the buttons flicker.
+
+Known limitation: a very quick tap can fall between polls and be missed. A
+deliberate press always lands.
 
 **Works: the display.** The CO5300 AMOLED is a `spi_mem` client on SPI2 with an
 fbdev framebuffer:
@@ -300,8 +334,9 @@ cores.
 ## Not done
 
 - **The console has no local input of its own.** The two side pushers emit
-  keycodes (`KEY_POWER`, `KEY_ENTER`) but nothing consumes them. Typing is via
-  the Bluetooth keyboard, or the USB port.
+  keycodes (`KEY_POWER`, `KEY_ENTER`) but nothing consumes them, and the three
+  touch buttons below the console emit `BTN_0/1/2` for the same reason. Typing is
+  via the Bluetooth keyboard, or the USB port.
 - **BLE media keys do nothing.** Boot protocol carries only the 8-byte keyboard
   report, so volume and browser keys never reach the host. They live on the
   consumer-page reports that report protocol exposes — and report protocol is
@@ -335,6 +370,15 @@ cores.
   `/etc/init.d/S03keepconfig` carries back only a named list. The timezone file
   and the RTC write-back script have to be re-installed with
   `./scripts/watch-time.sh` after one. Kernel-only flashes are unaffected.
+- **Touch reads on the controller are unreliable.** The RTC and PMU on the same
+  bit-banged bus are 40/40; the CST9217 at 0x1A is roughly 2 in 8. The buttons
+  work because a press lasts several frames and failed reads are skipped rather
+  than read as releases, but a quick tap between polls is lost. Slowing the bus
+  is untested and would be the first thing to try.
+- **`tbtns` cannot pulse the controller's hardware reset.** The XL9555 at 0x20
+  is owned by `pca953x`, so a plain `I2C_SLAVE` on that address returns `EBUSY`
+  and the reset is skipped; the daemon brings the part up in software instead.
+  It has worked on every boot so far, but the hardware path is unused.
 - **The buttons have no names yet** beyond the kernel keycodes they emit:
   Pusher A (top left) is `KEY_POWER`, Pusher B (bottom left) is `KEY_ENTER`.
 
