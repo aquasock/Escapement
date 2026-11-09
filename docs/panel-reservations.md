@@ -173,13 +173,14 @@ Consumers of that one operation:
 
 ## Not decided here
 
-- The API's exact shape (ioctl, sysfs node, or a small `/dev/` character
-  device). It needs to be decided before implementation because it fixes the
-  userspace contract.
+- ~~The API's exact shape.~~ Decided in `docs/panel-api.md`: a single ioctl on
+  `/dev/fb0`, because that node already exists and a new one would need an mdev
+  rule, which is exactly the `/etc` state a full-image flash destroys.
 - How a slot's art is supplied and where it is stored (`/home` is writable
-  jffs2; a slot config belongs there).
+  jffs2; a slot config belongs there). Still open; the API document deliberately
+  keeps the driver ignorant of slot semantics.
 - Whether the top bar is drawn by a daemon or by the kernel. A daemon is
-  consistent with `blekbd` and `tbtns`.
+  consistent with `blekbd` and `tbtns`, and it is the intended shape.
 - Whether partial top cells (1 and 7) are offered at all.
 
 ## Verification

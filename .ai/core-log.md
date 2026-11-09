@@ -160,3 +160,35 @@ The specification needs an implementation, and it deliberately leaves the API sh
 - User Test: N/A
 
 ---
+
+## 6 COMMIT Unreleased 2026-11-09T13:23:48-07:00
+
+#### Coming From:
+
+Unreleased 8134396
+
+#### Purpose:
+
+Decide how userspace writes pixels into the reserved edge strips, closing the one question the geometry specification deliberately left open.
+
+#### Outcome:
+
+`docs/panel-api.md` settles the calling convention: one ioctl on `/dev/fb0`, not a new character device, sysfs or debugfs. The deciding reason is not elegance but `FLS-003` -- a new device node needs an mdev rule, and mdev rules are precisely the `/etc` state that a full-image flash destroys, so a node would have to be recreated by hand after every reflash while `/dev/fb0` already exists and is already openable. It is also the display's own interface rather than a third device that happens to share a panel, and the fbdev core forwards unrecognised ioctls to the driver, which was checked in the tree at `fb_chrdev.c:148` rather than assumed. The ioctl magic `'C'` was confirmed unused in this kernel, as was `'c'`, so there is no collision with another built-in driver. Two commands are defined: `CO5300_IOC_WRITE_RECT` taking panel coordinates, a size, a row stride and an RGB565 buffer, and `CO5300_IOC_GET_GEOM` returning the panel and fb0 rectangles so no userspace program hardcodes 45 or 410, which doubles as a feature test because an older kernel returns `-ENOTTY`. Four semantics are load-bearing rather than conventional. The driver rejects any rectangle intersecting fb0, which puts the "edges never disturb the console" guarantee in the driver instead of in a convention -- a userspace bug cannot paint over the console, and the check is four comparisons. Pixels are passed in host byte order and byte-swapped by the driver, because requiring callers to pre-swap has already produced a silent bug here. Degenerate rectangles return `-EINVAL` instead of drawing nothing, since `LCD-002` established that a window one pixel wide or tall reports success. And each call is one window and one transfer, split into bands by the driver if it exceeds the transmit buffer, which is the only proven way to cover more than one buffer. The document also specifies that the driver gains one mutex taken at every panel entry point -- the four fbcon ops and the ioctl -- because fbcon serialises itself with `console_lock` but that lock does not exclude a userspace ioctl, while the ioctl deliberately does not take `console_lock` to avoid a deadlock class for no added safety. Transfer costs were derived from the measured rate in `LCD-005` rather than estimated: 742 ns per byte gives about 3 ms for a 45x45 tile, 29 ms for a full-width 45-row band and 37 ms for the whole bottom strip, and two earlier estimates in the draft were corrected against that derivation. The chief implementation risk is stated rather than glossed: a 45x45 window shape is untested, since `LCD-002` only established that 1 px fails and 432x31 works, and nothing has established where between those the limit lies. Two fallbacks are recorded, full-width band composition from `p->fb` if narrow windows misbehave, and restricting to the top and bottom strips where no fb0 rows are involved. The cycle also closed the loop with the geometry specification, whose "Not decided here" section previously listed the API shape as open; it now records the decision and points at the new document, so the two specs do not disagree. No code was written and no hardware was touched: the watch was unplugged from USB for this cycle, running on battery, which is why no build or deployment stage applies. The core-syntax audit passed: the `.ai/` diff was inspected, `.ai/core.md` was not modified, entry 6 was validated against the template with six sections in canonical order, sequential numbering from 5, an ISO-8601 timestamp carrying the America/Phoenix offset, prose-only Outcome and Next Steps, eligible Files Modified, and Status values within the allowed set.
+
+#### Next Steps:
+
+Implementation begins with the mutex and the two ioctls in `co5300.c`, which changes no fbcon behaviour, and the gate for everything after it is a diagnostic that paints a corner-marked pattern into every reserved region so the 45x45 window question is answered by looking at the glass. Argument validation -- bounds, fb0 overlap, degenerate size, stride -- is pure arithmetic and should be tested on the build host beside `scripts/tbtns-selftest.py` so a boundary error does not cost a flash. After that: a top-bar status daemon reading `/sys/class/power_supply` and the WiFi state, slot rendering driven by a config on `/home`, and finally button press and release art extending `tbtns`. Still open from the geometry document: where slot art lives and whether the partial top cells 1 and 7 are offered at all. The esp-hosted `process_rx_buf: bad if_type 6` console spam remains unaddressed and still pollutes the display during testing. BLE media keys, firmware-side bond persistence and any wake-from-sleep path remain deferred by user decision.
+
+#### Files Modified:
+
+- docs/panel-api.md
+- docs/panel-reservations.md
+- README.md
+
+#### Status:
+
+- Build: N/A
+- Deployment: N/A
+- User Test: N/A
+
+---

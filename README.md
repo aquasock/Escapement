@@ -116,7 +116,11 @@ The four strips around fb0 are reserved by a single specification,
 `docs/panel-reservations.md`: a 45 px module, a top status bar that owns the full
 width, seven 45x45 app slots down each side, and the three buttons across the
 bottom. It is a spec rather than an implementation — only the bottom bar is
-painted today — but it fixes the geometry every later feature reads from.
+painted today — but it fixes the geometry every later feature reads from. The
+calling convention for writing into those strips is a second spec,
+`docs/panel-api.md`: one ioctl on `/dev/fb0` that takes RGB565 pixels and a
+panel-coordinate rectangle, and refuses any rectangle that would touch the
+console.
 
 **Works: three touch buttons below the console.** The bottom strip outside fb0
 is painted red | green | blue, full width, and each third is a real input
