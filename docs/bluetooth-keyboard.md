@@ -180,3 +180,62 @@ Bisect the two candidates with logs visible:
 
 Each answer costs one flash, and step 1 in particular says whether NimBLE's GATT
 client simply does not fit alongside this port's WiFi.
+
+## Log visibility: what was built, what it proved, what broke
+
+The firmware could not be diagnosed after handoff because the USB-Serial-JTAG
+port belongs to Linux from ~1.75 s. Three things were added to fix that.
+
+**A `/dev/esp-log` device.** A new `ESP_LOG_IF` interface type in both the kernel
+and firmware enums, a misc device and its own skb queue on the Linux side, and a
+`ble_prov_log_nonblocking()` sender on the firmware side. Separate from
+`/dev/esp-ble` because that pipe is a **question-and-answer dialogue** between
+`/usr/sbin/ble-wifi-setup` and a phone: it writes prompts and `read_line`s the
+answers, so a log line arriving mid-dialogue is consumed as an answer and fires
+the provisioning menu. Sharing it was not an option.
+
+**It worked.** Proof from the kernel:
+
+```
+esp32_wifi:esp_log_pipe_rx: esp-log: first frame received, 48 bytes
+```
+
+**Two real bugs came out of testing it.**
+
+1. `skb_queue_tail+0xe` oops. The firmware logs as soon as its sink is installed,
+   which is before the kernel driver finishes probing, so frames arrived while
+   `log_q` was still zeroed and `skb_queue_tail` dereferenced a NULL `prev`. Fixed
+   by setting `log_adapter` last in init and treating it as the ready flag.
+
+2. A global `esp_log_set_vprintf` hook **wedges the board.** With the hook
+   installed and logging at INFO the board stops at the shmem probe and resets on
+   the core-0 task watchdog (`rst:0x7 TG0WDT_SYS_RST`), reproducibly. The first
+   theory -- that writing to the UART after handoff blocks -- was wrong; gating
+   that out did not help. What did help was not installing the global hook at all
+   and letting each module log explicitly (`hid_log()` in `ble_hid.c`).
+
+## Where it stopped
+
+Two independent blockers remain, and they are separate:
+
+  * The global log hook must not be used. Targeted senders only.
+  * `ble_hid` compiled in still wedges the board at ~4.4 s, immediately after
+    `Chipset=ESP32-S3 ID=09 detected over shmem IPC`, whether or not anything is
+    logged. So the BLE central/GATT-client/scan path has its own problem,
+    independent of logging.
+
+The watch is running the known-good firmware (`cab5e98`, 678,464 bytes) and boots
+to `buildroot login:`. The BLE work is on branch `ble-hid-wip` and in
+`stash@{0}` of `build/esp-hosted`; the log-pipe work is committed.
+
+## Next step
+
+Bisect `ble_hid` with the targeted log path in place, one variable per flash:
+
+  1. `ble_hid_configure()` only (security config + store), no host sync hook, no
+     scan. Does it boot?
+  2. Add `ble_hid_on_sync()` with `scan_start()` commented out.
+  3. Add the scan.
+
+That separates "the central role costs more RAM than is free" from "scanning
+under radio coexistence wedges core 0", which are very different fixes.
