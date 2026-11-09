@@ -4,3 +4,7 @@ build/
 
 # Upstream release blobs. scripts/fetch-images.sh downloads and verifies them.
 images/*.bin
+
+# Built by scripts/build-userspace.sh; deploy /home/blekbd on the watch.
+userspace/blekbd
+userspace/blekbd.strip

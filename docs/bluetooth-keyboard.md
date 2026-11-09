@@ -340,3 +340,133 @@ An earlier note in this file claimed "WiFi is up" on the strength of a `wifi
 scan` returning 19 networks. That was wrong. A scan proves the radio and the
 scan path work; it says nothing about the data path. The link was associated
 with an IP address and dropping 100% of packets at the time.
+
+# What it actually was, and what now works
+
+*2026-11-09.* The firmware that wedged the board was never short of RAM and
+never fighting WiFi. It was doing one thing wrong, and two more things had to
+be right before a keyboard could work at all.
+
+## 1. The wedge: an unbounded scan starves core 0's idle task
+
+`ble_gap_disc(own_addr_type, BLE_HS_FOREVER, ...)` was called once at start-up
+and never stopped. Every advertisement from every device in radio range was
+delivered to the NimBLE host task, which ESP-IDF creates with
+`xTaskCreatePinnedToCore(..., configMAX_PRIORITIES - 4, ..., NIMBLE_CORE)` —
+`NIMBLE_CORE` is 0, the core that also runs the WiFi task and the FreeRTOS idle
+task. Idle never ran again, and ten seconds later:
+
+```
+rst:0x7 (TG0WDT_SYS_RST)   /   esp_restart_noos at system_internal.c:158
+```
+
+**Proof that it was starvation, not memory or coexistence:** with
+`CONFIG_ESP_TASK_WDT_CHECK_IDLE_TASK_CPU0` off, the same firmware ran
+indefinitely, `loadavg 0.19`, with the BLE stack up and the keyboard connected.
+
+Two earlier readings of this same evidence were wrong and are superseded:
+
+- *"The central role plus a GATT client does not fit."* It fits. Roles-only
+  boots, and so does the full host.
+- *"Scanning under coexistence with WiFi wedges the core."* Scanning at 100 %
+  duty does. Scanning at 25 % duty in bounded windows does not, and WiFi stays
+  up.
+
+The fix is in `ble_hid.c`: a 30 ms window in a 120 ms interval, duplicate
+filtering on, 15 s per hunt, then an 8 s gap. Measured cost of the whole BLE
+host including the GATT client: 687,200 bytes of a 786,432-byte partition.
+
+**One thing this hid for a long time: firmware panics are invisible.** The
+ESP-IDF console is UART0, and nothing on this board is wired to UART0. A crash
+in `app_main` therefore looks exactly like a silent reset loop. Enabling
+`CONFIG_ESP_CONSOLE_SECONDARY_USB_SERIAL_JTAG` puts panics on the same
+`/dev/ttyACM0` the shell is on — but it also stops Linux from reaching
+userspace, because the firmware and the kernel both drive that peripheral.
+Enable it in a throwaway build only.
+
+## 2. The silent blocker: nothing initialised NimBLE's bond store
+
+With the scan fixed the board booted, found a keyboard, connected — and then:
+
+```
+hid: connected, security initiate (8)          <- BLE_HS_ENOTSUP
+hid: found 6 notifying report(s)
+hid: protocol mode -> report (0)
+hid: protocol mode write status 261            <- ATT 0x05, insufficient auth
+hid: map read status 261
+```
+
+`ble_store_config_init()` is the application's responsibility in ESP-IDF; the
+examples call it explicitly in `main()`. This firmware never did, and the store
+callbacks were therefore NULL, so `ble_gap_security_initiate()` declined to
+start pairing at all. Without pairing the link never encrypts, and a HID
+keyboard will not hand over a single report on an unencrypted link.
+
+## 3. Bonds cannot be persisted here, and that is a hardware limit
+
+With `CONFIG_BT_NIMBLE_NVS_PERSIST=y` the board reset-looped at ~3.3 s. The
+backtrace named it exactly:
+
+```
+abort() was called at PC 0x42023b2e on core 0
+  esp_ipc_call_and_wait
+  spi_flash_disable_interrupts_caches_and_other_cpu
+  esp_mm ... esp_ota_get_running_partition
+  esp_partition_write <- nvs::Page::writeItem <- nvs_set_blob
+```
+
+Any flash write from core 0 must park the other core to disable the flash
+caches, and **the other core is running Linux**, so there is no FreeRTOS IPC
+task to park. It aborts. There is no way around this from the firmware.
+
+So bonds live in RAM and the keyboard re-pairs on each boot. Doing better means
+handing the bond to Linux over the pipe, storing it on jffs2 in `/home`, and
+feeding it back before the NimBLE host starts — the mechanism is
+`ble_store_write_peer_sec()` on the firmware side. Not done yet.
+
+## 4. Report protocol, not boot protocol
+
+Boot protocol gives a fixed 8-byte keyboard report: letters, modifiers, nothing
+else. Every media key, every vendor report, is invisible in boot mode. The host
+now writes `1` to HID Protocol Mode (0x2A4E) and subscribes to every notifying
+report characteristic — six of them on the keyboard tested — then reads the HID
+Report Map (0x2A4B) and forwards it to Linux.
+
+The firmware forwards reports **verbatim**. When a HID device uses report IDs
+the ID is already the first payload byte, so the firmware needs no per-report
+bookkeeping at all; it is the daemon's job to know what the bytes mean.
+
+## 5. Choosing the right keyboard
+
+A scan sees every HID device in range. Connecting to the first one found spent
+the connect timeout on a neighbour at -92 dBm while the keyboard on the desk was
+never tried. Scan results are now collected for the whole window; anything at
+-60 dBm or better is connected immediately, otherwise the strongest candidate is
+tried when the window closes, and anything below -80 dBm is not tried at all.
+
+## The userspace side
+
+`userspace/blekbd.c` parses the HID report descriptor and drives uinput. The
+parser is the part most likely to be subtly wrong, so it is tested without a
+keyboard: `scripts/build-userspace.sh --selftest` builds it for the host, feeds
+it a recorded descriptor and report stream, and prints the keys it would inject.
+Modifiers, chords, and Consumer-page media keys all decode correctly.
+
+Two details the firmware/daemon split makes easy to get wrong:
+
+- **Bit offsets shift by one byte** when report IDs are in use, because the
+  report ID is part of the forwarded data but not part of the descriptor's bit
+  accounting.
+- **Array fields index through the logical minimum**, not from zero.
+
+Both were caught by the self-test rather than on the watch.
+
+## Where this leaves it
+
+Working and verified on hardware: the firmware boots with the watchdog armed,
+scans in bounded windows, detects BLE HID keyboards, connects, pairs, discovers
+the HID service, and logs every step to `/dev/esp-log`. The daemon runs on the
+watch, owns `/dev/esp-ble`, parses descriptors correctly, and requests hunts.
+
+Not yet verified end to end: a real keypress reaching the console. That needs
+the keyboard in Bluetooth pairing mode, which is a physical action.

@@ -105,3 +105,45 @@ echo 'int main(void){return 0;}' > t.c
 ...-gcc -mfdpic -Os -c t.c -o t.o && file t.o
 # ELF 32-bit MSB relocatable, Tensilica Xtensa, version 1
 ```
+
+## 5. `XTENSA_GNU_CONFIG` is not optional, and its absence looks like a broken linker
+
+The compiler reads the Xtensa core description from `XTENSA_GNU_CONFIG` at
+**run time**. Unset, it falls back to a generic core that is **big-endian**, so
+it emits `ELFDATA2MSB` objects while the uClibc in the sysroot is little-endian.
+The link then fails with:
+
+```
+ld: .../libgcc_s.so.1: error adding symbols: file in wrong format
+```
+
+and, with `-static-libgcc`, moves on to:
+
+```
+ld: .../sysroot/lib/libc.so.1: error adding symbols: file in wrong format
+```
+
+and, if it gets as far as the CRT objects:
+
+```
+ld: .../crt1.o: compiled for a little endian system and target is big endian
+```
+
+Nothing in that sequence mentions the missing variable, and `-mlittle-endian`
+is not a recognised option on this compiler (the endianness comes from the core,
+not a flag), so the toolchain reads as broken. It is not. Set:
+
+```sh
+export XTENSA_GNU_CONFIG=$PWD/build/toolchain/xtensa-dynconfig/esp32s3.so
+```
+
+`scripts/build-userspace.sh` does this for the userspace binaries. The kernel
+build gets it from the same place.
+
+The tell is one command away:
+
+```sh
+echo 'int main(void){return 0;}' > t.c
+...-gcc -Os -c t.c -o t.o
+readelf -h t.o | grep Data      # must say "little endian"
+```
