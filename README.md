@@ -51,8 +51,25 @@ Verified by corrupting the chip on purpose: set to 20:30 while true UTC was
 19:00, corrected the *system* clock only, rebooted — and the next boot reported
 `setting system clock to 2026-11-08T19:01:00 UTC`. The chip had followed.
 
+**Works: a text console on the AMOLED.** Black background, green text, blinking
+cursor, 40 columns by 25 rows:
+
+```
+Console: switching to colour frame buffer device 40x25
+```
+
+That is the VGA 8x16 font — the IBM PC text font, 8 px wide in a 9 px cell —
+which is what "the official console font" means in practice. The kernel picks
+it by default.
+
+The framebuffer is **320x400**, not the whole glass, placed at offset (45, 46).
+The panel's corners are 45-degree chamfers, so the largest unclipped rectangle
+is 320x412 (`docs/panel-geometry.md` has the measurement). Keeping fb0 to the
+console area means fbcon does the column/row arithmetic itself and the 45/46 px
+border stays outside the framebuffer, reserved for notification strips.
+
 **Works: the display.** The CO5300 AMOLED is a `spi_mem` client on SPI2 with an
-fbdev framebuffer, 410x502 RGB565:
+fbdev framebuffer:
 
 ```
 co5300: TE edges after init = 4 *** CONTROLLER IS SCANNING ***
@@ -102,7 +119,8 @@ LilyGo T-Watch Ultra:
 SoC      ESP32-S3, 2x Xtensa LX7, 240 MHz
 RAM      512 KiB internal + 8 MiB PSRAM, QUAD (not octal)
 Flash    16 MiB QSPI, DIO, 80 MHz
-Display  CO5300 AMOLED, 410x502, QSPI      works (fb0, SPI2)
+Display  CO5300 AMOLED, 410x502, QSPI      works (fb0 + console, SPI2)
+         usable 320x412 (45-degree chamfered corners)
 Touch    CST9217, I2C 0x1A                 -- no driver
 PMU      AXP2101, I2C 0x34                 works (battery)
 Expander XL9555, I2C 0x20                  works (display power)
@@ -223,8 +241,12 @@ cores.
 
 ## Not done
 
-- **No input.** `CONFIG_INPUT` is off in the kernel config. The two side
-  pushers and the touch panel are all unwired in software.
+- **No input into the console.** The two side pushers emit keycodes
+  (`KEY_POWER`, `KEY_ENTER`) but nothing consumes them, so the on-screen
+  console is output only. Typing still happens on the USB port.
+- **The console is slow to repaint.** Every fbcon drawing op goes straight to
+  the panel as one spi-mem op through a 64-byte FIFO, with no DMA and no dirty
+  region tracking. Correct first; fast later.
 - **Display is write-only and synchronous.** Every blit sends the whole window
   as one spi-mem op through a 64-byte FIFO, with no DMA and no double buffering.
   It works; it is not fast.

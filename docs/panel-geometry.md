@@ -75,3 +75,33 @@ terminal rarely reads.
     because they are measured from the visible glass inward.
   * The measurement is a photograph of an AMOLED through a camera. It is good to
     a few pixels, not to one.
+
+## The console uses 320x400 of it
+
+fbcon draws 40 columns by 25 rows at the VGA 8x16 cell (8 px wide in a 9 px
+cell):
+
+```
+40 * 8  = 320 px   (fills the width exactly)
+25 * 16 = 400 px   (12 px spare of 412)
+```
+
+The framebuffer is therefore 320x400, not 320x412, placed at (45, 46). Two
+reasons: the round 400 leaves the vertical centring exact, and making fb0 the
+console area rather than the whole glass means fbcon does the arithmetic and
+the border strips stay outside the framebuffer, free for notifications.
+
+The five fonts the kernel ships and what each would give here:
+
+```
+VGA8x16      8x16   ->  40 cols x 25 rows   <- chosen; the classic
+6x10         6x10   ->  53 cols x 41 rows
+6x8          6x8    ->  53 cols x 51 rows
+ProFont6x11  6x11   ->  53 cols x 37 rows
+7x14         7x14   ->  45 cols x 29 rows
+MINI4x6      4x6    ->  80 cols x 68 rows   <- the only 80-column option
+```
+
+MINI4x6 reaches 80 columns (4 * 80 = 320) but 4 px glyphs are rough to read on
+a 2-inch panel. 53 columns is the ceiling for any 6 px font, since 320 / 6 = 53
+and the glass is 410 wide at most.
