@@ -8,3 +8,7 @@ images/*.bin
 # Built by scripts/build-userspace.sh; deploy /home/blekbd on the watch.
 userspace/blekbd
 userspace/blekbd.strip
+
+# Runtime session state. .codewhale/handoff.md is tracked deliberately, so the
+# next agent can find the baton from a clean clone; the rest is per-session.
+.codewhale/state/
