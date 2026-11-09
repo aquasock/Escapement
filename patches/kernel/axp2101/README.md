@@ -39,3 +39,53 @@ rebase on the merged series.
 Rebased onto Linux 7.2.4 + this project's patches. Verified only as far as
 "the six patches apply and the kernel builds" — hardware behaviour is recorded
 in docs/bringup notes.
+
+## Two additions are whole files, not patches
+
+`final/` holds `axp20x.c`, `axp20x_battery.c` and `axp20x.h`, installed by
+`scripts/build-kernel.sh` after the patch stack. They carry:
+
+- `POWER_SUPPLY_PROP_CAPACITY` and `VOLTAGE_NOW` for the AXP2101 battery, read
+  straight from registers `0xa4` (percent, bits 6:0) and `0x34`/`0x35` (14-bit,
+  already mV). There is no IIO fallback for this variant.
+- the `axp20x-pek` cell in `axp2101_cells[]`, with the two edge interrupts, so
+  the top-left pusher becomes an input device instead of being silently absent.
+
+They were patches (0009, 0010) until both turned out to be broken in ways that
+only showed up as a *silently missing driver*:
+
+- **0009 had hunk line counts that did not match its body.** `git apply`
+  rejected it as corrupt, and because the loop wrapped the call in `|| true`
+  the failure was invisible. The kernel built, booted, and reported no battery.
+- **0010's diff headers carried a timestamp suffix** and a path missing the
+  `drivers/` prefix, so `git apply` looked for `mfd/axp20x.c` and did not find
+  it. Also silent.
+
+The lesson is in `scripts/build-kernel.sh` now: the loop reports failures
+instead of swallowing them, and the recursive glob means nothing under a
+subdirectory is skipped again.
+
+## Verified on hardware, 2026-11-09
+
+```
+/sys/class/power_supply/    axp20x-battery  axp20x-usb
+capacity                    100
+voltage_now                 4175000        uV
+status                      Full
+usb online                  1
+
+/proc/interrupts
+  8:  esp32xx-gpio       7  axp2101_irq_chip
+ 17:  axp2101_irq_chip   8  axp20x-pek-dbr
+ 18:  axp2101_irq_chip   9  axp20x-pek-dbf
+ 23:  axp2101_irq_chip  14  axp20x-usb-power-supply
+ 24:  axp2101_irq_chip  15  axp20x-usb-power-supply
+
+input: axp20x-pek as /devices/platform/i2c0/i2c-0/0-0034/axp20x-pek/input/input1
+```
+
+`voltage_now` needed its units fixed once: the register is mV and the property
+is uV, and the first version reported 4175 for a 4175 mV battery.
+
+`CONFIG_AXP20X_POWER` also had to be enabled -- it is what registers
+`axp20x-usb`, and it was off.

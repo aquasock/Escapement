@@ -22,9 +22,28 @@ voltage_now = 4182000      uV
 status      = Full
 ```
 
-No Linux driver for the AXP2101 exists — not here, not in mainline — so
-`patches/kernel/axp2101/` carries the pending upstream series plus two local
-fixes. See "The PMU" in the bring-up notes.
+No Linux driver for the AXP2101 exists in mainline — not here, not upstream — so
+`patches/kernel/axp2101/` carries the pending series plus three local fixes.
+
+**Both supplies register, and the interrupt works:**
+
+```
+/sys/class/power_supply/    axp20x-battery  axp20x-usb
+capacity                    100
+voltage_now                 4175000        uV
+status                      Full
+usb online                  1
+
+/proc/interrupts
+  8:  esp32xx-gpio       7  axp2101_irq_chip
+ 17:  axp2101_irq_chip   8  axp20x-pek-dbr
+ 18:  axp2101_irq_chip   9  axp20x-pek-dbf
+ 23:  axp2101_irq_chip  14  axp20x-usb-power-supply
+ 24:  axp2101_irq_chip  15  axp20x-usb-power-supply
+```
+
+`axp20x-pek` also appears as an input device, so the top-left pusher reaches
+Linux.
 
 **Works: the RTC.** A PCF85063A at I2C 0x51 registers as `rtc0` and
 `CONFIG_RTC_HCTOSYS` seeds the system clock before init:
@@ -277,13 +296,13 @@ cores.
 - **Display is write-only and synchronous.** Every blit sends the whole window
   as one spi-mem op through a 64-byte FIFO, with no DMA and no double buffering.
   It works; it is not fast.
-- **The PMU's interrupt is not wired.** The AXP2101 binds at 0x34 and loads, but
-  with `interrupts = <7 LEVEL_LOW>` the boot hung — a level-triggered IRQ on a
-  pin nothing pulls up storms forever. No IRQ means polling, which covers
-  battery state and rules out wake-from-sleep and hotplug events.
-- **`axp20x-usb` does not register.** Only the battery supply appears. The USB
-  power-supply driver wants the two VBUS interrupts, which are the ones we
-  cannot provide.
+- **Wake-from-sleep is not wired to anything.** The PMU interrupt works and the
+  VBUS hotplug interrupts are registered, but nothing acts on them yet: there is
+  no suspend path, so the watch does not sleep at all. That is a power
+  management project, not a driver gap.
+- **The PMU's fuel gauge is not driven.** `capacity` and `voltage_now` come from
+  the registers directly (see `patches/kernel/axp2101/0009`); there is no
+  battery model, so there is no time-to-empty and no charge-cycle estimate.
 - **The RTC's stored time is UTC+8.** The chip counts correctly but the factory
   set it to China Standard Time. It is exactly 8 h ahead of true UTC, so it
   needs one `hwclock --set` to correct. Not a driver fault.

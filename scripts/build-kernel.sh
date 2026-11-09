@@ -74,13 +74,33 @@ cd "$here"
 # ---- stack 2: ours ---------------------------------------------------------
 say "escapement patches"
 cd "$K"
-# Every patch in patches/kernel, in filename order. The glob used to be
-# 0001-* only, which silently skipped later patches -- including the one that
-# registers the CO5300 driver, so a clean build produced a kernel with no
-# display driver and reported success.
-for f in "$here"/patches/kernel/*.patch; do
+# Every patch under patches/kernel, in filename order, including one level of
+# subdirectory.
+#
+# Two separate ways this has silently lost patches:
+#
+#   1. The glob used to be 0001-*, which skipped later patches -- including the
+#      one registering the CO5300 driver, so a clean build produced a kernel
+#      with no display driver and reported success.
+#   2. It was then *.patch, which does not recurse. Everything in
+#      patches/kernel/axp2101/ was skipped, so a rebuild lost the AXP2101 MFD,
+#      regulator and battery drivers entirely: the PMU stopped appearing in
+#      /sys/class/power_supply and the only trace of it was the DTB's
+#      compatible strings, which nothing bound to.
+#
+# Patch files are not sorted for us by the shell, so sort them explicitly, and
+# report a failure instead of swallowing it. A patch that does not apply is a
+# statement about the tree, not noise.
+for f in $(ls -1 "$here"/patches/kernel/*.patch \
+                  "$here"/patches/kernel/*/*.patch 2>/dev/null | sort); do
     [ -e "$f" ] || continue
-    git apply --whitespace=nowarn "$f" 2>/dev/null || true
+    if git apply --whitespace=nowarn "$f" 2>/dev/null; then
+        echo "  applied $(basename "$f")"
+    elif git apply --reverse --check "$f" 2>/dev/null; then
+        echo "  already applied: $(basename "$f")"
+    else
+        echo "  FAILED to apply $(basename "$f")" >&2
+    fi
 done
 cd "$here"
 # ---- ours: the drivers that are still under active change -------------------
@@ -89,6 +109,18 @@ cd "$here"
 # with, so they are kept as whole-file copies and installed after the patch
 # stacks. Everything else in patches/kernel is a real patch.
 say "display driver sources"
+# The AXP2101 additions that live on top of the pending series (capacity,
+# voltage, the power-key cell) are whole files for the same reason: two of them
+# were carried as patches whose hunk line counts did not match their bodies, and
+# `git apply` rejected them silently because the loop swallowed the error. The
+# result was a kernel with the DTB describing a PMU that no driver bound to.
+cp "$here"/patches/kernel/axp2101/final/axp20x.c \
+   "$K/drivers/mfd/axp20x.c"
+cp "$here"/patches/kernel/axp2101/final/axp20x_battery.c \
+   "$K/drivers/power/supply/axp20x_battery.c"
+cp "$here"/patches/kernel/axp2101/final/axp20x.h \
+   "$K/include/linux/mfd/axp20x.h"
+
 cp "$here"/patches/kernel/display/final/spi-esp32.c "$K/drivers/spi/spi-esp32.c"
 cp "$here"/patches/kernel/display/final/co5300.c "$K/drivers/video/fbdev/co5300.c"
 cp "$here"/patches/kernel/display/final/esp32s3-devkit-c1.dts \
