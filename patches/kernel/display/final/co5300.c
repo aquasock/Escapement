@@ -41,6 +41,17 @@
 #define PANEL_W 410
 #define PANEL_H 502
 #define PANEL_OFFSET_X 22
+
+/*
+ * The glass has 45-degree chamfered corners, not circular ones, so these are
+ * the only rectangle dimensions that are guaranteed to render in full. Measured
+ * on hardware; see docs/panel-geometry.md for the method and the numbers.
+ *
+ *    panel 410x502  -  inset 45 per side  =  320x412 usable
+ */
+#define PANEL_SAFE_INSET	45
+#define PANEL_SAFE_W		(PANEL_W - 2 * PANEL_SAFE_INSET)	/* 320 */
+#define PANEL_SAFE_H		(PANEL_H - 2 * PANEL_SAFE_INSET)	/* 412 */
 #define BPP 16
 
 struct co5300 {
