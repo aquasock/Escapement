@@ -116,3 +116,67 @@ rediscovering:
   * **`ble_prov.c` is single-connection today.** It keys off one global
     `conn_handle`, which was fine for provisioning and is not fine for
     provisioning plus a keyboard.
+
+## First attempt: the watch boot-looped, and was restored
+
+The firmware side was written and did compile — `ble_hid.c` with the scan, pair,
+HID discovery, subscribe and report-forward path, wired so that its sync ran from
+`ble_prov.c`'s (there is exactly one NimBLE sync callback and `ble_prov` owns it).
+It did not run.
+
+First flash with it:
+
+```
+rst:0x8 (TG1WDT_SYS_RST)
+```
+
+A task-watchdog reset, about 4.4 s in, repeating. The kernel got as far as
+`esp32s3-rsa: hardware RSA registered` and then the board reset.
+
+Reducing the scan duty cycle from 100 % (window == interval, which starves the
+idle task on a core shared with WiFi) to 50 % made no difference, so the duty
+cycle was not the cause.
+
+**Root cause is not yet established.** Two candidates, and they need separating:
+
+  1. Enabling the central/observer roles at all, with a GATT client linked in.
+  2. Scanning under radio coexistence with `esp-hosted`'s WiFi.
+
+**The instant revert**: `build/esp-hosted` was reset to `cab5e98`, the firmware
+rebuilt (678,464 bytes) and flashed, and the watch boots to `buildroot login:`
+with no reset. The work is kept on branch `ble-hid-wip`.
+
+## The real blocker: firmware logs are invisible after handoff
+
+This is what made the failure hard to read, and it has to be fixed before the
+next attempt.
+
+The USB-Serial-JTAG port carries ESP-IDF logs until Linux claims it, at about
+1.75 s. Every line after that is Linux printk. `app_main` brings the BLE stack up
+*after* it starts Linux, so `ble_hid`'s own `ESP_LOGI` output goes to a port Linux
+now owns -- it is lost, not delayed. Raising the log level to INFO made the early
+boot verbose and revealed nothing about BLE, because the BLE code runs later.
+
+So debugging the keyboard stack needs one of:
+
+  * a log sink that survives handoff -- a second UART, or the `printf` that
+    `esp-hosted` already uses for its own diagnostics;
+  * starting the BLE host *before* `linux_boot`, so its logs land in the window
+    that is still visible;
+  * a status command the Linux side can invoke, which needs the keyboard up
+    first -- circular;
+  * a deliberately delayed Linux boot while bringing the keyboard up.
+
+The second is the cheapest and also the most likely to be correct on its own
+merits: the radio should be up before there is traffic to share it with.
+
+## Next step
+
+Bisect the two candidates with logs visible:
+
+  1. Central/observer roles enabled, `ble_hid.c` not called at all. Does it boot?
+  2. If yes, add the host init but no scan. Does it boot?
+  3. Then add the scan.
+
+Each answer costs one flash, and step 1 in particular says whether NimBLE's GATT
+client simply does not fit alongside this port's WiFi.
