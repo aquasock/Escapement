@@ -1,0 +1,86 @@
+diff --git a/patches/kernel/display/final/co5300.c b/patches/kernel/display/final/co5300.c
+index 78fd5a4..098a1a1 100644
+--- a/patches/kernel/display/final/co5300.c
++++ b/patches/kernel/display/final/co5300.c
+@@ -35,6 +35,7 @@
+ #include <linux/spi/spi-mem.h>
+ #include <linux/io.h>
+ #include <linux/vmalloc.h>
++#include <linux/uaccess.h>
+ 
+ #define DRIVER_NAME "co5300"
+ 
+@@ -477,12 +478,73 @@ static int co5300_fb_setcolreg(u_int regno, u_int red, u_int green, u_int blue,
+ 	return 0;
+ }
+ 
++
++/*
++ * fb_write - let userspace draw on the panel.
++ *
++ * Without this there is no userspace path onto fb0 at all. The driver provides
++ * only the accelerated ops (fillrect / copyarea / imageblit), which fbcon uses,
++ * so text works -- but mmap() returns ENODEV (no fb_mmap) and write() hits
++ * fb_WARN_ON_ONCE(!info->fbops->fb_write) and returns -1. A program that wants
++ * to put its own pixels on the glass has no way to do it.
++ *
++ * fb_mmap alone would not be enough either: the panel has no memory of ours, it
++ * is fed over SPI, so writing to the framebuffer only puts bytes in RAM. Each
++ * write therefore copies into the framebuffer and then blits the rows it
++ * touched, which is the only thing that reaches the glass.
++ *
++ * The whole frame cannot be pushed as one op from here (spi-mem wants a command
++ * with its data), so this reuses co5300_blit(), which is already the path fbcon
++ * takes.
++ */
++static ssize_t co5300_write(struct fb_info *info, const char __user *buf,
++			    size_t count, loff_t *ppos)
++{
++	struct co5300 *p = info->par;
++	unsigned int total = info->fix.smem_len;
++	unsigned int line = info->fix.line_length;
++	unsigned int start, y0, y1;
++
++	/*
++	 * Everything here is 32-bit on purpose. The offsets are bounded by
++	 * smem_len (256000), so 64-bit arithmetic buys nothing -- and on Xtensa
++	 * a 64-bit divide pulls in __divdi3, which this kernel does not link.
++	 * The first version used loff_t and failed to link at vmlinux.
++	 */
++	if (*ppos < 0)
++		return -EINVAL;
++	if ((loff_t)*ppos > (loff_t)total)
++		return 0;
++
++	start = (unsigned int)*ppos;
++
++	if (count > total - start)
++		count = total - start;
++	if (!count)
++		return 0;
++
++	if (copy_from_user((u8 __force *)info->screen_base + start, buf, count))
++		return -EFAULT;
++
++	*ppos = start + count;
++
++	y0 = start / line;
++	y1 = (start + (unsigned int)count - 1) / line;
++	if (y1 > FB_H - 1)
++		y1 = FB_H - 1;
++
++	co5300_blit(p, 0, (int)y0, FB_W - 1, (int)y1);
++
++	return count;
++}
++
+ static const struct fb_ops co5300_fb_ops = {
+ 	.owner = THIS_MODULE,
+ 	.fb_setcolreg = co5300_fb_setcolreg,
+ 	.fb_fillrect = co5300_fillrect,
+ 	.fb_copyarea = co5300_copyarea,
+ 	.fb_imageblit = co5300_imageblit,
++	.fb_write = co5300_write,
+ };
+ 
+ static int co5300_probe(struct spi_mem *mem)
