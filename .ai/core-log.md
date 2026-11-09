@@ -129,3 +129,34 @@ The buttons are accepted as they are and no further work is owed on them. If the
 - User Test: PASS
 
 ---
+
+## 5 COMMIT Unreleased 2026-11-09T13:21:27-07:00
+
+#### Coming From:
+
+Unreleased fe9de87
+
+#### Purpose:
+
+Reserve the four edge strips around fb0 with one specification, so that the top status bar, the side app slots and the bottom buttons all read their geometry from a single agreed document instead of each inventing its own.
+
+#### Outcome:
+
+`docs/panel-reservations.md` now fixes the layout. The module is 45 px, which is the largest square that fits a side strip without touching fb0 and therefore costs no console columns; 48 was considered and rejected because it would have forced fb0 from 320 to 304 px and cost two of the forty columns. Measured geometry gives a 45 px left strip, a 45 px right strip, 45 rows above fb0 and 57 below it, and the strips are trapezoids rather than rectangles because the glass corners are 45-degree chamfers. The two sides are not symmetric: the left strip is full width from row 80 but the right only from row 89, because the top-right chamfer leg is 10 px longer than the top-left, so the slot grid is laid out on the intersection of the two, rows 89 to 420, and centred within it. Seven 45x45 slots per side at rows 97..411 use 315 of 332 available rows with the 17 spare split 8 above and 9 below, and every one of the fourteen slots was checked cell by cell against the chamfer inequalities and is 100 percent unclipped. The top bar was given the full width including the corners, by explicit decision, and 410 is not divisible by 45, so the nine top cells leave a 5 px orphan at x 405..409 which sits inside the top-right chamfer and is invisible anyway; wasting that space to keep one module everywhere was the deliberate trade. Cell-by-cell visibility across the top bar came out at 2, 69, 100, 100, 100, 100, 100, 61 and 1 percent, which is the concrete statement that the bar has five fully usable cells and four that are clipped, and that clipping is accepted rather than treated as a fault. The bottom strip stays the three buttons as they are, at panel columns 0..134, 137..270 and 273..409, and is deliberately not on the 45 module because it is fixed chrome rather than a slot grid. The central design point recorded is that all four edges are one operation -- write RGB565 into a named rectangle in panel coordinates, outside fb0 -- and that the bottom bar is already that operation, painted at probe time rather than on demand. Non-interference with the console is shown to be structural rather than a matter of discipline: `co5300_blit()` sets its column window to `FB_X + x0 .. FB_X + x1`, so fbcon physically cannot address a panel column outside fb0, which was checked in the source rather than assumed. The document also carries forward the three defects that any new drawing path must respect, since all three reported success while drawing nothing: pixels must be byte-swapped, a degenerate window is not honoured, and a rectangle must be one transfer. No code was written and no hardware was touched -- this cycle is a specification, so Build, Deployment and User Test do not apply. The core-syntax audit passed: the `.ai/` diff was inspected, `.ai/core.md` was not modified, entry 5 was validated against the template with six sections in canonical order, sequential numbering from 4, an ISO-8601 timestamp carrying the America/Phoenix offset, prose-only Outcome and Next Steps, eligible Files Modified, and Status values within the allowed set.
+
+#### Next Steps:
+
+The specification needs an implementation, and it deliberately leaves the API shape open: ioctl, sysfs node or a small character device has to be settled first because it fixes the userspace contract, and the top bar's drawing should be a daemon for consistency with `blekbd` and `tbtns`. Whatever is chosen must begin with a structured test pattern -- distinct colours per slot and a different colour in each corner of each slot -- because a flat fill proves nothing about addressing on a write-only panel, and this project has already had three drawing paths report success while drawing nothing. The bottom bar's press and release artwork is the last consumer to wire up, once the press path can repaint a region. The esp-hosted `process_rx_buf: bad if_type 6` console spam remains open and is still the cheapest next cycle because it pollutes the display during testing. BLE media keys, firmware-side bond persistence and any wake-from-sleep path remain deferred by user decision.
+
+#### Files Modified:
+
+- docs/panel-reservations.md
+- README.md
+
+#### Status:
+
+- Build: N/A
+- Deployment: N/A
+- User Test: N/A
+
+---

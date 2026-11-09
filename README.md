@@ -112,6 +112,12 @@ console area means fbcon does the column/row arithmetic itself and the 45 px
 border stays outside the framebuffer, reserved for notification strips. That
 leaves 57 rows below fb0, which is where the touch buttons live.
 
+The four strips around fb0 are reserved by a single specification,
+`docs/panel-reservations.md`: a 45 px module, a top status bar that owns the full
+width, seven 45x45 app slots down each side, and the three buttons across the
+bottom. It is a spec rather than an implementation — only the bottom bar is
+painted today — but it fixes the geometry every later feature reads from.
+
 **Works: three touch buttons below the console.** The bottom strip outside fb0
 is painted red | green | blue, full width, and each third is a real input
 device:
