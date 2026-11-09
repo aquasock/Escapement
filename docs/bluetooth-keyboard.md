@@ -239,3 +239,62 @@ Bisect `ble_hid` with the targeted log path in place, one variable per flash:
 
 That separates "the central role costs more RAM than is free" from "scanning
 under radio coexistence wedges core 0", which are very different fixes.
+
+## Measured: permanent BLE advertising breaks WiFi data
+
+This is the clearest result of the whole investigation, and it came from an A/B
+that changed one variable.
+
+**With BLE advertising running** (the `Esp32-Linux` provisioning peripheral,
+which advertises forever and re-arms every 5 s):
+
+```
+watch -> gateway:   4 packets transmitted, 0 received, 100% packet loss
+wpa_supplicant:     CTRL-EVENT-DISCONNECTED ... reason=2   (several times)
+host -> watch:      15 packets transmitted, 0 received, 100% packet loss
+```
+
+`reason=2` is "previous authentication no longer valid" -- the AP dropping a
+station that stopped answering, not the station leaving.
+
+**After provisioning was configured**, so the watch started itself with
+`BLE WiFi setup: not started (wifi already configured)` and nothing was
+advertising:
+
+```
+watch -> gateway:   4 packets transmitted, 4 received, 0% packet loss
+                    min/avg/max = 15.7 / 63.9 / 192.8 ms
+host  -> watch:     5 packets transmitted, 5 received, 0% packet loss
+                    min/avg/max = 177.7 / 187.6 / 196.0 ms
+```
+
+Same firmware, same radio, same AP, same watch. The only change is that the BLE
+peripheral stopped advertising.
+
+## What this means for the keyboard
+
+BLE and WiFi share one radio on the ESP32-S3, on a core that also runs the
+ESP-IDF idle task. A peripheral advertising every 5 s for the life of the device
+is enough to starve an active WiFi STA link into 100% loss.
+
+So the keyboard work cannot simply add "connect to a BLE keyboard" on top of
+what exists. The provisioning peripheral has to stop advertising once WiFi is
+configured -- which it now does, for exactly this reason, in the port's own
+`S46blewifi` logic -- and anything that keeps BLE alive must coexist politely:
+
+  * **Stop advertising once configured.** Already true, and load-bearing.
+  * **Narrow scan windows.** 50 ms in every 100 ms, not window == interval.
+    Continuous scan starves the idle task on a shared core.
+  * **Expect degraded throughput, not a broken link.** A connected BLE keyboard
+    at a sane connection interval costs the radio far less than advertising.
+  * **Do not run peripheral and central roles at once unless measured.** The
+    original plan had the watch as provisioning peripheral *and* HID central
+    simultaneously. On this hardware that is a coexistence question first and a
+    protocol question second.
+
+## Also corrected
+
+An earlier note in this file claimed "WiFi is up" on the strength of a `wifi
+scan` returning 19 networks. That was wrong. A scan proves the radio and the
+scan path work; it says nothing about the data path. The link was associated
+with an IP address and dropping 100% of packets at the time.
