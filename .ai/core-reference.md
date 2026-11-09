@@ -132,6 +132,8 @@ Topic IDs are the `record_id` prefix. An entry reserves a name; it does not clai
 | Why does a thin fill draw nothing while a thick one works? | LCD | LCD-002 |
 | Does a 45x45 window draw, or is it too narrow? | LCD | LCD-008 |
 | Why does a tall strip tear into diagonal splits? | LCD | LCD-009 |
+| What does a panel transfer cost per byte? | LCD | LCD-010 |
+| Is the panel or the CPU the display bottleneck? | LCD | LCD-010 |
 | Why did a white test pattern come out pink? | LCD | LCD-008 |
 | Why does a coloured fill report success and change nothing? | LCD | LCD-003 |
 | Why is one pixel missing from the left and top edges? | LCD | LCD-004 |
@@ -189,6 +191,7 @@ LCD-006: "A whole frame cannot be a single transfer: spi-mem refuses a data-only
 LCD-007: "The glass is 410x502 with 45-degree chamfers; the largest unclipped rectangle is 320x412 and fb0 is 320x400 at (45,45), leaving a 57-row strip below it that the touch buttons are painted into"
 LCD-008: "45x45 windows are honoured, so the edge API needs no full-width fallback; and in RGB565 green is a 6-bit field, so RGB565(31,31,31) is pink (0xFBFF) and white needs 63 (0xFFFF)"
 LCD-009: "A long single-transfer window to the right strip (45x356) tears into diagonal splits; the same rect in 2-row bands is clean. Not width, not X, not height -- the cap is a workaround and the root cause is unestablished, with SPI clock the remaining suspect"
+LCD-010: "Transfers cost 11.42 us per 64-byte chunk with per-transfer fixed cost ~0, at 5.6 MB/s (56% of quad wire); the panel itself is only 1.6% of that, so the remaining 5 us/chunk is CPU FIFO work and DMA caps at about 2x"
 TCH-001: "The touch controller is a CST9217 at I2C 0x1A (register 0x0000 reads 0xCA, the family checkcode); 0x5A is the DRV2605 haptic driver, whose register 0x00 reads 0xE0 (DEVICE_ID bits), and only 0x1A completes the CST92xx unlock handshake"
 TCH-002: "A reset CST9217 is in command mode and reports nothing: write 0xD1=0x01, then 0xD1=0x1E twice, require byte 1 of a read of 0x0002 to be 0x1E, then write 0xD1=0x09 for normal mode"
 TCH-003: "Report block at 0xD000 is 15 bytes and the transfer must be all 15 even though only 7 are decoded; byte 0 = 0x06 for a down event and 0xAB means no new report; x=(b1<<4)|(b3>>4), y=(b2<<4)|(b3&0x0F); a short read leaves the ack mid-block so a held touch freezes"
@@ -499,6 +502,20 @@ EXT-001: "The SPLB32 Tamagotchi core runs at 4.05x realtime headless on this boa
     - "userspace/panel-test.c: the -D, -T, -W and -C modes that produced these measurements"
     - "patches/kernel/display/NOTES provenance on the 45 MHz shearing at 20 MHz in the reference firmware"
   verification: "Measured on the glass across six test patterns, changing one variable per pattern. The decisive pair: one 45x356 transfer tears into eight diagonal splits; the identical rectangle in 2-row bands is clean, confirmed repeatedly. After the driver cap was applied, userspace sending the same single rectangle produced a clean uniform strip."
+
+- record_id: LCD-010
+  kind: DISPLAY
+  topic_id: LCD
+  title: "Panel transfers cost 11.4 us per 64-byte chunk with no per-transfer fixed cost, and the panel itself is only 1.6 percent of that"
+  status: VERIFIED
+  verified_date: 2026-11-09
+  statement: "Timing the same pixel payload twice with `CO5300_IOC_BENCH` -- once with CS asserted so the panel receives it, once with CS never asserted so the peripheral clocks the bytes out into nothing -- separates the panel's contribution from the driver's. A 288x2 payload (18 chunks of 64 bytes) costs 197 us with CS and 193 us without; a 288x64 payload (576 chunks) costs 6572 us and 6470 us. Fitting those two points gives 11.42 us per 64-byte chunk and a per-transfer fixed cost of -8.6 us, which is zero within noise. The panel therefore accounts for 0.18 to 0.22 us per chunk, about 1.6 percent of transfer time. Throughput is 5.6 MB/s against 10 MB/s of quad-lane wire capacity at 20 MHz, so 56 percent."
+  consequence: "Two things follow for anyone deciding what to optimise. Per-transfer overhead is not worth designing around: command, address, CS and the completion poll together cost less than noise, so a dirty-rectangle scheme pays no per-call penalty and splitting a frame into many small transfers is cheap in fixed cost. And the remaining 5 us per chunk is CPU work -- 16 memcpy_toio writes into a 64-byte FIFO, a length register write, and a cpu_relax() completion poll -- which is what DMA would remove, capping the gain at about 2x rather than the 5-10x a FIFO-share estimate suggested. The panel is excluded: removing it entirely from the circuit changes the time by 1.6 percent."
+  sources:
+    - "patches/kernel/display/final/co5300.c: CO5300_IOC_BENCH, which performs the CS-asserted and CS-not-asserted runs"
+    - "docs/panel-transfer-cost.md: the measurements, the fit, and the reproduction command"
+    - "patches/kernel/display/final/spi-esp32.c: the FIFO-only exec_op that the per-chunk cost comes from"
+  verification: "Measured on hardware 2026-11-09 with the transmitted buffer, not a shared-memory estimate. The contradictory figure is recorded rather than resolved: LCD-005 puts a 320x400 frame at about 190 ms, while 4000 chunks at 11.42 us is 45.7 ms, a factor of 4.2 apart. Those do not reconcile and the difference is not explained; LCD-005 predates the CS-handling fix and may have included non-transfer work. LCD-005 should be re-measured through the real repaint path before either number is quoted."
 
 - record_id: PMU-001
   kind: PMU

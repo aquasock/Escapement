@@ -64,6 +64,14 @@ struct co5300_geom {
 #define CO5300_IOC_GET_GEOM \
 	_IOR(CO5300_IOC_MAGIC, 2, struct co5300_geom)
 
+#define CO5300_IOC_BENCH \
+	_IOWR(CO5300_IOC_MAGIC, 3, struct co5300_bench)
+
+struct co5300_bench {
+	uint16_t w, h, iters, reserved;
+	uint32_t cs_us, nocs_us, bytes;
+};
+
 #define RGB565(r, g, b) \
 	((uint16_t)((((r) & 0x1F) << 11) | (((g) & 0x3F) << 5) | ((b) & 0x1F)))
 
@@ -288,10 +296,11 @@ static int ruler(int x, int y, int w, int h, int ntiles)
 
 int main(int argc, char **argv)
 {
-	int clear = 0, ruler_mode = 0, solid_mode = 0, bands_mode = 0, edge_mode = 0, clean_mode = 0, stacked_mode = 0, sweep_mode = 0, tall_mode = 0, rows_mode = 0, raw_mode = 0, opt, bad = 0, i;
+	int clear = 0, ruler_mode = 0, solid_mode = 0, bands_mode = 0, edge_mode = 0, clean_mode = 0, stacked_mode = 0, sweep_mode = 0, tall_mode = 0, rows_mode = 0, bench_mode = 0, raw_mode = 0, opt, bad = 0, i;
+	int bench[3] = {0};
 	int raw[4] = {0};
 
-	while ((opt = getopt(argc, argv, "gcnR1BECSWTDr:")) != -1) {
+	while ((opt = getopt(argc, argv, "gcnR1BECSWTDb:r:")) != -1) {
 		switch (opt) {
 		case 'g': {
 			struct co5300_geom g;
@@ -321,6 +330,15 @@ int main(int argc, char **argv)
 		case 'W': sweep_mode = 1; break;
 		case 'T': tall_mode = 1; break;
 		case 'D': rows_mode = 1; break;
+		case 'b': {
+			if (sscanf(optarg, "%d,%d,%d", &bench[0], &bench[1],
+				   &bench[2]) != 3) {
+				fprintf(stderr, "usage: -b w,h,iters\n");
+				return 2;
+			}
+			bench_mode = 1;
+			break;
+		}
 		case 'r': {
 			/* -r x,y,w,h : paint one black rect. For bisecting. */
 			if (sscanf(optarg, "%d,%d,%d,%d", &raw[0], &raw[1],
@@ -354,6 +372,51 @@ int main(int argc, char **argv)
 	printf("panel %ux%u, fb0 %ux%u at (%u,%u)\n",
 	       geom.panel_w, geom.panel_h, geom.fb_w, geom.fb_h,
 	       geom.fb_x, geom.fb_y);
+
+	if (bench_mode) {
+		struct co5300_bench b;
+
+		memset(&b, 0, sizeof(b));
+		b.w = (uint16_t)bench[0];
+		b.h = (uint16_t)bench[1];
+		b.iters = (uint16_t)bench[2];
+
+		if (ioctl(ffd, CO5300_IOC_BENCH, &b) < 0)
+			die("CO5300_IOC_BENCH");
+
+		/*
+		 * Integer formatting only.
+		 *
+		 * The first version printed %.2f and died with SIGSEGV on the board
+		 * with no output at all -- a floating-point conversion in printf is
+		 * the one thing this mode did that the working modes do not, and the
+		 * crash disappeared when the doubles were removed. Whether that is
+		 * the FPU, a soft-float stub, or something in uClibc's %f path is not
+		 * established; what is established is that this binary must not use
+		 * floating point to report measurements.
+		 */
+		{
+			unsigned chunks = b.bytes / 64;
+			unsigned cs_chunk_x100 = chunks ? (b.cs_us * 100 / chunks) : 0;
+			unsigned nocs_chunk_x100 = chunks ? (b.nocs_us * 100 / chunks) : 0;
+			/* hundredths of a MB/s, without touching a float */
+			unsigned cs_kbps = b.cs_us ? (b.bytes / b.cs_us) : 0;
+			unsigned nocs_kbps = b.nocs_us ? (b.bytes / b.nocs_us) : 0;
+
+			printf("%ux%u  %u bytes  %u chunks  iters %u\n",
+			       b.w, b.h, b.bytes, chunks, b.iters);
+			printf("  cs asserted     %8u us  %u.%02u us/chunk  %u KB/s\n",
+			       b.cs_us, cs_chunk_x100 / 100, cs_chunk_x100 % 100,
+			       cs_kbps);
+			printf("  cs not asserted %8u us  %u.%02u us/chunk  %u KB/s\n",
+			       b.nocs_us, nocs_chunk_x100 / 100,
+			       nocs_chunk_x100 % 100, nocs_kbps);
+			printf("  panel share     %+d us of the cs run\n",
+			       (int)b.cs_us - (int)b.nocs_us);
+		}
+		close(ffd);
+		return 0;
+	}
 
 	if (rows_mode) {
 		/*

@@ -263,3 +263,35 @@ The panel API is usable as specified: callers hand over one rectangle and the dr
 - User Test: PASS
 
 ---
+
+## 9 COMMIT Unreleased 2026-11-09T15:35:14-07:00
+
+#### Coming From:
+
+Unreleased 38f2f36
+
+#### Purpose:
+
+Answer whether the display path or the CPU limits the panel, for another project that needs the number to decide whether to port to this board.
+
+#### Outcome:
+
+A bench was added to the driver, `CO5300_IOC_BENCH`, which times the same pixel payload twice -- once with CS asserted so the panel receives it, and once with CS never asserted so the peripheral clocks the bytes out into nothing. The difference is the panel's contribution and the rest is the driver and CPU. Measured on hardware: 288x2 (18 chunks of 64 bytes) costs 197 us with CS and 193 us without, and 288x64 (576 chunks) costs 6572 us and 6470 us. Fitting those two points gives 11.42 us per 64-byte chunk and a per-transfer fixed cost of -8.6 us, which is zero within noise. The panel accounts for 0.18 to 0.22 us per chunk, about 1.6 percent. Throughput is 5.6 MB/s against 10 MB/s of quad-lane wire capacity at 20 MHz. Three conclusions follow and they are the reason the cycle was worth running. Per-transfer overhead is negligible, so a dirty-rectangle scheme pays no per-call penalty and splitting a frame into many small transfers is cheap in fixed cost -- which reverses the concern that a 2-row cap would multiply overhead by transfer count. The panel is excluded as a bottleneck outright: removing it changes the time by 1.6 percent. And the remaining 5 us per chunk is CPU work, 16 memcpy_toio writes into a 64-byte FIFO plus a length write and a cpu_relax() completion poll, so DMA caps the gain at about 2x rather than the 5-10x a FIFO-share estimate suggested. One contradiction is recorded rather than resolved: LCD-005 puts a 320x400 frame at about 190 ms while 4000 chunks at 11.42 us is 45.7 ms, a factor of 4.2, and nothing yet explains the difference -- LCD-005 predates the CS-handling fix and may have included work outside the transfer, so it should be re-measured through the real repaint path before either figure is quoted. The cycle also produced a lesson about the instrument. Bench runs that block leave the calling shell unable to execute anything, and on this NOMMU kernel the blocked process cannot be interrupted with Ctrl-C, so only a chip reset clears it; two such wedges cost several resets and a great deal of time before the pattern was recognised, and the fix is to launch a bench with nohup in the background so it can never hold the shell. During the work a genuine bug in the test tool was found and fixed: the getopt string listed `b` without a colon while `r` had one, so `-b` received no argument, `sscanf` was handed NULL and the tool died with SIGSEGV and no output. That is almost certainly the intermittent crash recorded as unreproduced in entries 7 and 8 -- same signature, same absence of a kernel oops, and the reason it correlated with newly added modes rather than with rect size. The core-syntax audit passed: the `.ai/` diff was inspected, `.ai/core.md` was not modified, entry 9 was validated against the template with six sections in canonical order, sequential numbering from 8, an ISO-8601 timestamp carrying the America/Phoenix offset, prose-only Outcome and Next Steps, eligible Files Modified, and Status values within the allowed set.
+
+#### Next Steps:
+
+The bench is a permanent diagnostic and `docs/panel-transfer-cost.md` records how to run it safely. Two follow-ups are worth their cost. First, re-measure the 320x400 frame through the real repaint path to settle the 4.2x disagreement with LCD-005; until that is done the practical frame rate of the console is unknown and both published figures are suspect. Second, with per-transfer cost shown to be zero, the 2-row cap on `CO5300_IOC_WRITE_RECT` can be revisited on transfer-time grounds alone: the cap costs almost nothing in overhead, so it stays for correctness rather than cost, and the tearing root cause from LCD-009 is still open with SPI clock the remaining suspect. The next feature cycle is the top-bar status daemon, reading `/sys/class/power_supply` and the WiFi state, which needs no further kernel work. The esp-hosted `process_rx_buf: bad if_type 6` fault wedged the network three times in this session and each time only a chip reset cleared it, so it is now the most costly open defect in the project and should be scheduled. BLE media keys, firmware-side bond persistence and any wake-from-sleep path remain deferred by user decision.
+
+#### Files Modified:
+
+- patches/kernel/display/final/co5300.c
+- userspace/panel-test.c
+- docs/panel-transfer-cost.md
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: PASS
+
+---

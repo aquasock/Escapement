@@ -53,6 +53,7 @@
  * ioctls here, so no core change is needed.
  */
 #include <linux/ioctl.h>
+#include <linux/ktime.h>
 #include "co5300_rect.h"
 
 /* The rect structs and the bounds check live in co5300_rect.h so the
@@ -61,6 +62,31 @@
 	_IOW(CO5300_IOC_MAGIC, 1, struct co5300_rect)
 #define CO5300_IOC_GET_GEOM \
 	_IOR(CO5300_IOC_MAGIC, 2, struct co5300_geom)
+
+/*
+ * Diagnostic only: time the same pixel payload twice, once with CS asserted so
+ * the panel receives it and once with CS never asserted so the peripheral
+ * clocks the bytes out into nothing.
+ *
+ * The difference is the panel's contribution. If both are equal, the cost is
+ * the driver and the CPU -- register pokes and the completion poll -- and DMA
+ * would help. If the asserted run is much slower, the panel is gating the bus
+ * and DMA would buy nothing, because the wire is not the constraint.
+ *
+ * This does not write visible pixels of any value: the buffer is the transmit
+ * buffer as it stands, and a CS-high transfer is ignored by the controller.
+ */
+struct co5300_bench {
+	__u16 w, h;	/* payload shape, panel pixels */
+	__u16 iters;	/* repetitions, 1..64 */
+	__u16 reserved;
+	__u32 cs_us;	/* mean microseconds per iteration, CS asserted */
+	__u32 nocs_us;	/* mean microseconds per iteration, CS not asserted */
+	__u32 bytes;	/* payload bytes per iteration */
+};
+
+#define CO5300_IOC_BENCH \
+	_IOWR(CO5300_IOC_MAGIC, 3, struct co5300_bench)
 
 /*
  * Rows per transfer for CO5300_IOC_WRITE_RECT, capped hard.
@@ -475,7 +501,8 @@ static void co5300_blit(struct co5300 *p, int x0, int y0, int x1, int y1)
  * The caller must have byte-swapped the pixels: the panel takes the low byte
  * first and the peripheral shifts the high byte out first (LCD-003).
  */
-static int co5300_send_band(struct co5300 *p, int x0, int y0, int x1, int y1)
+static int co5300_send_band_cs(struct co5300 *p, int x0, int y0, int x1, int y1,
+			       bool assert_cs)
 {
 	u8 *win = p->small;
 	size_t npix = (size_t)(x1 - x0 + 1) * (size_t)(y1 - y0 + 1);
@@ -496,18 +523,23 @@ static int co5300_send_band(struct co5300 *p, int x0, int y0, int x1, int y1)
 
 	co5300_op(p, 0x02, 0x002C00, NULL, 0, 1);
 
-	if (p->cs)
+	if (p->cs && assert_cs)
 		gpiod_set_value_cansleep(p->cs, 1);
 
 	rc = co5300_xfer(p, 0x32, 1, 0x002C00, 1, p->tx, npix * 2, 4);
 
-	if (p->cs)
+	if (p->cs && assert_cs)
 		gpiod_set_value_cansleep(p->cs, 0);
 
 	if (rc)
 		pr_err("co5300: rect %zu bytes -> %d\n", npix * 2, rc);
 
 	return rc;
+}
+
+static int co5300_send_band(struct co5300 *p, int x0, int y0, int x1, int y1)
+{
+	return co5300_send_band_cs(p, x0, y0, x1, y1, true);
 }
 
 
@@ -981,6 +1013,65 @@ out:
 	return rc;
 }
 
+static int co5300_do_bench(struct co5300 *p, struct co5300_bench __user *ub)
+{
+	struct co5300_bench b;
+	ktime_t t0;
+	/*
+	 * 32-bit accumulators on purpose. On Xtensa a 64-bit divide pulls in
+	 * __divdi3, which this kernel does not link -- the same trap already
+	 * documented in co5300_write(). Bounded: 64 iterations of at most a few
+	 * hundred milliseconds each is well under 2^32 microseconds.
+	 */
+	u32 cs_total = 0, nocs_total = 0;
+	size_t npix;
+	int i, rc = 0;
+
+	if (copy_from_user(&b, ub, sizeof(b)))
+		return -EFAULT;
+
+	if (b.w < 2 || b.h < 2 || b.iters < 1 || b.iters > 64)
+		return -EINVAL;
+
+	npix = (size_t)b.w * (size_t)b.h;
+	if (!p->tx || npix * 2 > p->tx_len)
+		return -EINVAL;
+
+	/*
+	 * Fill the transmit buffer with something non-trivial. A zero buffer is
+	 * fine for timing, but a non-zero one rules out any chance the
+	 * peripheral short-circuits on constant data.
+	 */
+	for (i = 0; i < (int)npix; i++)
+		p->tx[i] = swab16((u16)(0x1234 + (i & 0xFF)));
+
+	/* Warm up: first iteration pays for whatever is cold. */
+	co5300_send_band_cs(p, 0, 0, b.w - 1, b.h - 1, true);
+
+	for (i = 0; i < b.iters; i++) {
+		t0 = ktime_get();
+		co5300_send_band_cs(p, 0, 0, b.w - 1, b.h - 1, true);
+		cs_total += (u32)ktime_to_us(ktime_sub(ktime_get(), t0));
+	}
+
+	for (i = 0; i < b.iters; i++) {
+		t0 = ktime_get();
+		co5300_send_band_cs(p, 0, 0, b.w - 1, b.h - 1, false);
+		nocs_total += (u32)ktime_to_us(ktime_sub(ktime_get(), t0));
+	}
+
+	b.cs_us = cs_total / b.iters;
+	b.nocs_us = nocs_total / b.iters;
+	b.bytes = (u32)(npix * 2);
+
+	pr_info("co5300 bench: %ux%u = %u bytes: cs=%u us, nocs=%u us, chunks=%zu\n",
+		b.w, b.h, b.bytes, b.cs_us, b.nocs_us, npix * 2 / 64);
+
+	if (copy_to_user(ub, &b, sizeof(b)))
+		return -EFAULT;
+	return rc;
+}
+
 static int co5300_ioctl(struct fb_info *info, unsigned int cmd, unsigned long arg)
 {
 	struct co5300 *p = info->par;
@@ -1005,6 +1096,12 @@ static int co5300_ioctl(struct fb_info *info, unsigned int cmd, unsigned long ar
 			return -EFAULT;
 		return 0;
 	}
+
+	case CO5300_IOC_BENCH:
+		mutex_lock(&p->lock);
+		rc = co5300_do_bench(p, uarg);
+		mutex_unlock(&p->lock);
+		return rc;
 
 	case CO5300_IOC_WRITE_RECT:
 		/*
