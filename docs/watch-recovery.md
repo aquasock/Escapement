@@ -43,6 +43,34 @@ release image. It booted — and cost:
 Every one of those was recoverable, and none of it needed to happen. A single
 `read_flash 0 0x1000000` beforehand would have made it a 16 MiB restore.
 
+## Userspace drawing on the panel
+
+`fb_write` is implemented in the CO5300 driver (`co5300_write`), so userspace can
+put pixels on the glass. Without it there is no userspace path at all: the driver
+provides only `fb_setcolreg`, `fb_fillrect`, `fb_copyarea` and `fb_imageblit`,
+which fbcon uses, so text works while `mmap()` returns ENODEV and `write()` hits
+`fb_WARN_ON_ONCE(!info->fbops->fb_write)`.
+
+`fb_mmap` alone would not be enough either — the panel has no memory of ours and
+is fed over SPI, so fb writing into the framebuffer only puts bytes in RAM.
+`co5300_write` copies and then blits the rows it touched.
+
+Two things to know when driving it from a program:
+
+- **Write in bands.** A 320x400 RGB565 frame is 256 KB, and on NOMMU that must
+  be one *contiguous* allocation; after a few minutes of uptime the largest free
+  block is smaller than that. Bands of ~40 rows (25 KB) always fit, and each
+  band is a complete `fb_write` call.
+- **Do not put the payload in `.bss`.** A large static array is part of the ELF
+  load segment, so the program fails to *exec* when memory is fragmented —
+  `nommu: Allocation of length 569344 ... failed` is the load segment, not a
+  runtime allocation. The 512 KB Tamagotchi ROM hits this; it has to be read
+  from a file into a runtime allocation.
+
+Each `pwrite` is a synchronous SPI blit, so frame rate is bounded by the display
+path, not the CPU: 4 fps leaves the emulator at ~1.1x realtime, 30 fps drops it
+to 0.18x because the writes dominate.
+
 ## What the release image is, and is not
 
 `images/linux-esp32s3-native-full.bin` is the upstream release. It is **not**
