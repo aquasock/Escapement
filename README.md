@@ -266,9 +266,11 @@ cores.
   second subscription and the report map read, done serially.
 - **No bond is kept, so the keyboard re-pairs every time it reconnects.** The firmware
   cannot write flash after Linux starts (an NVS write parks the other core,
-  which is running Linux, and aborts), so there is nowhere to store the keys.
-  Re-pairing is automatic and takes a fraction of a second; it is only visible
-  as a brief delay.
+  which is running Linux, and aborts). Re-pairing is automatic and takes a
+  fraction of a second; it is only visible as a brief delay.
+  A jffs2-based workaround is half built — export to `/etc/ble-bond.bin` works,
+  the boot-time load does not. See `docs/bluetooth-bond.md`; it is not enabled
+  on the watch.
 - **The console is slow to repaint.** Every fbcon drawing op goes straight to
   the panel as one spi-mem op through a 64-byte FIFO, with no DMA and no dirty
   region tracking. Correct first; fast later.

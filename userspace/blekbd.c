@@ -51,12 +51,14 @@
 #include <sys/time.h>
 
 #define DEV_PIPE	"/dev/esp-ble"
+#define BOND_PATH	"/etc/ble-bond.bin"
 #define DEV_UINPUT	"/dev/uinput"
 
 #define FRAME_MAGIC	0xA5
 #define FRAME_INPUT	0x01
 #define FRAME_MAP	0x02
 #define FRAME_STATE	0x03
+#define FRAME_BOND	0x04
 
 #define STATE_DISCONNECTED	0
 #define STATE_CONNECTED		1
@@ -842,6 +844,44 @@ emit:
  * main
  * ------------------------------------------------------------------ */
 
+/*
+ * Persist the bond the firmware just handed us.
+ *
+ * Written to a temporary file and renamed, because a partially written bond is
+ * worse than none: the firmware would load half a key and fail to authenticate
+ * on every subsequent boot. rename() on jffs2 is atomic enough for that.
+ */
+static void save_bond(const unsigned char *p, int len)
+{
+	char tmp[] = BOND_PATH ".tmp";
+	int fd;
+
+	fd = open(tmp, O_WRONLY | O_CREAT | O_TRUNC, 0600);
+	if (fd < 0) {
+		perror(tmp);
+		return;
+	}
+
+	if (write(fd, p, len) != len) {
+		perror("write bond");
+		close(fd);
+		unlink(tmp);
+		return;
+	}
+
+	if (fsync(fd) < 0)
+		perror("fsync bond");
+	close(fd);
+
+	if (rename(tmp, BOND_PATH) < 0) {
+		perror("rename bond");
+		unlink(tmp);
+		return;
+	}
+
+	say("blekbd: bond saved (%d bytes)", len);
+}
+
 static unsigned char rx_buf[2048];
 static size_t rx_have;
 
@@ -915,6 +955,18 @@ static void consume_frames(void)
 				say("blekbd: report map too large (%d bytes)",
 				    len);
 			}
+			pos += 4 + len;
+
+		} else if (rx_buf[pos + 1] == FRAME_BOND) {
+			int len;
+
+			if (avail < 4)
+				break;
+			len = rx_buf[pos + 2] | (rx_buf[pos + 3] << 8);
+			if (avail < (size_t)(4 + len))
+				break;
+
+			save_bond(rx_buf + pos + 4, len);
 			pos += 4 + len;
 
 		} else if (rx_buf[pos + 1] == FRAME_STATE) {
