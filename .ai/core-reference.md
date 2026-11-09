@@ -131,6 +131,7 @@ Topic IDs are the `record_id` prefix. An entry reserves a name; it does not clai
 | Can userspace draw on /dev/fb0? | LCD | LCD-001 |
 | Why does a thin fill draw nothing while a thick one works? | LCD | LCD-002 |
 | Does a 45x45 window draw, or is it too narrow? | LCD | LCD-008 |
+| Why does a tall strip tear into diagonal splits? | LCD | LCD-009 |
 | Why did a white test pattern come out pink? | LCD | LCD-008 |
 | Why does a coloured fill report success and change nothing? | LCD | LCD-003 |
 | Why is one pixel missing from the left and top edges? | LCD | LCD-004 |
@@ -187,6 +188,7 @@ LCD-005: "A 320x400 RGB565 frame costs about 190 ms in SPI transfers, roughly 19
 LCD-006: "A whole frame cannot be a single transfer: spi-mem refuses a data-only op with no command, and the controller treats a CS edge as end-of-burst"
 LCD-007: "The glass is 410x502 with 45-degree chamfers; the largest unclipped rectangle is 320x412 and fb0 is 320x400 at (45,45), leaving a 57-row strip below it that the touch buttons are painted into"
 LCD-008: "45x45 windows are honoured, so the edge API needs no full-width fallback; and in RGB565 green is a 6-bit field, so RGB565(31,31,31) is pink (0xFBFF) and white needs 63 (0xFFFF)"
+LCD-009: "A long single-transfer window to the right strip (45x356) tears into diagonal splits; the same rect in 2-row bands is clean. Not width, not X, not height -- the cap is a workaround and the root cause is unestablished, with SPI clock the remaining suspect"
 TCH-001: "The touch controller is a CST9217 at I2C 0x1A (register 0x0000 reads 0xCA, the family checkcode); 0x5A is the DRV2605 haptic driver, whose register 0x00 reads 0xE0 (DEVICE_ID bits), and only 0x1A completes the CST92xx unlock handshake"
 TCH-002: "A reset CST9217 is in command mode and reports nothing: write 0xD1=0x01, then 0xD1=0x1E twice, require byte 1 of a read of 0x0002 to be 0x1E, then write 0xD1=0x09 for normal mode"
 TCH-003: "Report block at 0xD000 is 15 bytes and the transfer must be all 15 even though only 7 are decoded; byte 0 = 0x06 for a down event and 0xAB means no new report; x=(b1<<4)|(b3>>4), y=(b2<<4)|(b3&0x0F); a short read leaves the ack mid-block so a held touch freezes"
@@ -483,6 +485,20 @@ EXT-001: "The SPLB32 Tamagotchi core runs at 4.05x realtime headless on this boa
     - "patches/kernel/display/final/co5300.c: CO5300_IOC_WRITE_RECT, which is what was exercised"
     - "LCD-002 for the degenerate-window result this extends"
   verification: "Verified on the glass, which is the only admissible evidence for this panel. Solid primaries drawn one per region read back as red on the left, green on the right and blue at the bottom, with the top strip white only after the green field was corrected to 63 -- it read pink before. Tile, tall-strip and full-width rectangles all drew at the coordinates requested, with fb0 untouched."
+
+- record_id: LCD-009
+  kind: DISPLAY
+  topic_id: LCD
+  title: "A long single-transfer window to the right-hand strip tears into diagonal splits; 2-row bands do not"
+  status: VERIFIED
+  verified_date: 2026-11-09
+  statement: "A single 45x356 transfer into the right-hand strip returns as eight diagonal splits, worst at the bottom, and the splits are visible even in a uniform fill -- so whole rows did not receive the write rather than being torn mid-scan. The same rectangle sent as 178 windows of 45x2 is clean, repeatably. The failure is not explained by width, by X position, or by window height. Width is excluded because the behaviour is non-monotonic: with five stacked segments from the same origin, 45 wide tore, 35 wide was clean, and 25, 15 and 5 wide all tore. X position is excluded because nine 45x50 windows swept across the bottom strip at x = 0, 45, ... 360 were all clean, including one at controller columns 382..426, overlapping the right strip's 387..431. Height is excluded because the 45x71 segments also tore. The left strip tolerates the same 45x356 single transfer that the right strip does not."
+  consequence: "The rule that holds on hardware is that a single transfer must carry few rows, so `CO5300_IOC_WRITE_RECT` caps every band at two rows and loops. That is invisible to callers -- userspace still hands over one rectangle -- and it is cheap here because these are status icons, but it is a workaround and not a fix: it would be wrong for continuous drawing, which is why `co5300_blit()` keeps its own uncapped sizing. The root cause is NOT established. The strongest remaining suspect is SPI clock margin, because the reference firmware recorded the identical signature at 45 MHz -- 'dark horizontal lines shearing slightly down to the right' -- cured by dropping to 20 MHz, and this project runs at 20 MHz where that signature is still marginal for long narrow transfers."
+  sources:
+    - "patches/kernel/display/final/co5300.c: CO5300_RECT_ROWS_PER_BAND and the record of what is and is not established"
+    - "userspace/panel-test.c: the -D, -T, -W and -C modes that produced these measurements"
+    - "patches/kernel/display/NOTES provenance on the 45 MHz shearing at 20 MHz in the reference firmware"
+  verification: "Measured on the glass across six test patterns, changing one variable per pattern. The decisive pair: one 45x356 transfer tears into eight diagonal splits; the identical rectangle in 2-row bands is clean, confirmed repeatedly. After the driver cap was applied, userspace sending the same single rectangle produced a clean uniform strip."
 
 - record_id: PMU-001
   kind: PMU

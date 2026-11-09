@@ -62,6 +62,39 @@
 #define CO5300_IOC_GET_GEOM \
 	_IOR(CO5300_IOC_MAGIC, 2, struct co5300_geom)
 
+/*
+ * Rows per transfer for CO5300_IOC_WRITE_RECT, capped hard.
+ *
+ * The transmit buffer could hold a whole frame, and the first version let a
+ * rectangle go out as one op so long as it fit. On the hardware that tears: a
+ * single 45x356 write to the right-hand strip came back as eight diagonal
+ * splits, worst at the bottom. The same rectangle written as 178 windows of
+ * 45x2 is clean, repeatedly.
+ *
+ * What is established, from the glass:
+ *
+ *   45x356 one op, right strip   torn
+ *   45x71  one op, right strip   torn -- though a 35-wide segment happened to
+ *                                come out clean, so width is not the rule
+ *   45x2   per op, right strip   clean
+ *   45x356 one op, left strip    clean
+ *
+ * So the rule is not width and not position: it is how much a single transfer
+ * carries, with the right-hand strip tolerating less than the left. The ROOT
+ * CAUSE IS NOT ESTABLISHED. This is a workaround that has held every time it
+ * was tried, not an explanation.
+ *
+ * It is acceptable here because these are status icons that change on battery
+ * or link state. It would not be acceptable for continuous drawing, and
+ * co5300_blit() -- fbcon's path -- keeps its own uncapped sizing.
+ *
+ * The same signature is recorded for the reference firmware at 45 MHz ("dark
+ * horizontal lines shearing slightly down to the right", cured by dropping to
+ * 20 MHz), which is why SPI clock stays a suspect once the mechanism is worth
+ * the cycles to find.
+ */
+#define CO5300_RECT_ROWS_PER_BAND	2
+
 #define PANEL_W 410
 #define PANEL_H 502
 #define PANEL_OFFSET_X 22
@@ -895,12 +928,12 @@ static int co5300_do_write_rect(struct fb_info *info, struct co5300_rect __user 
 	}
 
 	/*
-	 * max rows that fit the transmit buffer at this width. p->tx_len is a
-	 * whole frame, so a 45x45 tile or even a full-width bottom strip is one
-	 * band; the loop exists so a caller cannot ask for something that would
-	 * overrun it.
+	 * Rows per transfer: capped at CO5300_RECT_ROWS_PER_BAND, and further
+	 * reduced only if a single row of this width would not fit the buffer.
 	 */
-	band = p->tx_len / ((size_t)r.w * 2);
+	band = CO5300_RECT_ROWS_PER_BAND;
+	if (band > p->tx_len / ((size_t)r.w * 2))
+		band = p->tx_len / ((size_t)r.w * 2);
 	if (band < 1)
 		return -EINVAL;
 

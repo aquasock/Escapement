@@ -288,10 +288,10 @@ static int ruler(int x, int y, int w, int h, int ntiles)
 
 int main(int argc, char **argv)
 {
-	int clear = 0, ruler_mode = 0, solid_mode = 0, raw_mode = 0, opt, bad = 0, i;
+	int clear = 0, ruler_mode = 0, solid_mode = 0, bands_mode = 0, edge_mode = 0, clean_mode = 0, stacked_mode = 0, sweep_mode = 0, tall_mode = 0, rows_mode = 0, raw_mode = 0, opt, bad = 0, i;
 	int raw[4] = {0};
 
-	while ((opt = getopt(argc, argv, "gcnR1r:")) != -1) {
+	while ((opt = getopt(argc, argv, "gcnR1BECSWTDr:")) != -1) {
 		switch (opt) {
 		case 'g': {
 			struct co5300_geom g;
@@ -314,6 +314,13 @@ int main(int argc, char **argv)
 		case 'n': dry_run = 1; break;
 		case 'R': ruler_mode = 1; break;
 		case '1': solid_mode = 1; break;
+		case 'B': bands_mode = 1; break;
+		case 'E': edge_mode = 1; break;
+		case 'C': clean_mode = 1; break;
+		case 'S': stacked_mode = 1; break;
+		case 'W': sweep_mode = 1; break;
+		case 'T': tall_mode = 1; break;
+		case 'D': rows_mode = 1; break;
 		case 'r': {
 			/* -r x,y,w,h : paint one black rect. For bisecting. */
 			if (sscanf(optarg, "%d,%d,%d,%d", &raw[0], &raw[1],
@@ -347,6 +354,329 @@ int main(int argc, char **argv)
 	printf("panel %ux%u, fb0 %ux%u at (%u,%u)\n",
 	       geom.panel_w, geom.panel_h, geom.fb_w, geom.fb_h,
 	       geom.fb_x, geom.fb_y);
+
+	if (rows_mode) {
+		/*
+		 * Write the right strip two rows at a time instead of all 356 at once.
+		 *
+		 * A shear inside a solid fill is invisible, so the diagonal splits the
+		 * user sees in a single-colour bar mean some rows did not receive the
+		 * write at all. That happens when the controller's write pointer does
+		 * not return to the window's left edge on each new row: each row lands
+		 * further right, and after enough rows the content falls off the end.
+		 *
+		 * A 45x2 window leaves that pointer almost no room to accumulate. If
+		 * the result is a clean bar, the per-row advance inside a multi-row
+		 * window is the bug, and the driver can work around it by sending one
+		 * window per row pair. If it is still torn, the pointer is not the
+		 * problem and the fault is somewhere I have not looked.
+		 *
+		 * 178 windows of 45x2, painted bottom-up so any residue from the
+		 * previous test is overwritten last.
+		 */
+		int y;
+
+		printf("rows: right strip as 178 windows of 45x2\n");
+
+		/* Left control: same construction, known-clean side. */
+		for (y = 444; y >= 89; y -= 2) {
+			int y0 = (y - 1 < 89) ? 89 : y - 1;
+
+			bad |= paint(0, y0, 45, y - y0 + 1, WHITE, 0, 0) < 0;
+		}
+
+		for (y = 444; y >= 89; y -= 2) {
+			int y0 = (y - 1 < 89) ? 89 : y - 1;
+
+			bad |= paint(365, y0, 45, y - y0 + 1, GREEN, 0, 0) < 0;
+		}
+
+		close(ffd);
+		if (bad) {
+			printf("FAIL: a region was rejected\n");
+			return 1;
+		}
+		printf("painted: left white, right green, both in 2-row windows\n");
+		return 0;
+	}
+
+	if (tall_mode) {
+		/*
+		 * Width is the only variable.
+		 *
+		 * -1 paints the right strip as ONE solid 45x356 rectangle and it came
+		 * out as eight diagonal tears. A uniform fill cannot be torn by
+		 * residue, so the controller is receiving rows at a drifting X --
+		 * which is what a row overrunning its RAM line looks like. The error
+		 * accumulates downward, matching "the eighth tear is the worst".
+		 *
+		 * The right strip is split into five vertical segments, each 71 rows
+		 * tall and each painted with a different WIDTH from the same origin
+		 * x=365. Nothing else varies.
+		 *
+		 *   seg 0  y  89..159   width 45   white
+		 *   seg 1  y 160..230   width 35   red
+		 *   seg 2  y 231..301   width 25   green
+		 *   seg 3  y 302..372   width 15   blue
+		 *   seg 4  y 373..443   width  5   yellow
+		 *
+		 * If the narrow segments are clean, the wrap point is between them
+		 * and is knowable. If all five tear, width is not the variable and
+		 * the fault is the segment's position rather than its size.
+		 */
+		static const uint16_t TC[5] = {
+			WHITE, RED, GREEN, BLUE, RGB565(31, 63, 0),
+		};
+		static const int TW[5] = { 45, 35, 25, 15, 5 };
+		int k;
+
+		printf("tall: five stacked segments, widths 45/35/25/15/5\n");
+
+		/* Left control: five solid segments, full 45 width, same rows. */
+		for (k = 0; k < 5; k++) {
+			int y = 89 + k * 71;
+			int h = (k == 4) ? 71 : 71;
+
+			bad |= paint(0, y, 45, h, TC[k], 0, 0) < 0;
+		}
+
+		for (k = 0; k < 5; k++) {
+			int y = 89 + k * 71;
+
+			/* black backing so the unpainted remainder is unambiguous */
+			bad |= paint(365, y, 45, 71, BLACK, 0, 0) < 0;
+			bad |= paint(365, y, TW[k], 71, TC[k], 0, 0) < 0;
+			printf("  seg %d y %d..%d width %d\n", k, y, y + 70, TW[k]);
+		}
+
+		close(ffd);
+		if (bad) {
+			printf("FAIL: a region was rejected\n");
+			return 1;
+		}
+		printf("painted: right strip, widths 45 35 25 15 5 top to bottom\n");
+		return 0;
+	}
+
+	if (sweep_mode) {
+		/*
+		 * Where does a 45-wide window start to tear?
+		 *
+		 * Every other test has compared only the two places a 45-wide window
+		 * can go -- the far left and the far right -- so X and everything
+		 * correlated with X were inseparable. The bottom strip is outside fb0
+		 * and spans the full width, so the same 45x50 window can be placed at
+		 * nine different X positions across it. Nothing else varies.
+		 *
+		 *   black background over the whole strip (sliced, so the background
+		 *   itself is not the thing under test)
+		 *   nine white 45x50 blocks at x = 0, 45, 90, ... 360
+		 *
+		 * Whichever blocks come out torn name the X range that breaks.
+		 */
+		int x;
+
+		printf("sweep: 45x50 blocks at x = 0..360 step 45 in the bottom strip\n");
+
+		/* Background in small slices to keep each transfer tiny. */
+		for (x = 0; x < 410; x += 50) {
+			int w = (x + 50 > 410) ? (410 - x) : 50;
+
+			bad |= paint(x, 445, w, 57, BLACK, 0, 0) < 0;
+		}
+
+		for (x = 0; x + 45 <= 410; x += 45) {
+			bad |= paint(x, 449, 45, 50, WHITE, 0, 0) < 0;
+			printf("  block x %d..%d (ctrl %d..%d)\n",
+			       x, x + 44, x + 22, x + 66);
+		}
+
+		close(ffd);
+		if (bad) {
+			printf("FAIL: a region was rejected\n");
+			return 1;
+		}
+		printf("painted: nine white blocks across the bottom strip\n");
+		return 0;
+	}
+
+	if (stacked_mode) {
+		/*
+		 * Same picture as -C, but the strip background is written as many
+		 * short rectangles instead of one tall one.
+		 *
+		 * -C paints each strip as a single 45x356 rect -- 32040 bytes in ONE
+		 * spi transfer -- and the result was clean at the top and torn at the
+		 * bottom with un-written rows showing the previous test's colours.
+		 * That is what a truncated transfer looks like: the rows near the
+		 * start land, and everything after the truncation keeps old data.
+		 *
+		 * If stacking short rects fixes it, the window height (or the total
+		 * byte count of one op) is the limit and the driver must band large
+		 * windows. If it does not, height is not the variable.
+		 *
+		 * Each slice is 45 wide and 44 tall: 3960 bytes, comfortably small.
+		 */
+		int y, k;
+
+		printf("stacked: strips written as 9 slices of 45x44\n");
+		bad |= paint(0, 0, 410, 45, WHITE, 0, 0) < 0;
+		bad |= paint(0, 445, 410, 57, BLUE, 0, 0) < 0;
+
+		for (y = 89, k = 0; y < 445; y += 44, k++) {
+			int h = (y + 44 > 445) ? (445 - y) : 44;
+
+			bad |= paint(0, y, 45, h, WHITE, 0, 0) < 0;
+			bad |= paint(365, y, 45, h, WHITE, 0, 0) < 0;
+		}
+
+		/* One block each side, well inside the stacked area. */
+		bad |= paint(0, 240, 45, 50, RED, 0, 0) < 0;
+		bad |= paint(365, 240, 45, 50, RED, 0, 0) < 0;
+
+		close(ffd);
+		if (bad) {
+			printf("FAIL: a region was rejected\n");
+			return 1;
+		}
+		printf("painted: same picture as -C, background in slices\n");
+		return 0;
+	}
+
+	if (clean_mode) {
+		/*
+		 * Clean slate: one uniform fill over each whole strip, then a single
+		 * contrasting block in the middle of each.
+		 *
+		 * Every earlier test drew many partial rectangles of different
+		 * colours into the same region, so anything that landed inexactly
+		 * left a neighbour's colour beside it -- and the result reads as a
+		 * tear or a gap that may be nothing of the kind. On a uniform
+		 * background there is exactly one thing to look at: is the block a
+		 * rectangle, and are its edges parallel to the screen.
+		 */
+		printf("clean: uniform strip, one block in the middle\n");
+
+		/* Whole strips, one colour each. */
+		bad |= paint(0, 89, 45, 356, WHITE, 0, 0) < 0;
+		bad |= paint(365, 89, 45, 356, WHITE, 0, 0) < 0;
+
+		/* One block, same place on both sides, nothing else in the strip. */
+		bad |= paint(0, 240, 45, 50, RED, 0, 0) < 0;
+		bad |= paint(365, 240, 45, 50, RED, 0, 0) < 0;
+
+		/* And a second, higher up, so a vertical drift shows as a difference
+		 * in where the two blocks sit relative to each other. */
+		bad |= paint(0, 120, 45, 50, BLUE, 0, 0) < 0;
+		bad |= paint(365, 120, 45, 50, BLUE, 0, 0) < 0;
+
+		close(ffd);
+		if (bad) {
+			printf("FAIL: a region was rejected\n");
+			return 1;
+		}
+		printf("painted: white strips, blue block at y120, red block at y240\n");
+		return 0;
+	}
+
+	if (edge_mode) {
+		/*
+		 * Find where the right edge breaks.
+		 *
+		 * Every band starts at panel x 365 (controller column 387) and ends
+		 * at a different x1, so the only variable is how far toward the
+		 * right the window reaches. The left strip carries the same colours
+		 * at the full 45 width as a control, because it is known clean.
+		 *
+		 * If the tear disappears past some x1, that is the controller's RAM
+		 * boundary and PANEL_OFFSET_X = 22 was the wrong inference. If every
+		 * band is torn regardless, the right edge is not the variable.
+		 *
+		 *   band  colour   panel x1   controller x1   width
+		 *    0    red        409          431           45
+		 *    1    yellow     405          427           41
+		 *    2    green      401          423           37
+		 *    3    cyan       397          419           33
+		 *    4    blue       393          415           29
+		 *    5    magenta    389          411           25
+		 *    6    white      385          407           21
+		 *    7    red        381          403           17
+		 */
+		static const uint16_t ECOL[8] = {
+			RED, RGB565(31, 63, 0), GREEN, RGB565(0, 63, 31),
+			BLUE, RGB565(31, 0, 31), WHITE, RED,
+		};
+		int k;
+
+		printf("edge: right strip x0=365, x1 varies; left is the control\n");
+
+		bad |= paint(0, 0, 410, 45, WHITE, 0, 0) < 0;
+		bad |= paint(0, 445, 410, 57, BLUE, 0, 0) < 0;
+
+		for (k = 0; k < 8; k++) {
+			int y = 89 + k * 44;
+			int x1 = 409 - k * 4;
+
+			/* control: full width on the left */
+			bad |= paint(0, y, 45, 44, ECOL[k], 0, 0) < 0;
+			/* variable: right edge pulled in */
+			bad |= paint(365, y, x1 - 365 + 1, 44, ECOL[k], 0, 0) < 0;
+			printf("  band %d y %d..%d  right x1 %d (ctrl %d)\n",
+			       k, y, y + 43, x1, x1 + 22);
+		}
+
+		close(ffd);
+		if (bad) {
+			printf("FAIL: a region was rejected\n");
+			return 1;
+		}
+		printf("painted: top-down on the right, x1 = 409,405,401,397,393,389,385,381\n");
+		return 0;
+	}
+
+	if (bands_mode) {
+		/*
+		 * The decisive test: IDENTICAL structured content on both side
+		 * strips. Same width, same height, same band heights, same colours.
+		 * The only difference is X position -- controller columns 22..66 on
+		 * the left against 387..431 on the right.
+		 *
+		 * If the left is a clean stack of rectangles and the right is
+		 * sheared, the fault is positional and nothing else. If both shear,
+		 * it is the 45-wide window shape and position is irrelevant.
+		 *
+		 * A solid fill could never show this: a shear inside a solid colour
+		 * is invisible.
+		 */
+		static const uint16_t BAND[9] = {
+			RED, RGB565(31, 63, 0), GREEN, RGB565(0, 63, 31),
+			BLUE, RGB565(31, 0, 31), WHITE, RED, RGB565(31, 63, 0),
+		};
+		int k;
+
+		printf("bands: identical content, left x0..44 vs right x365..409\n");
+
+		/* Full-width reference bars first, so any vertical offset in the
+		 * strips can be measured against them. */
+		bad |= paint(0, 0, 410, 45, WHITE, 0, 0) < 0;
+		bad |= paint(0, 445, 410, 57, BLUE, 0, 0) < 0;
+
+		for (k = 0; k < 9; k++) {
+			int y = 89 + k * 40;
+
+			/* Each band is one rect per side: 45 wide, 40 tall. */
+			bad |= paint(0, y, 45, 40, BAND[k], 0, 0) < 0;
+			bad |= paint(365, y, 45, 40, BAND[k], 0, 0) < 0;
+		}
+
+		close(ffd);
+		if (bad) {
+			printf("FAIL: a region was rejected\n");
+			return 1;
+		}
+		printf("painted: compare left and right -- they should be identical\n");
+		return 0;
+	}
 
 	if (raw_mode) {
 		int rc;

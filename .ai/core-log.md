@@ -231,3 +231,35 @@ The API is implemented and proven, so the consumers can be built. The next cycle
 - User Test: PASS
 
 ---
+
+## 8 COMMIT Unreleased 2026-11-09T14:46:17-07:00
+
+#### Coming From:
+
+Unreleased 2cb6ffd
+
+#### Purpose:
+
+Diagnose the diagonal tearing the user reported in the right-hand strip and make panel writes land correctly there.
+
+#### Outcome:
+
+The tearing is real, is not residue, and is not explained by any geometric property of the rectangle. It is explained, empirically, by how much one transfer carries: `CO5300_IOC_WRITE_RECT` now sends every rectangle in bands of two rows, and the right strip draws cleanly. Diagnosing it took six test patterns, each varying one thing, and the two hypotheses carried in were both wrong. The first was width: a 45-wide window was thought to be near some limit, and the observation that 45x45 drew earlier made that unlikely, correctly. The second was X position, on the theory that controller columns 387..431 reach past the controller's RAM boundary inferred from `PANEL_OFFSET_X = 22`. Both were excluded by measurement rather than argument. Width is excluded because severity is non-monotonic: five stacked segments from the same origin gave 45 wide torn, 35 wide clean, and 25, 15 and 5 wide all torn. X position is excluded because nine 45x50 windows swept across the bottom strip at x = 0, 45, ... 360 were all clean, including one at controller columns 382..426 which overlaps the right strip almost entirely. Height is excluded because 45x71 segments tore too. Residue is excluded because the splits are visible in a single uniform fill, which cannot be produced by overlapping partial writes. What the measurements do show is that a single 45x356 transfer into the right strip returns as eight diagonal splits worst at the bottom, while the same rectangle as 178 windows of 45x2 is clean, repeatably, and that the left strip tolerates the single tall transfer the right does not. After the driver change, userspace sending the same single rectangle produced a clean uniform strip, so the cap is invisible to callers. Two things are recorded rather than glossed. The root cause is NOT established: this is a workaround that has held every time it was tried, not an explanation, and it is acceptable only because these are status icons that change on battery or link state -- it would be wrong for continuous drawing, which is why `co5300_blit()` keeps its own uncapped sizing. And the strongest remaining suspect is SPI clock margin, because the reference firmware recorded the identical signature at 45 MHz, "dark horizontal lines shearing slightly down to the right", cured by dropping to 20 MHz, while this project runs at 20 MHz and the signature persists for long narrow transfers. A separate defect in the diagnostic tool was found and fixed during the work: several test patterns painted partial rectangles of different colours into the same region, so anything landing inexactly left a neighbour's colour beside it and read as a tear. That produced two false reports from the user -- "all four sides pink" and "eight tears in a solid fill" were partly artefacts of the tool -- and the lesson recorded is that a diagnostic must repaint its whole region in one operation before its output is trusted. A second defect is open and unresolved: `panel-test -R` and `-1` segfaulted intermittently, and after bisecting rect size ten to fifteen times each with no failure, the modes ran 24 consecutive times clean, so it is unreproduced and its cause is not established. The build was flashed to 0x140000 after a full 16 MiB backup, the vectors address was verified at 0x40380000 before writing, and the kernel booted with the console, PMU and RTC intact. The core-syntax audit passed: the `.ai/` diff was inspected, `.ai/core.md` was not modified, entry 8 was validated against the template with six sections in canonical order, sequential numbering from 7, an ISO-8601 timestamp carrying the America/Phoenix offset, prose-only Outcome and Next Steps, eligible Files Modified, and Status values within the allowed set.
+
+#### Next Steps:
+
+The panel API is usable as specified: callers hand over one rectangle and the driver bands it. The next cycle is the top-bar status daemon, reading `/sys/class/power_supply` and the WiFi state and drawing into the five fully usable cells, which needs no further kernel work. Two experiments are worth their cost before the tearing is declared closed. First, drop the SPI clock to 10 MHz and repeat the single tall 45x356 transfer: if it comes back clean, the fault is signal margin rather than anything in the addressing, and the driver could then band less aggressively at a lower clock or keep the cap and raise it. Second, if that does not explain it, capture the tearing under a faster scope of instrument -- a full-width reference bar beside the strip in the same frame would show whether rows are lost or shifted. The intermittent `panel-test` segfault remains open and unreproduced. The esp-hosted `process_rx_buf: bad if_type 6` fault still drops the network hard enough to need a reboot and is still the cheapest general cycle. BLE media keys, firmware-side bond persistence and any wake-from-sleep path remain deferred by user decision.
+
+#### Files Modified:
+
+- patches/kernel/display/final/co5300.c
+- userspace/panel-test.c
+- docs/panel-api.md
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: PASS
+
+---

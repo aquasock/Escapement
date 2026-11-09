@@ -83,16 +83,16 @@ console, and the check is four comparisons.
 This is why `GET_GEOM` returns the fb0 rectangle: a caller can tell, before
 calling, whether what it intends is legal.
 
-### One rectangle is one transfer
+### One rectangle is one address window, sent in short bands
 
-Each call opens its own address window and streams the whole rectangle before
+Each call opens its own address window and streams the rectangle before
 releasing CS (`LCD-006`: a CS edge ends the burst, and `spi-mem` will not
 continue a pixel stream across calls).
 
-If the rectangle is larger than the transmit buffer the driver splits it into
-row bands, each band a complete window and a complete transfer. That is the same
-shape `co5300_paint_frame()` already uses and the only proven way to cover an
-area bigger than one buffer. It is invisible to the caller.
+Every rectangle is split into bands of **two rows**, regardless of buffer space,
+because longer transfers tear on this hardware — see "Transfer size" below. The
+split is invisible to the caller: userspace hands over one rectangle and one
+buffer, and the driver issues the bands.
 
 ### Pixels are RGB565 in host byte order
 
@@ -177,6 +177,46 @@ Deliberately out of scope, so the primitive stays one primitive:
 - **No press/release handling.** `tbtns` already owns reading the buttons; it
   gets the new paint primitive for free once this exists.
 - **No double buffering.** Every call is a direct panel write.
+
+## Transfer size: a cap that works, and a cause that is unknown
+
+`CO5300_IOC_WRITE_RECT` sends every rectangle in bands of **two rows**, even
+though the transmit buffer could hold a whole frame.
+
+That is not caution. A single 45x356 transfer into the right-hand strip comes
+back as eight diagonal splits, worst at the bottom, and the splits show even in
+a uniform fill — so whole rows did not receive the write rather than the panel
+being caught mid-scan. The same rectangle sent as 178 windows of 45x2 is clean,
+repeatedly.
+
+What was ruled out, one variable per test pattern, all measured on the glass:
+
+```
+width       not it -- non-monotonic. From one origin, stacked:
+            45 wide torn, 35 wide CLEAN, 25, 15 and 5 wide all torn
+X position  not it -- nine 45x50 windows swept across the bottom strip at
+            x = 0..360 were all clean, including controller columns 382..426,
+            which overlap the right strip's 387..431
+height      not it -- the 45x71 segments tore as well
+residue     not it -- the splits are visible in a single solid fill
+```
+
+And the left strip tolerates the same 45x356 single transfer that the right one
+does not.
+
+**The root cause is not established.** This is a workaround that has held every
+time it was tried, not an explanation. It is acceptable here because these are
+status icons that change on battery or link state; it would be wrong for
+continuous drawing, which is why `co5300_blit()` — fbcon's path — keeps its own
+uncapped sizing.
+
+The strongest remaining suspect is **SPI clock margin**. `NOTES.md` in
+`patches/kernel/display/` records the identical signature at 45 MHz in the
+reference firmware — "dark horizontal lines shearing slightly down to the
+right", cured by dropping to 20 MHz. We run at 20 MHz and the same signature is
+still marginal for long narrow transfers, which suggests 20 MHz is closer to the
+edge than believed. That is one experiment worth running before the mechanism
+is declared mysterious.
 
 ## Implementation risk, stated plainly
 
