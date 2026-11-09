@@ -388,6 +388,142 @@ static void co5300_blit(struct co5300 *p, int x0, int y0, int x1, int y1)
 		pr_err("co5300: pixel stream %zu bytes -> %d\n", npix * 2, rc);
 }
 
+
+// ---- panel-space drawing ---------------------------------------------------
+
+#define RGB565(r, g, b)	((u16)((((r) & 0x1f) << 11) | \
+				 (((g) & 0x3f) << 5) | ((b) & 0x1f)))
+#define COL_BLACK	0x0000
+#define COL_RED		RGB565(31, 0, 0)
+
+/*
+ * Ring thickness, in pixels.
+ *
+ * One visible pixel on every edge, which is not one drawn pixel on every edge.
+ * Measured on the glass, one pixel at a time:
+ *
+ *   uniform 1 px ring  -> right and bottom appeared, left and top did not
+ *   uniform 2 px ring  -> right and bottom appeared 2 px, left and top 1 px
+ *
+ * So exactly one pixel is lost at the left and top edges and none at the right
+ * and bottom -- consistent with the first row and column being swallowed, which
+ * docs/panel-geometry.md recorded as unresolved when the glass was measured.
+ *
+ * Left and top are therefore drawn one pixel wider than right and bottom, so
+ * that the same thickness survives. Every ring pixel is outside fb0, so the
+ * console is never affected either way.
+ */
+#define RING_T		1
+#define RING_LT		(RING_T + 1)
+
+/*
+ * Paint the whole panel: black, with a 1 px red outline where fb0 ends.
+ *
+ * Everything here goes out as FULL-WIDTH bands, and that is the point. An
+ * earlier version drew the background with wide fills and then the outline with
+ * four thin ones -- 322x1 across and 1x402 down -- and the outline never
+ * appeared, while a 432x31 strip in the same place did. Every call returned 0.
+ *
+ * The controller does not reliably accept a window whose width or height is a
+ * single pixel. Rather than find out exactly which dimension it objects to, the
+ * outline is drawn inside the band loop: each transfer is a full-width band,
+ * identical in shape to the background fill that demonstrably works, and the
+ * red pixels are just values in the row buffer.
+ */
+static int co5300_paint_frame(struct co5300 *p, int l, int r, int t, int b)
+{
+	size_t width = (size_t)(PANEL_OFFSET_X + PANEL_W);
+	size_t max_band, i;
+	int y;
+
+	if (!p->tx)
+		return -ENOMEM;
+
+	max_band = p->tx_len / (width * 2);
+	if (max_band < 1)
+		return -ENOMEM;
+
+	for (y = 0; y < PANEL_H; y += (int)max_band) {
+		u16 *row = p->tx;
+		int y2 = y + (int)max_band - 1;
+		size_t npx;
+		u8 *win;
+		int rc, yy;
+
+		if (y2 > PANEL_H - 1)
+			y2 = PANEL_H - 1;
+
+		npx = width * (size_t)(y2 - y + 1);
+
+		/* Background first, then the ring pixels on top of it. */
+		for (i = 0; i < npx; i++)
+			row[i] = swab16(COL_BLACK);
+
+		for (yy = y; yy <= y2; yy++) {
+			u16 *line = row + width * (size_t)(yy - y);
+			int x;
+
+			/*
+			 * One visible pixel on every edge, which needs different
+			 * numbers of drawn pixels per edge: the left and top each
+			 * lose one to whatever swallows the first row and column,
+			 * the right and bottom lose none. See RING_LT.
+			 *
+			 *   drawn            ->  visible
+			 *   left/top  RING_LT     RING_LT - 1 = 1
+			 *   right/bot RING_T      RING_T       = 1
+			 */
+			if (yy >= t - RING_LT + 1 && yy <= t) {
+				for (x = l - RING_LT + 1;
+				     x <= r + RING_T - 1; x++)
+					line[x] = swab16(COL_RED);
+			} else if (yy >= b && yy <= b + RING_T - 1) {
+				for (x = l - RING_LT + 1;
+				     x <= r + RING_T - 1; x++)
+					line[x] = swab16(COL_RED);
+			} else if (yy > t && yy < b) {
+				for (x = l - RING_LT + 1; x <= l; x++)
+					line[x] = swab16(COL_RED);
+				for (x = r; x <= r + RING_T - 1; x++)
+					line[x] = swab16(COL_RED);
+			}
+		}
+
+		win = p->small;
+		win[0] = 0; win[1] = 0;
+		win[2] = (u8)((width - 1) >> 8); win[3] = (u8)((width - 1) & 0xFF);
+		co5300_cmd(p, 0x2A, win, 4);
+
+		win[0] = (u8)(y >> 8); win[1] = (u8)(y & 0xFF);
+		win[2] = (u8)(y2 >> 8); win[3] = (u8)(y2 & 0xFF);
+		co5300_cmd(p, 0x2B, win, 4);
+
+		co5300_op(p, 0x02, 0x002C00, NULL, 0, 1);
+
+		if (p->cs)
+			gpiod_set_value_cansleep(p->cs, 1);
+		rc = co5300_xfer(p, 0x32, 1, 0x002C00, 1, row, npx * 2, 4);
+		if (p->cs)
+			gpiod_set_value_cansleep(p->cs, 0);
+		if (rc)
+			return rc;
+	}
+
+	return 0;
+}
+
+
+//
+// The area outside fb0 is not part of the framebuffer, so neither fbcon nor
+// userspace can put anything there: it exists only in the panel's own RAM.
+// Anything drawn outside the console therefore has to be drawn here, in panel
+// coordinates, at probe time.
+//
+// "Panel coordinates" means what goes into the 0x2A/0x2B window registers --
+// the controller's RAM, not the visible glass. The init table windows the RAM
+// at 22..431, so the visible 410 px sit at column 22 plus the visible x.
+
+
 // ---- framebuffer -----------------------------------------------------------
 
 /*
@@ -666,45 +802,31 @@ static int co5300_probe(struct spi_mem *mem)
 		return dev_err_probe(dev, ret, "register_framebuffer failed\n");
 
 	/*
-	 * Clear the whole glass to black, then let fbcon draw into fb0.
+	 * Paint the border AFTER the framebuffer is registered.
 	 *
-	 * The border outside fb0 is not part of the framebuffer, so it has to be
-	 * cleared here or a previous image stays visible in the strips that are
-	 * being kept for notifications. It is cleared as a full-panel window
-	 * rather than through the fb, which knows nothing about it.
+	 * The border outside fb0 is not part of the framebuffer, so fbcon cannot
+	 * reach it and userspace cannot either. Left alone it keeps whatever the
+	 * panel powered up with -- a teal wash that reads as a broken display
+	 * rather than as a border.
+	 *
+	 * Order matters and cost a round of debugging: the fill used to run before
+	 * register_framebuffer() and the ring was lost, while the background
+	 * survived. Registering first and drawing last means nothing can overwrite
+	 * the ring afterwards -- fbcon only ever touches fb0.
 	 */
-	{
-		u16 *blank = vzalloc((size_t)PANEL_W * 2);
-		u8 *win = p->small;
-		int y;
-
-		if (blank) {
-			for (y = 0; y < PANEL_H; y++) {
-				win[0] = (PANEL_OFFSET_X) >> 8;
-				win[1] = (PANEL_OFFSET_X) & 0xFF;
-				win[2] = (PANEL_OFFSET_X + PANEL_W - 1) >> 8;
-				win[3] = (PANEL_OFFSET_X + PANEL_W - 1) & 0xFF;
-				co5300_cmd(p, 0x2A, win, 4);
-
-				win[0] = y >> 8; win[1] = y & 0xFF;
-				win[2] = y >> 8; win[3] = y & 0xFF;
-				co5300_cmd(p, 0x2B, win, 4);
-
-				co5300_op(p, 0x02, 0x002C00, NULL, 0, 1);
-
-				if (p->cs)
-					gpiod_set_value_cansleep(p->cs, 1);
-				co5300_xfer(p, 0x32, 1, 0x002C00, 1, blank,
-					    (size_t)PANEL_W * 2, 4);
-				if (p->cs)
-					gpiod_set_value_cansleep(p->cs, 0);
-			}
-			vfree(blank);
-		}
-	}
-
 	memset(p->fb, 0x00, p->fb_bytes);
 	co5300_blit(p, 0, 0, FB_W - 1, FB_H - 1);
+
+	{
+		int l = PANEL_OFFSET_X + FB_X - 1;	/* 66, left of fb0  */
+		int r = PANEL_OFFSET_X + FB_X + FB_W;	/* 387, right of fb0 */
+		int t = FB_Y - 1;			/* 44, above fb0    */
+		int b = FB_Y + FB_H;			/* 445, below fb0   */
+		int rc = co5300_paint_frame(p, l, r, t, b);
+
+		pr_info("co5300: frame painted rc=%d, ring cols %d/%d rows %d/%d\n",
+			rc, l, r, t, b);
+	}
 
 	dev_info(dev, "%dx%d RGB565, fb0 registered\n", PANEL_W, PANEL_H);
 	return 0;

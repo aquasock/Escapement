@@ -71,8 +71,7 @@ terminal rarely reads.
     photograph while everything from 20 px inward did. That may just be the
     photograph, or it may be an addressing offset — the driver windows the glass
     at `PANEL_OFFSET_X = 22` because the controller's addressable area is wider
-    than the visible one. Unresolved, and it does not affect the numbers above
-    because they are measured from the visible glass inward.
+    than the visible one. **This is now measured, see below.**
   * The measurement is a photograph of an AMOLED through a camera. It is good to
     a few pixels, not to one.
 
@@ -105,3 +104,35 @@ MINI4x6      4x6    ->  80 cols x 68 rows   <- the only 80-column option
 MINI4x6 reaches 80 columns (4 * 80 = 320) but 4 px glyphs are rough to read on
 a 2-inch panel. 53 columns is the ceiling for any 6 px font, since 320 / 6 = 53
 and the glass is 410 wide at most.
+
+## The first row and column are swallowed — measured
+
+The border experiment settled the open question above. A 1 px red rectangle was
+drawn around the framebuffer, outside fb0, and the thickness that survived was
+counted on the glass:
+
+```
+uniform 1 px ring   right and bottom appeared, left and top did not
+uniform 2 px ring   right and bottom appeared 2 px, left and top 1 px
+```
+
+So **exactly one pixel is lost at the left and top edges, and none at the right
+and bottom.** That is the first row and column disappearing, which is what the
+photograph hinted at — the offset is real, it is one pixel, and it applies only
+at the origin.
+
+`co5300.c` compensates by drawing the left and top edges one pixel wider than the
+right and bottom (`RING_LT` versus `RING_T`), so the same thickness is visible on
+all four sides. Both sets of pixels are outside fb0, so the console is unaffected
+either way.
+
+Two things also learned about the controller while doing it, both of which cost
+time:
+
+  * **A window one pixel wide or tall is not reliably honoured.** Drawing the
+    border as four 1 px fills (322x1 across, 1x402 down) produced nothing at all
+    and returned success on every call. A 432x31 strip in the same place
+    appeared. The border is now drawn inside the same full-width band loop as
+    the background, so every transfer is a normal large window.
+  * **The panel is write-only.** None of this was discoverable from the host —
+    every conclusion above came from looking at the glass and counting pixels.
