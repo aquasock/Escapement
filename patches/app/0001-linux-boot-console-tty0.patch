@@ -1,0 +1,35 @@
+From: Escapement
+Subject: [PATCH] linux_boot: put the console on the framebuffer too
+
+Adds console=tty0 before ttyGS3 so printk mirrors to the AMOLED as well as the
+USB port, which is what makes the panel show the boot log and the login prompt
+instead of the driver's last painted image.
+
+Order still matters: /dev/console binds to the LAST console= on the line, so
+ttyGS3 stays last and init's stdin/stdout remain on the USB port. tty0 is a sink
+only -- there is no keyboard behind it, and the side buttons emit keycodes that
+nothing consumes yet.
+
+Apply from the esp-hosted checkout root (its git repo root is build/esp-hosted,
+not the esp_driver subdirectory):
+
+    cd build/esp-hosted
+    git apply -p1 ../../patches/app/0001-linux-boot-console-tty0.patch
+
+It has to be committed there too: esp_driver/CMakeLists.txt runs
+`git reset --hard` on every cmake invocation, so an uncommitted change is lost
+at the next build.
+
+diff --git a/esp_hosted_ng/esp/esp_driver/network_adapter/main/linux_boot.c b/esp_hosted_ng/esp/esp_driver/network_adapter/main/linux_boot.c
+index 4cc4e02..30efbe3 100644
+--- a/esp_hosted_ng/esp/esp_driver/network_adapter/main/linux_boot.c
++++ b/esp_hosted_ng/esp/esp_driver/network_adapter/main/linux_boot.c
+@@ -52,7 +52,7 @@ static const char default_cmdline[] =
+ 	 * line. With ttyS0 last, init's stdin/stdout went to a UART this board
+ 	 * does not have, while printk still mirrored to ttyGS3 -- so the log
+ 	 * appeared and typing went nowhere. */
+-	"console=ttyS0,115200n8 console=ttyGS3 "
++	"console=ttyS0,115200n8 console=tty0 console=ttyGS3 "
+ 	"rw root=mtd:rootfs rootfstype=cramfs panic=10 panic_console_replay "
+ 	"loglevel=7";
+ 

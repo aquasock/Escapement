@@ -74,7 +74,12 @@ cd "$here"
 # ---- stack 2: ours ---------------------------------------------------------
 say "escapement patches"
 cd "$K"
-for f in "$here"/patches/kernel/0001-*.patch; do
+# Every patch in patches/kernel, in filename order. The glob used to be
+# 0001-* only, which silently skipped later patches -- including the one that
+# registers the CO5300 driver, so a clean build produced a kernel with no
+# display driver and reported success.
+for f in "$here"/patches/kernel/*.patch; do
+    [ -e "$f" ] || continue
     git apply --whitespace=nowarn "$f" 2>/dev/null || true
 done
 cd "$here"
@@ -110,18 +115,20 @@ for p in kernel.patch real/scheduler.patch reclaim.patch quiet-trace.patch \
     fi
 done
 
-# Without these two the backend is compiled out and fork() silently falls back
-# to something that cannot work on NOMMU.
-./scripts/config --enable XTENSA_NOMMU_FORK --set-str LOCALVERSION '-forkbank'
-# RTC_NVMEM defaults to RTC_CLASS and drags in the whole NVMEM framework. The
-# PCF85063A uses none of it and the board config ships NVMEM off.
-./scripts/config --disable RTC_NVMEM --disable NVMEM
+# The config switches are applied further down, once .config exists. Running
+# scripts/config here used to work only because an earlier build had left a
+# .config behind; on a clean tree it fails with "No such file or directory"
+# and the build carries on with defaults.
 cd "$here"
 
 # ---- build -----------------------------------------------------------------
 say "build"
 cd "$K"
-cp "$PROJ/new-files/board/espressif/esp32s3/devkit_c1_16m_linux.config" .config
+# Our own config, not the port's seed. The seed is a moving target that has to
+# be patched again on every version bump, and a missed patch is invisible: the
+# kernel builds and simply lacks the symbol. One tracked file that is copied
+# verbatim is checkable, and check-kernel-config.py compares against it below.
+cp "$here/patches/kernel/config/devkit_c1_16m_linux.config" .config
 ./scripts/config --enable XTENSA_NOMMU_FORK --set-str LOCALVERSION '-forkbank'
 ./scripts/config --disable RTC_NVMEM --disable NVMEM
 make ARCH=xtensa CROSS_COMPILE=$CROSS olddefconfig >/dev/null
@@ -142,7 +149,7 @@ make ARCH=xtensa CROSS_COMPILE=$CROSS -j"$(nproc)" xipImage
 # ---- checks that matter ----------------------------------------------------
 say "checks"
 python3 "$FORK/check-kernel-config.py" \
-    "$PROJ/new-files/board/espressif/esp32s3/devkit_c1_16m_linux.config" .config \
+    "$here/patches/kernel/config/devkit_c1_16m_linux.config" .config \
     || die "config drifted from the board seed"
 grep -q '^CONFIG_XTENSA_NOMMU_FORK=y' .config || die "fork backend not enabled"
 grep -q '^CONFIG_LOCALVERSION="-forkbank"' .config || die "LOCALVERSION not set"
@@ -151,9 +158,16 @@ grep -q '^CONFIG_RTC_DRV_PCF85063=y' .config || die "RTC driver missing"
 
 size=$(stat -c %s arch/xtensa/boot/xipImage)
 [ "$size" -le $((0x400000)) ] || die "xipImage $size exceeds the 4 MiB linux partition"
-strings arch/xtensa/boot/xipImage | grep -q "Linux version $KV-forkbank" \
-    || die "kernel is not the forkbank build -- the fork backend did not apply"
+# Capture once rather than piping into grep -q. Under `set -o pipefail`,
+# `strings ... | grep -q` fails intermittently: grep exits at the first match,
+# strings takes SIGPIPE, and the pipeline's status becomes 141 -- reported as
+# "the fork backend did not apply" on a kernel that is perfectly fine.
+kv_strings=$(strings arch/xtensa/boot/xipImage)
+case $kv_strings in
+    *"Linux version $KV-forkbank"*) ;;
+    *) die "kernel is not the forkbank build -- the fork backend did not apply" ;;
+esac
 
 printf '\nxipImage: %s bytes (limit 4194304, %s free)\n' "$size" $((0x400000-size))
-strings arch/xtensa/boot/xipImage | grep -m1 -o "Linux version [^ ]*"
+printf '%s\n' "$kv_strings" | grep -m1 -o "Linux version [^ ]*" || true
 printf '\nflash:\n  esptool.py ... write_flash 0x140000 %s/arch/xtensa/boot/xipImage\n' "$K"

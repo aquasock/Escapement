@@ -57,8 +57,12 @@ diff --git a/esp_hosted_ng/esp/esp_driver/network_adapter/main/linux_boot.c b/es
 +	/* ttyGS3 last on purpose: /dev/console binds to the LAST console= on the
 +	 * line. With ttyS0 last, init's stdin/stdout went to a UART this board
 +	 * does not have, while printk still mirrored to ttyGS3 -- so the log
-+	 * appeared and typing went nowhere. */
-+	"console=ttyS0,115200n8 console=ttyGS3 "
++	 * appeared and typing went nowhere.
++	 *
++	 * tty0 is the framebuffer console: printk mirrors to it, so the kernel
++	 * log and everything the console prints also appears on the AMOLED. It
++	 * sits before ttyGS3 so /dev/console stays on the USB port. */
++	"console=ttyS0,115200n8 console=tty0 console=ttyGS3 "
 +	"rw root=mtd:rootfs rootfstype=cramfs panic=10 panic_console_replay "
 +	"loglevel=7";
 +

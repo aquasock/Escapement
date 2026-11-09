@@ -52,6 +52,23 @@
 #define PANEL_SAFE_INSET	45
 #define PANEL_SAFE_W		(PANEL_W - 2 * PANEL_SAFE_INSET)	/* 320 */
 #define PANEL_SAFE_H		(PANEL_H - 2 * PANEL_SAFE_INSET)	/* 412 */
+
+/*
+ * The framebuffer IS the console area, not the whole glass.
+ *
+ * That is the whole point of the split: fbcon lays a console across whatever
+ * the framebuffer says it is, so making fb0 320x410 gives 40 columns by 25
+ * rows at the 8x16 VGA cell with no driver-side arithmetic. The 45/46 px
+ * border that the chamfered corners force stays outside fb0, free for
+ * notifications and status strips.
+ *
+ * FB_X and FB_Y are where fb0 sits on the glass; co5300_blit() adds
+ * PANEL_OFFSET_X on top for the controller's own column offset.
+ */
+#define FB_X		((PANEL_W - PANEL_SAFE_W) / 2)	/* 45 */
+#define FB_Y		((PANEL_H - PANEL_SAFE_H) / 2)	/* 46 */
+#define FB_W		PANEL_SAFE_W			/* 320 */
+#define FB_H		400				/* 25 rows of 16 */
 #define BPP 16
 
 struct co5300 {
@@ -72,6 +89,7 @@ struct co5300 {
 	 * heap or static. These two serve the window registers and the small
 	 * init payloads. */
 	u8 *small;
+	u32 pseudo_palette[16];
 };
 
 
@@ -312,14 +330,17 @@ static void co5300_blit(struct co5300 *p, int x0, int y0, int x1, int y1)
 	size_t npix = (size_t)(x1 - x0 + 1) * (y1 - y0 + 1);
 	int x, y, rc;
 
-	win[0] = (x0 + PANEL_OFFSET_X) >> 8;
-	win[1] = (x0 + PANEL_OFFSET_X) & 0xFF;
-	win[2] = (x1 + PANEL_OFFSET_X) >> 8;
-	win[3] = (x1 + PANEL_OFFSET_X) & 0xFF;
+	int px0 = FB_X + x0, px1 = FB_X + x1;
+	int py0 = FB_Y + y0, py1 = FB_Y + y1;
+
+	win[0] = (px0 + PANEL_OFFSET_X) >> 8;
+	win[1] = (px0 + PANEL_OFFSET_X) & 0xFF;
+	win[2] = (px1 + PANEL_OFFSET_X) >> 8;
+	win[3] = (px1 + PANEL_OFFSET_X) & 0xFF;
 	co5300_cmd(p, 0x2A, win, 4);
 
-	win[0] = y0 >> 8; win[1] = y0 & 0xFF;
-	win[2] = y1 >> 8; win[3] = y1 & 0xFF;
+	win[0] = py0 >> 8; win[1] = py0 & 0xFF;
+	win[2] = py1 >> 8; win[3] = py1 & 0xFF;
 	co5300_cmd(p, 0x2B, win, 4);
 
 	/*
@@ -339,7 +360,7 @@ static void co5300_blit(struct co5300 *p, int x0, int y0, int x1, int y1)
 	 */
 	for (y = y0; y <= y1; y++)
 		for (x = x0; x <= x1; x++)
-			*dst++ = swab16(src[(size_t)y * PANEL_W + x]);
+			*dst++ = swab16(src[(size_t)y * FB_W + x]);
 
 	/*
 	 * The whole window in ONE op with CS held across all of it.
@@ -368,18 +389,100 @@ static void co5300_blit(struct co5300 *p, int x0, int y0, int x1, int y1)
 
 // ---- framebuffer -----------------------------------------------------------
 
+/*
+ * Every fbcon drawing primitive has to push to the panel as well as to memory.
+ *
+ * The cfb_* helpers write into the framebuffer and stop there, which is fine
+ * for a display that scans memory out of its own RAM. This panel has no memory
+ * of ours -- it is fed over SPI -- so a console drawn with bare cfb_* would
+ * fill the buffer and never appear. Each op therefore blits the rectangle it
+ * touched straight afterwards.
+ *
+ * This is slow: the blit path is one spi-mem op per call through a 64-byte
+ * FIFO, so a full 40x25 repaint is thousands of register writes. It is correct
+ * first; batching a dirty region comes later.
+ */
+static void co5300_flush(struct fb_info *info, const struct fb_fillrect *r)
+{
+	struct co5300 *p = info->par;
+	int x0 = r->dx, y0 = r->dy;
+	int x1 = r->dx + r->width - 1;
+	int y1 = r->dy + r->height - 1;
+
+	if (x1 < x0 || y1 < y0)
+		return;
+	if (x0 < 0) x0 = 0;
+	if (y0 < 0) y0 = 0;
+	if (x1 > FB_W - 1) x1 = FB_W - 1;
+	if (y1 > FB_H - 1) y1 = FB_H - 1;
+	if (x1 < x0 || y1 < y0)
+		return;
+
+	co5300_blit(p, x0, y0, x1, y1);
+}
+
+static void co5300_fillrect(struct fb_info *info, const struct fb_fillrect *rect)
+{
+	cfb_fillrect(info, rect);
+	co5300_flush(info, rect);
+}
+
+static void co5300_copyarea(struct fb_info *info, const struct fb_copyarea *area)
+{
+	struct fb_fillrect r = {
+		.dx = area->dx, .dy = area->dy,
+		.width = area->width, .height = area->height,
+	};
+
+	cfb_copyarea(info, area);
+	co5300_flush(info, &r);
+}
+
+static void co5300_imageblit(struct fb_info *info, const struct fb_image *image)
+{
+	struct fb_fillrect r = {
+		.dx = image->dx, .dy = image->dy,
+		.width = image->width, .height = image->height,
+	};
+
+	cfb_imageblit(info, image);
+	co5300_flush(info, &r);
+}
+
+/*
+ * Palette: black background, green text.
+ *
+ * fbcon asks for the standard 16 VGA colours and we hand back green in the two
+ * entries ordinary text actually uses -- 7 (light grey, the default foreground)
+ * and 15 (bright white, used for bold). Everything else is left as asked, so
+ * `ls --color`, error messages and the rest still work.
+ */
 static int co5300_fb_setcolreg(u_int regno, u_int red, u_int green, u_int blue,
 			       u_int transp, struct fb_info *info)
 {
-	return regno > 255 ? 1 : 0;
+	u32 v;
+
+	if (regno > 255)
+		return 1;
+
+	if (regno == 7 || regno == 15) {
+		/* bright green, slightly dimmer for the non-bold entry */
+		red = 0x20;
+		green = (regno == 15) ? 0xFF : 0xC0;
+		blue = 0x20;
+	}
+
+	v = (red >> 3) << 11 | (green >> 2) << 5 | (blue >> 3);
+	((u32 *)info->pseudo_palette)[regno] = v;
+	return 0;
 }
 
 static const struct fb_ops co5300_fb_ops = {
 	.owner = THIS_MODULE,
 	.fb_setcolreg = co5300_fb_setcolreg,
-	.fb_fillrect = cfb_fillrect,
-	.fb_copyarea = cfb_copyarea,
-	.fb_imageblit = cfb_imageblit,
+	.fb_fillrect = co5300_fillrect,
+	.fb_copyarea = co5300_copyarea,
+	.fb_imageblit = co5300_imageblit,
 };
 
 static int co5300_probe(struct spi_mem *mem)
@@ -458,7 +561,7 @@ static int co5300_probe(struct spi_mem *mem)
 		edges == 0 ? "(controller NOT scanning)" :
 		edges < 0 ? "(no te gpio)" : "*** CONTROLLER IS SCANNING ***");
 
-	p->fb_bytes = PANEL_W * PANEL_H * (BPP / 8);
+	p->fb_bytes = FB_W * FB_H * (BPP / 8);
 	p->fb = vzalloc(p->fb_bytes);
 	/*
 	 * The transmit buffer is a whole frame, because the pixel stream has to
@@ -475,6 +578,8 @@ static int co5300_probe(struct spi_mem *mem)
 	if (!info)
 		return -ENOMEM;
 	p->info = info;
+	info->par = p;
+	info->pseudo_palette = p->pseudo_palette;
 
 	info->screen_base = (char __iomem *)p->fb;
 	info->screen_size = p->fb_bytes;
@@ -482,13 +587,13 @@ static int co5300_probe(struct spi_mem *mem)
 	info->fix.smem_len = p->fb_bytes;
 	info->fix.type = FB_TYPE_PACKED_PIXELS;
 	info->fix.visual = FB_VISUAL_TRUECOLOR;
-	info->fix.line_length = PANEL_W * (BPP / 8);
+	info->fix.line_length = FB_W * (BPP / 8);
 
 	var = &info->var;
-	var->xres = PANEL_W;
-	var->yres = PANEL_H;
-	var->xres_virtual = PANEL_W;
-	var->yres_virtual = PANEL_H;
+	var->xres = FB_W;
+	var->yres = FB_H;
+	var->xres_virtual = FB_W;
+	var->yres_virtual = FB_H;
 	var->bits_per_pixel = BPP;
 	var->red.offset = 11; var->red.length = 5;
 	var->green.offset = 5; var->green.length = 6;
@@ -499,43 +604,45 @@ static int co5300_probe(struct spi_mem *mem)
 		return dev_err_probe(dev, ret, "register_framebuffer failed\n");
 
 	/*
-	 * Prove the panel emits, with structure rather than a flat fill.
+	 * Clear the whole glass to black, then let fbcon draw into fb0.
 	 *
-	 * A solid colour renders identically whether the controller received all
-	 * 502 rows or received row 0 five hundred times, so it cannot tell a
-	 * working row address from a broken one. Horizontal bands stacked down
-	 * the glass vary along y and can:
-	 *
-	 *     8 equal bands, top to bottom:
-	 *         white, red, green, blue, yellow, magenta, cyan, grey
-	 *
-	 * Anything else -- one flat colour, a thin strip, a repeat of the first
-	 * band -- localises the fault to row addressing instead of leaving it
-	 * open. Colours are bright on purpose: black on an AMOLED is a
-	 * powered-off panel.
+	 * The border outside fb0 is not part of the framebuffer, so it has to be
+	 * cleared here or a previous image stays visible in the strips that are
+	 * being kept for notifications. It is cleared as a full-panel window
+	 * rather than through the fb, which knows nothing about it.
 	 */
 	{
-		static const u16 bands[8] = {
-			0xFFFF,	/* white   */
-			0xF800,	/* red     */
-			0x07E0,	/* green   */
-			0x001F,	/* blue    */
-			0xFFE0,	/* yellow  */
-			0xF81F,	/* magenta */
-			0x07FF,	/* cyan    */
-			0x8410,	/* grey    */
-		};
-		int y, x;
+		u16 *blank = vzalloc((size_t)PANEL_W * 2);
+		u8 *win = p->small;
+		int y;
 
-		for (y = 0; y < PANEL_H; y++) {
-			u16 c = bands[(y * 8) / PANEL_H];
+		if (blank) {
+			for (y = 0; y < PANEL_H; y++) {
+				win[0] = (PANEL_OFFSET_X) >> 8;
+				win[1] = (PANEL_OFFSET_X) & 0xFF;
+				win[2] = (PANEL_OFFSET_X + PANEL_W - 1) >> 8;
+				win[3] = (PANEL_OFFSET_X + PANEL_W - 1) & 0xFF;
+				co5300_cmd(p, 0x2A, win, 4);
 
-			for (x = 0; x < PANEL_W; x++)
-				p->fb[(size_t)y * PANEL_W + x] = c;
+				win[0] = y >> 8; win[1] = y & 0xFF;
+				win[2] = y >> 8; win[3] = y & 0xFF;
+				co5300_cmd(p, 0x2B, win, 4);
+
+				co5300_op(p, 0x02, 0x002C00, NULL, 0, 1);
+
+				if (p->cs)
+					gpiod_set_value_cansleep(p->cs, 1);
+				co5300_xfer(p, 0x32, 1, 0x002C00, 1, blank,
+					    (size_t)PANEL_W * 2, 4);
+				if (p->cs)
+					gpiod_set_value_cansleep(p->cs, 0);
+			}
+			vfree(blank);
 		}
 	}
 
-	co5300_blit(p, 0, 0, PANEL_W - 1, PANEL_H - 1);
+	memset(p->fb, 0x00, p->fb_bytes);
+	co5300_blit(p, 0, 0, FB_W - 1, FB_H - 1);
 
 	dev_info(dev, "%dx%d RGB565, fb0 registered\n", PANEL_W, PANEL_H);
 	return 0;

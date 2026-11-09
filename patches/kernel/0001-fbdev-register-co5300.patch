@@ -1,0 +1,51 @@
+From: Escapement
+Subject: [PATCH] fbdev: register the CO5300 panel driver
+
+co5300.c has been in the tree and working, but the build only ever picked it up
+because the Kconfig entry and Makefile line had been added by hand to an
+existing build tree. A clean build copies the driver in and compiles nothing:
+`co5300` appears zero times in System.map, the panel never probes, and the only
+symptom is a dark screen.
+
+Found by the config check in build-kernel.sh, which is what it exists for -- the
+kernel built fine, reported success, and had no display driver in it.
+
+--- a/drivers/video/fbdev/Kconfig
++++ b/drivers/video/fbdev/Kconfig
+@@ -1776,6 +1776,26 @@
+ 	  Configuration re: surface address, size, and format must be provided
+ 	  through device tree, or plain old platform data.
+ 
++config FB_CO5300
++	tristate "CO5300 AMOLED panel (T-Watch Ultra)"
++	depends on FB && SPI_MEM
++	select FB_CFB_FILLRECT
++	select FB_CFB_COPYAREA
++	select FB_CFB_IMAGEBLIT
++	help
++	  Framebuffer for the CO5300 AMOLED on LilyGo's T-Watch Ultra, driven as
++	  a spi-mem client.
++
++	  The panel speaks a protocol spi_transfer cannot express: an 8-bit
++	  command phase and a 24-bit address phase on one lane, then the pixel
++	  payload on four. It is write-only, so the only feedback is the
++	  tearing-effect pin, which pulses once per refresh while the controller
++	  scans.
++
++	  The cfb_* helpers draw into system memory and then hand the rectangle
++	  back through fb_ops, where this driver blits it to the panel. The
++	  sys_* variants would bypass that and the glass would never update.
++
+ config FB_SSD1307
+ 	tristate "Solomon SSD1307 framebuffer support"
+ 	depends on FB && I2C
+--- a/drivers/video/fbdev/Makefile
++++ b/drivers/video/fbdev/Makefile
+@@ -121,6 +121,7 @@
+ obj-$(CONFIG_FB_OF)               += offb.o
+ obj-$(CONFIG_FB_SSD1307)	  += ssd1307fb.o
+ obj-$(CONFIG_FB_SIMPLE)           += simplefb.o
++obj-$(CONFIG_FB_CO5300)          += co5300.o
+ 
+ # the test framebuffer is last
+ obj-$(CONFIG_FB_VIRTUAL)          += vfb.o
