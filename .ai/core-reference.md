@@ -129,6 +129,9 @@ Topic IDs are the `record_id` prefix. An entry reserves a name; it does not clai
 | Why did the PMU work, then stop, after a rebuild? | PMU | PMU-002 |
 | Which config option publishes axp20x-usb? | PMU | PMU-003 |
 | Where does the RTC's time come from and go to? | RTC | RTC-001 |
+| Why does `date` print UTC when the clock is right? | RTC | RTC-002 |
+| Why did the clock jump to last shutdown's time at boot? | RTC | RTC-003 |
+| What survives a full-image flash in /etc? | FLS | FLS-003 |
 | Can the firmware persist anything to flash after Linux starts? | JFS | JFS-001 |
 | Can the firmware read a file Linux wrote? | JFS | JFS-002 |
 | Why does a program fail to exec with free memory remaining? | KRN | KRN-001 |
@@ -177,6 +180,9 @@ PMU-002: "The AXP2101 has no mainline driver, so it lives in patches/kernel/axp2
 PMU-003: "CONFIG_AXP20X_POWER publishes /sys/class/power_supply/axp20x-usb and is off by default; its absence is silent because axp20x-battery still appears"
 
 RTC-001: "The PCF85063A at I2C 0x51 registers as rtc0 and, with CONFIG_RTC_HCTOSYS, seeds the system clock before init; its interrupt shares GPIO bank 0 with the PMU line"
+RTC-002: "The image ships no /etc/TZ, /etc/localtime or /usr/share/zoneinfo, so `date` prints UTC even when the clock is right; /etc/TZ containing MST7 (UTC-7 all year, no DST) is the whole fix for uClibc-ng"
+RTC-003: "The upstream image's /etc/init.d/S01clock saves the epoch to /home/.clock at shutdown and overwrites the RTC-seeded clock at boot; the board has one RTC (rtc0 at 0x51), so it is a second mechanism, not a second clock, and this project disables it by moving it out of /etc/init.d because S??* still matches .disabled"
+FLS-003: "A full-image flash rewrites /etc and S03keepconfig carries back only seven named files plus dropbear keys, so project-added /etc files must be re-installed by scripts/watch-time.sh after one; a kernel-only flash leaves /etc alone"
 
 KRN-001: "NOMMU with no overcommit: every ELF load segment and every large allocation must be CONTIGUOUS, so 'nommu: Allocation of length N failed' is a contiguity failure, not an out-of-memory one, and a big static array blocks exec rather than failing at run time"
 KRN-002: "init_linux_mmap() extends the linear flash window over the whole 16 MiB only inside map_flash_and_go(), immediately before the jump to Linux; firmware dereferencing 0x42xx0000 earlier reads unmapped memory and reset-loops with no output"
@@ -439,12 +445,40 @@ EXT-001: "The SPLB32 Tamagotchi core runs at 4.05x realtime headless on this boa
   status: VERIFIED
   verified_date: 2026-11-09
   statement: "A PCF85063A at I2C address 0x51 registers as rtc0 and, with CONFIG_RTC_HCTOSYS set, its stored time seeds the kernel's clock before init runs. The kernel logs 'rtc-pcf85063 0-0051: registered as rtc0' followed by 'setting system clock to ... UTC'. Its interrupt resolves to the same GPIO bank as the PMU line, appearing as 'esp32xx-gpio 1 pcf85063'."
-  consequence: "The clock is available to userspace from the first second of boot rather than waiting for a network time source. This project writes the system clock back to the chip at shutdown, and the factory had set the chip to UTC+8, which required one correction."
+  consequence: "The clock is available to userspace from the first second of boot rather than waiting for a network time source. This project writes the system clock back to the chip at shutdown, so a correction made during a session survives the next boot. The factory had set the chip to UTC+8, and that correction has been applied: the chip now holds true UTC, confirmed against the host clock to within two seconds."
   sources:
     - "patches/kernel/0001-dts-watch-i2c-pins-and-rtc.patch"
     - "boot log on hardware: 'rtc-pcf85063 0-0051: registered as rtc0' and the hctosys line"
     - "README.md, RTC section"
-  verification: "Observed in every boot log. The write-back loop was verified earlier by corrupting the chip on purpose and confirming the next boot adopted the corrected system clock; not re-tested this session."
+  verification: "Observed in every boot log. The write-back loop was verified twice: first by corrupting the chip on purpose and confirming the next boot adopted the corrected system clock, and again on 2026-11-09 by skewing the system clock +300 s, rebooting with no manual write, and finding the chip holding the skewed value (18:06:36 against true 18:01:38) while hctosys then seeded from it. Revised 2026-11-09 (core-log entry 2): the chip now holds true UTC, so the standing UTC+8 correction is no longer outstanding."
+
+- record_id: RTC-002
+  kind: RTC
+  topic_id: RTC
+  title: "The image ships no timezone data; /etc/TZ containing MST7 is what makes `date` read local time"
+  status: VERIFIED
+  verified_date: 2026-11-09
+  statement: "The image contains no `/etc/TZ`, no `/etc/localtime` and no `/usr/share/zoneinfo`. The kernel's stored UTC can be exactly right while `date` still prints UTC, because nothing tells userspace what offset to apply. Placing the POSIX TZ string `MST7` in `/etc/TZ` is sufficient: uClibc-ng reads that file whenever `TZ` is unset, which is the state of the console's shells. `MST7` means UTC-7 for the whole year with no DST, which is America/Phoenix; `MST7MDT` would apply a one-hour DST offset and be wrong for all of summer."
+  consequence: "This is a separate defect from the clock being correct. A watch whose chip holds perfect UTC still shows the wrong time on the glass until `/etc/TZ` exists. The file must contain the TZ string and nothing else -- neither uClibc-ng nor glibc parses comments there, so a comment becomes part of the zone name. It is installed by `scripts/watch-time.sh` and is unlisted in `S03keepconfig`, so a full-image flash loses it."
+  sources:
+    - "userspace/TZ (repo artifact: the single line `MST7`)"
+    - "scripts/watch-time.sh: the install path and the MST7 reasoning"
+    - "on the watch: `ls /etc/TZ /etc/localtime /usr/share/zoneinfo` all report No such file or directory"
+  verification: "Verified on hardware: with `TZ` unset and `/etc/TZ` absent, `date` printed '2026-11-09T17:46:20 UTC +0000'; after writing `MST7`, the same command printed '2026-11-09T10:47:07 MST -0700' against a true UTC of 17:47:07."
+
+- record_id: RTC-003
+  kind: RTC
+  topic_id: RTC
+  title: "The upstream image ships a stamp pseudo-clock (S01clock) that can overwrite the RTC-seeded time at boot"
+  status: VERIFIED
+  verified_date: 2026-11-09
+  statement: "`/etc/init.d/S01clock` ships in the upstream image and is not a clock. At shutdown it writes the epoch to `/home/.clock`; at boot it overwrites the system clock with that note whenever the note is newer than the current clock. It sorts after `hctosys`, which seeds from the RTC about 5.4 s into boot, so the note has the last word. `/sys/class/rtc/` contains `rtc0` and nothing else, resolving to `platform/i2c0/i2c-0/0-0051/rtc/rtc0` -- the board has exactly one timekeeper, so this is a second mechanism, not a second clock. It also costs one jffs2 write per shutdown."
+  consequence: "Left enabled, boot time can come from the previous shutdown rather than from the chip, which masks a dead or drifting RTC and silently discards any correction NTP made during the last session. This project disables it so the PCF85063A is the single authority; `scripts/watch-time.sh` moves it to `/etc/disabled/S01clock` and deletes `/home/.clock`. Disabling it is deliberately not a rename: `rcS` and `rcK` both iterate `for i in $(ls /etc/init.d/S??*)`, and that pattern is S, exactly two characters, then anything, so `S01clock.disabled` and `S01clock.off` both still match and still run. Only a file outside `/etc/init.d` is actually stopped."
+  sources:
+    - "on the watch: `cat /etc/init.d/S01clock`, and `cat /etc/init.d/rcS` / `rcK` for the invocation loop"
+    - "`ls /etc/init.d/S??*` behaviour checked in a scratch directory: S01clock, S01clock.disabled, S01clock.off and S20foo all matched"
+    - "scripts/watch-time.sh: disable_stamp_clock()"
+  verification: "Verified on hardware: with `/home/.clock` set 90 minutes ahead, `/etc/init.d/S01clock start` printed 'Clock restored to 2026-11-09 19:42:56 UTC' and the clock moved from 18:12:58 to 19:42:56 against a true 18:12:59. After the disable, a shutdown-and-reboot cycle left `/home/.clock` absent -- `rcK` would have recreated it had the script still been in the glob -- with `uptime` 54 s and hctosys seeding true UTC."
 
 - record_id: KRN-001
   kind: KERNEL
@@ -513,6 +547,19 @@ EXT-001: "The SPLB32 Tamagotchi core runs at 4.05x realtime headless on this boa
     - "boot log after flashing it: 'octal_psram: PSRAM ID read error'"
     - "docs/watch-recovery.md"
   verification: "Established by doing it on hardware and paying the full cost, then recovering by writing this project's kernel to 0x140000."
+
+- record_id: FLS-003
+  kind: FLASH
+  topic_id: FLS
+  title: "A full-image flash rewrites /etc, and S03keepconfig carries back only seven named files plus the dropbear keys"
+  status: VERIFIED
+  verified_date: 2026-11-09
+  statement: "A full-image flash rewrites the `/etc` jffs2 partition from the image. `/etc/init.d/S03keepconfig` restores a fixed list afterwards -- `wpa_supplicant.conf`, `shadow`, `passwd`, `group`, `inetd.conf`, `remote-login`, `remote-login.conf`, and the four `dropbear/dropbear_*_host_key` files -- from a copy it keeps in `/home/.etc-backup`, and only when `/etc` carries no generation stamp. Nothing outside that list survives; every other file added to `/etc` is lost. A kernel-only write to 0x140000 does not touch `/etc` at all."
+  consequence: "Any project-added `/etc` file -- `/etc/TZ`, `/etc/init.d/S01hwclock`, a deployed init script -- must be re-installed after a full-image flash, but not after a kernel flash. This is how a shutdown write-back hook that had been verified on hardware came to be missing from the board: the script's existence was documented while the file itself had been removed by a reflash. `scripts/watch-time.sh` is idempotent and re-installs both files, so the cure is one command rather than remembering."
+  sources:
+    - "on the watch: `cat /etc/init.d/S03keepconfig` -- the FILES and KEYS lists, and the stamp gate"
+    - "FLS-001 for the partition layout and the kernel-only write path"
+  verification: "Verified on hardware: `/etc/TZ` written by hand and `/etc/init.d/S01hwclock` installed both survived a plain reboot, while `/etc/init.d/S01hwclock` was absent from the board at the start of this cycle despite being documented as running at shutdown. The surviving-file list is read directly from the script's own `FILES` and `KEYS` variables, not inferred."
 
 - record_id: JFS-001
   kind: JFFS2

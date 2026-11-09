@@ -1,0 +1,49 @@
+#!/bin/sh
+#
+# S01hwclock - write the system clock back to the PCF85063A at shutdown.
+#
+# CONFIG_RTC_HCTOSYS seeds the kernel from the chip at boot, so the clock is
+# right from the first second. Nothing closed the other direction: after NTP or
+# a manual correction, the chip kept the value it had, and the error returned on
+# the next boot.
+#
+# Named S01 so that it runs LAST on the way down. rcK runs S??* in reverse
+# order, which makes S01 the final script before `umount -a` -- late enough for
+# the network and the clock to have settled, early enough that the jffs2 mounts
+# are still there.
+#
+# `-u` is not optional. The chip holds UTC; without -u BusyBox hwclock consults
+# /var/lib/hwclock/adjtime to decide what the chip means, that file does not
+# exist on this image, and it guesses -- writing local time into a UTC chip.
+# (BusyBox has no --set: -s, -w and --systz only.)
+#
+# The year gate is a guard, not decoration. If the chip is dead or never set,
+# hctosys can hand userspace a 1970-epoch clock; writing that back would destroy
+# whatever good time the chip held and make the next boot worse than this one.
+# A clock that is obviously wrong is not worth persisting.
+
+case "$1" in
+start)
+	# rcS calls every S??* with 'start'. Nothing to do at boot: hctosys
+	# has already seeded the clock from the chip.
+	;;
+stop)
+	year=$(date +%Y 2>/dev/null)
+	if [ -n "$year" ] && [ "$year" -ge 2020 ]; then
+		hwclock -w -u 2>/dev/null || :
+	fi
+	;;
+status)
+	printf 'system clock:   '
+	date '+%Y-%m-%dT%H:%M:%S %Z %z'
+	# -l prints the chip's stored value unconverted, which is UTC. -u would
+	# convert it to local time and read seven hours behind, which is the
+	# shape of a clock that is wrong when it is not.
+	printf 'RTC chip (UTC): '
+	hwclock -r -l 2>/dev/null || echo 'unreadable'
+	;;
+*)
+	echo "Usage: $0 {start|stop|status}" >&2
+	exit 1
+	;;
+esac

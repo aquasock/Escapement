@@ -56,15 +56,39 @@ i2c-gpio i2c0: using lines 579 (SDA) and 578 (SCL)     # pins 3 and 2
 
 The stored value was UTC+8 — the factory set the chip to China Standard Time,
 so it needed one correction. Reads and writes both work: the chip kept exact
-time over a 60 s sample (02:52:05 → 02:53:05), and `scripts/rtc-writeback.sh`
-closes the loop so the corrected clock is written back at shutdown.
+time over a 60 s sample (02:52:05 → 02:53:05), and the shutdown write-back
+closes the loop so a corrected clock is pushed down to the chip.
 
 ```
 time rate     60 s sample, 60 s apart, no drift
 chip write    hwclock -w -u            (BusyBox: no --set, -s/-w/--systz only)
 boot           hctosys seeds the kernel from the chip
-shutdown       /etc/init.d/S01hwclock  writes it back
+shutdown       /etc/init.d/S01hwclock  writes it back, from rcK
 ```
+
+**The image ships no timezone data at all.** No `/etc/TZ`, no `/etc/localtime`,
+no `/usr/share/zoneinfo` — so out of the box `date` prints UTC and the console
+clock is seven hours off the wall. `/etc/TZ` holding the POSIX string `MST7`
+is enough: uClibc-ng reads it whenever `TZ` is unset, which is how the console's
+shells run. America/Phoenix is `MST7`, UTC-7 all year with no DST — not
+`MST7MDT`, which is an hour wrong every summer.
+
+`scripts/watch-time.sh` installs both files and verifies them. It has to be
+re-run after any **full-image** flash, because `/etc` is rewritten from the
+image and `/etc/init.d/S03keepconfig` only carries seven named files across
+(`wpa_supplicant.conf`, `shadow`, `passwd`, `group`, `inetd.conf`,
+`remote-login`, `remote-login.conf`, plus the dropbear keys). A kernel-only
+flash leaves `/etc` alone and needs no re-install.
+
+The script also disables the upstream image's `/etc/init.d/S01clock`. That is not
+a second clock — `/sys/class/rtc/` holds `rtc0` and nothing else — but a note:
+it saves the epoch to `/home/.clock` at shutdown and writes it back over the
+system clock at boot whenever the note is newer, which is *after* `hctosys` has
+seeded from the chip. Set 90 minutes ahead, it moved the clock to 19:42 against
+a true 18:12. Disabled by decision: the PCF85063A is the single authority, and
+if it dies then the time is wrong and should say so. It is moved to
+`/etc/disabled/S01clock` rather than renamed, because `rcS` and `rcK` glob
+`S??*` and `S01clock.disabled` would still run.
 
 Verified by corrupting the chip on purpose: set to 20:30 while true UTC was
 19:00, corrected the *system* clock only, rebooted — and the next boot reported
@@ -303,9 +327,14 @@ cores.
 - **The PMU's fuel gauge is not driven.** `capacity` and `voltage_now` come from
   the registers directly (see `patches/kernel/axp2101/0009`); there is no
   battery model, so there is no time-to-empty and no charge-cycle estimate.
-- **The RTC's stored time is UTC+8.** The chip counts correctly but the factory
-  set it to China Standard Time. It is exactly 8 h ahead of true UTC, so it
-  needs one `hwclock --set` to correct. Not a driver fault.
+- **The RTC's stored time has been corrected once.** The factory set the chip
+  to China Standard Time, exactly 8 h ahead of true UTC. It has since been
+  corrected and the chip now holds true UTC, verified against the host clock.
+  Not a driver fault, and no longer outstanding.
+- **`/etc` does not survive a full-image flash.** The image rewrites it, and
+  `/etc/init.d/S03keepconfig` carries back only a named list. The timezone file
+  and the RTC write-back script have to be re-installed with
+  `./scripts/watch-time.sh` after one. Kernel-only flashes are unaffected.
 - **The buttons have no names yet** beyond the kernel keycodes they emit:
   Pusher A (top left) is `KEY_POWER`, Pusher B (bottom left) is `KEY_ENTER`.
 

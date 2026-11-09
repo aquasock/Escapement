@@ -99,6 +99,7 @@ rate        02:52:05 -> 02:53:05 over 60 s wall time, no drift
 boot        rtc-pcf85063 0-0051: setting system clock to ... UTC   (hctosys)
 write       hwclock -w -u
 shutdown    /etc/init.d/S01hwclock, called by rcK
+install     ./scripts/watch-time.sh   (/etc/TZ and S01hwclock, verified)
 ```
 
 The write-back hook exists because `hctosys` only goes one way. Without it, an
@@ -140,16 +141,52 @@ With neither `-u` nor `-l`, BusyBox `hwclock` reads
 exist here, so it is guessing. Always pass `-u`: the chip holds UTC, and
 timezone is userspace's business.
 
-Corollary: `date -s` takes a literal `YYYY-MM-DD hh:mm:ss`. There is no
-`@epoch` form and no `+format`, so `date -s "@$saved"` — which the shipped
-`S01clock` uses — does not work on this shell.
+Corollary: `date -s` takes a literal `YYYY-MM-DD hh:mm:ss`. **`@epoch` also
+works here** — `date -u -s "@1000000000"` sets the clock to 2001 on this shell.
+That was previously recorded here as unsupported, and it is not; it was
+established by running it. There is still no `+format` form for `-s`.
+
+### The shipped `S01clock` is disabled on purpose
+
+The upstream image ships `/etc/init.d/S01clock`, which is a *second* time
+mechanism and not a second clock. At shutdown it writes the epoch to
+`/home/.clock`; at boot it overwrites the system clock with that note whenever
+the note is newer than the current clock. It runs after `hctosys` has already
+seeded from the RTC, so the note beats the chip.
+
+Measured, not assumed: with the note set 90 minutes ahead, `S01clock start`
+moved the clock from 18:12:58 to 19:42:56 while true UTC was 18:12:59.
+
+`/sys/class/rtc/` contains `rtc0` and nothing else, and it resolves to the
+PCF85063A at 0x51. The board has one clock. The note is not a clock; it is the
+last shutdown's guess, and disabling it is a project decision: if the chip
+dies, the time is wrong and that is a fact worth seeing. `scripts/watch-time.sh`
+moves the script to `/etc/disabled/S01clock` and deletes `/home/.clock`.
+
+**Why it is moved and not renamed.** `rcS` and `rcK` both iterate
+`for i in $(ls /etc/init.d/S??*)`. That pattern is `S`, exactly two characters,
+then anything — so `S01clock.disabled` and `S01clock.off` still match and still
+run. Checked in a scratch directory: all three names were matched. Only a file
+that leaves `/etc/init.d` is actually stopped. This is the same shape of trap as
+the non-recursive patch glob in `scripts/build-kernel.sh`: a pattern that looks
+like it excludes something and does not.
 
 ### The factory set it to China time
 
 The chip arrived holding UTC+8. LilyGo are in Shenzhen; the RTC is battery
 backed and was set to local time at the factory with no timezone attached.
 `hctosys` then copied that number in as if it were UTC, so the kernel clock was
-also 8 hours fast. One correction fixes it, and the hook keeps it fixed.
+also 8 hours fast. It has since been corrected and the chip now holds true UTC,
+verified against the host clock to within two seconds; the hook keeps it that
+way.
+
+### The image has no timezone data, so `date` reads UTC
+
+No `/etc/TZ`, no `/etc/localtime`, no `/usr/share/zoneinfo`. The stored time can
+be perfectly correct and the console clock still be seven hours off, because
+nothing tells userspace what the offset is. `/etc/TZ` holding `MST7` fixes it:
+uClibc-ng reads that file whenever `TZ` is unset. `MST7` is UTC-7 all year with
+no DST, which is America/Phoenix; `MST7MDT` would be an hour wrong all summer.
 
 ### Editing a script over the console: never send tabs
 
