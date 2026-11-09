@@ -1,44 +1,52 @@
 #!/bin/sh
 #
-# S49tty1shell - an interactive root shell on the AMOLED console.
+# S49tty1shell - a real login on the AMOLED console.
 #
 # tty1 is the framebuffer console on the watch face. The image's /etc/inittab
 # puts a getty on /dev/console only, which binds to the LAST console= on the
 # kernel command line -- ttyGS3, the USB-Serial-JTAG port. So without this the
-# AMOLED shows kernel output and nothing else, and there is no way to type into
+# AMOLED shows kernel output and nothing else and there is no way to log in on
 # it from the Bluetooth keyboard.
 #
-# A getty line for tty1 was added to /etc/inittab and BusyBox init does not
-# spawn it (cause not established; the line is well formed and the binary
-# exists). A shell started here is what has been verified to work, and it needs
-# no password, which makes the console usable the moment the watch boots.
+# An `tty1::respawn:/sbin/getty -L tty1 0 vt100` line in /etc/inittab is well
+# formed and /sbin/getty exists, but BusyBox init does not spawn it (cause not
+# established). Starting it from here is what has been verified on hardware,
+# and it asks for a username and password exactly like the serial console.
 #
-# stdin/stdout are the console itself, not a pipe, so keystrokes from the
-# uinput device reach this shell directly.
+# An earlier version started `sh -i` directly, giving a root shell on the watch
+# face with no authentication. A console anyone can hold is not a console.
+
+SUP=/home/tty1-getty.sh
+PIDFILE=/var/run/tty1getty.pid
 
 case "$1" in
 start)
-	# Already there? Then leave it alone -- this script runs on every boot
-	# and must not stack shells if it is ever re-run.
-	if [ -e /var/run/tty1shell.pid ] &&
-	   kill -0 "$(cat /var/run/tty1shell.pid)" 2>/dev/null; then
+	if [ -e "$PIDFILE" ] && kill -0 "$(cat "$PIDFILE")" 2>/dev/null; then
 		exit 0
 	fi
-	printf 'Starting tty1 console: '
-	setsid sh -i < /dev/tty1 > /dev/tty1 2>&1 &
-	echo $! > /var/run/tty1shell.pid
+	printf 'Starting tty1 login: '
+	setsid "$SUP" < /dev/null > /dev/null 2>&1 &
+	echo $! > "$PIDFILE"
+	sleep 1
 	echo "OK"
 	;;
 stop)
-	kill "$(cat /var/run/tty1shell.pid)" 2>/dev/null
-	rm -f /var/run/tty1shell.pid
+	printf 'Stopping tty1 login: '
+	[ -e "$PIDFILE" ] && kill "$(cat "$PIDFILE")" 2>/dev/null
+	rm -f "$PIDFILE"
+	# Only tty1's getty is killed. NOT `killall getty`: the serial
+	# console's login is a getty too, and killing it would lock the USB
+	# console out as well.
+	for p in $(pgrep -f "getty -L tty1" 2>/dev/null); do
+		kill "$p" 2>/dev/null
+	done
+	echo "OK"
 	;;
 status)
-	if [ -e /var/run/tty1shell.pid ] &&
-	   kill -0 "$(cat /var/run/tty1shell.pid)" 2>/dev/null; then
-		echo 'tty1 console: running'
+	if [ -e "$PIDFILE" ] && kill -0 "$(cat "$PIDFILE")" 2>/dev/null; then
+		echo 'tty1 login: running'
 	else
-		echo 'tty1 console: not running'
+		echo 'tty1 login: not running'
 	fi
 	;;
 *)
