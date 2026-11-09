@@ -295,3 +295,36 @@ The bench is a permanent diagnostic and `docs/panel-transfer-cost.md` records ho
 - User Test: PASS
 
 ---
+
+## 10 COMMIT Unreleased 2026-11-09T16:53:31-07:00
+
+#### Coming From:
+
+Unreleased fb9ad02
+
+#### Purpose:
+
+Fix the `process_rx_buf: bad if_type 6` console spam and restore the firmware diagnostic channel it was hiding.
+
+#### Outcome:
+
+The cause was an interface enum that had drifted between firmware and kernel. esp-hosted tags every payload with an `if_type` byte and both sides test it against `ESP_MAX_IF`; upstream has six values and this project's firmware fork added a seventh, `ESP_LOG_IF`, for its own diagnostic stream, so the firmware's `ESP_MAX_IF` became 7 while the kernel's stayed 6. Every log frame therefore arrived tagged 6, failed `if_type >= ESP_MAX_IF` in `process_rx_buf()`, and was dropped -- which is the message that had been scrolling the console for days. The frames were not merely rejected, they had nowhere to go: `esp_log_pipe.c` was carried in `patches/kernel/display/final/` but `build-kernel.sh` never installed or compiled it, so `/dev/esp-log` did not exist on this board at all. `patches/kernel/0007` fixes both together, deliberately: the enum entry, the dispatch to `esp_log_pipe_rx()`, the init and deinit calls and the Makefile object, because accepting `ESP_LOG_IF` without a consumer would leave those skbs queued in `rx_q` forever, which is worse than dropping them. Verified on hardware: `/dev/esp-log` now exists as character device 10,257 and delivers real firmware lines such as `@LOG hid: scan 1 complete (connected 0)`, while `bad if_type` errors are zero through the first minutes of uptime against hundreds per boot before the change. The log stream is sparse and that is correct -- the firmware emitter is rate limited to 40 lines per second because, in its own words, a flood of these frames competes for the same shmem link the kernel is booting over. PMU, RTC, local time and WiFi were checked afterwards and are unaffected. Two additional defects surfaced while making the build honest. The escapement patch loop used to print `FAILED to apply` and carry on, which is the silent-loss pattern of TOL-003; it now dies, and on the first clean build that immediately caught two patches that had been doing nothing. One targets `new-files/.../devkit_c1_16m_linux.config`, a file in the port repository rather than the kernel tree, so it is now skipped explicitly as the port's to apply. The other, `0006-dts-side-buttons.patch`, had never applied and never needed to: every element it adds -- `gpio-keys`, `pusher_b_pins`, `pmic_irq_pins`, `KEY_ENTER` and the PMU interrupt -- is already present in the whole-file DTS that `build-kernel.sh` installs, checked one element at a time before it was deleted, and keeping a patch that can never apply is a trap for the next person. What is explicitly not claimed: that this fixes the wedge. The firmware's own source records that a flood of these frames "has already been shown to stop Linux reaching userspace", and that is consistent with what was observed -- ICMP answering throughout while a telnet login stalled, and the IPC ring advancing its read pointer even on a rejected frame so errors could not have stalled it. But that is a hypothesis supported by the evidence, not a demonstrated mechanism, and if the wedge recurs the next instrument is per-interface packet counts in the ring. The core-syntax audit passed: the `.ai/` diff was inspected, `.ai/core.md` was not modified, entry 10 was validated against the template with six sections in canonical order, sequential numbering from 9, an ISO-8601 timestamp carrying the America/Phoenix offset, prose-only Outcome and Next Steps, eligible Files Modified, and Status values within the allowed set.
+
+#### Next Steps:
+
+The firmware diagnostic channel is now a tool rather than a gap, and it should be used before anything else in the deferred list: `cat /dev/esp-log` shows what the BLE host and the shmem link are doing after handoff, which is exactly the period that was previously undiagnosable, and it is already reporting that the keyboard scans repeatedly and connects to nothing. That makes the accepted `sm_bonding` defect -- pairing needed after every reboot -- the obvious next cycle, because the log can now show whether the load path runs at all. The wedge needs a stability test across several hours of ordinary telnet use before it is called fixed; if it recurs, add per-interface counters where the ring is consumed. The tearing root cause in LCD-009 is still open with SPI clock the remaining suspect, and re-measuring the 320x400 frame through the real repaint path to settle the 4.2x disagreement with LCD-005 is still outstanding. The top-bar status daemon has not been started. BLE media keys, firmware-side bond persistence and any wake-from-sleep path remain deferred by user decision.
+
+#### Files Modified:
+
+- patches/kernel/0007-wireless-esp32-ng-add-ESP_LOG_IF-and-log-pipe.patch
+- patches/kernel/0006-dts-side-buttons.patch
+- scripts/build-kernel.sh
+- README.md
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: PASS
+
+---

@@ -163,6 +163,8 @@ Topic IDs are the `record_id` prefix. An entry reserves a name; it does not clai
 | Why does an unattended reboot miss the keyboard entirely? | BLE | BLE-004 |
 | What is WiFi's real throughput and latency? | NET | NET-001 |
 | Is `wifi scan` a safe connectivity test? | NET | NET-002 |
+| Why does the console fill with `bad if_type 6`? | NET | NET-003 |
+| Where do firmware logs go after handoff? | NET | NET-003 |
 | Why does the cross compiler emit objects the linker rejects? | TOL | TOL-001 |
 | Which toolchain is it, and what does it produce? | TOL | TOL-002 |
 | Why does a kernel patch silently go missing? | TOL | TOL-003 |
@@ -223,6 +225,7 @@ BLE-004: "A continuous scan starves core 0's idle task and trips the task watchd
 
 NET-001: "WiFi delivers about 409 KB/s bulk and 30-50 ms to the gateway over esp-hosted on a shared shmem link and one core"
 NET-002: "`wifi scan` proves the radio and scan path only, not the data path; repeated scans while associated disrupt the link, so ping the gateway and use the board's own `wifi connect` helper"
+NET-003: "The firmware fork added ESP_LOG_IF = 6 for its diagnostics, so its ESP_MAX_IF is 7 against the kernel's 6; a mismatch makes every log frame fail if_type >= ESP_MAX_IF and print `bad if_type 6`. Matching the enum alone is not enough -- the frame needs a consumer or it queues forever, so enum and /dev/esp-log driver belong in one patch"
 
 TOL-001: "Without XTENSA_GNU_CONFIG pointing at esp32s3.so the compiler emits BIG-ENDIAN objects and the link fails with 'file in wrong format' naming libc or libgcc, which reads as a broken toolchain"
 TOL-002: "crosstool-NG xtensa-esp32s3-linux-uclibcfdpic, GCC 14.1.0, uClibc-ng; binaries are dynamically linked to libc.so.0 with interpreter /lib/ld-uClibc.so.0, and -static needs -mfdpic"
@@ -782,6 +785,21 @@ EXT-001: "The SPLB32 Tamagotchi core runs at 4.05x realtime headless on this boa
     - "docs/bluetooth-keyboard.md: the retracted advertising/WiFi analysis and what survived from it"
     - "usr/sbin/ble-wifi-setup: uses `wifi connect` and `wifi scan --tsv`"
   verification: "The distinction was learned on hardware and is recorded in the retraction: an A/B that appeared to blame BLE advertising was actually measuring a reboot, because advertising was running in both arms."
+
+- record_id: NET-003
+  kind: NETWORK
+  topic_id: NET
+  title: "The firmware fork adds ESP_LOG_IF as interface 6, so the kernel's enum must match or every log frame is dropped"
+  status: VERIFIED
+  verified_date: 2026-11-09
+  statement: "The esp-hosted payload header carries an `if_type` byte naming the interface a frame belongs to, and both sides test it against `ESP_MAX_IF`. Upstream has six values, 0 through 5, with `ESP_MAX_IF` = 6. This project's firmware fork added a seventh, `ESP_LOG_IF`, for its own diagnostic stream, which makes its `ESP_MAX_IF` = 7. With the kernel's enum left at six, every firmware log frame arrives tagged 6, fails `if_type >= ESP_MAX_IF` in `process_rx_buf()`, and is dropped -- printing `process_rx_buf: bad if_type 6` to the console. The kernel accepted the frames from the moment the enum matched: `/dev/esp-log` appears and delivers lines such as `@LOG hid: scan 1 complete (connected 0)`."
+  consequence: "The interface enum is a shared ABI between firmware and kernel and nothing enforces it; a one-entry divergence silently discards a whole stream. The match has to be made on both sides or the failure is invisible apart from console spam. Two further facts from this: the frames were not merely rejected but never had a consumer, because `esp_log_pipe.c` was carried in the tree but never compiled, so `/dev/esp-log` did not exist at all; and accepting the type without a consumer would be worse than rejecting it, because those skbs would queue in `rx_q` forever. The enum entry and the driver must land together."
+  sources:
+    - "patches/kernel/0007-wireless-esp32-ng-add-ESP_LOG_IF-and-log-pipe.patch: the enum entry, the dispatch and the driver wiring"
+    - "build/esp-hosted/esp_hosted_ng/esp/esp_driver/network_adapter/main/include/adapter.h: the fork's enum with ESP_LOG_IF"
+    - "drivers/net/wireless/espressif/esp32-ng/esp_shmem.c: process_rx_buf() and its if_type >= ESP_MAX_IF test"
+    - "build/esp-hosted/esp_hosted_ng/esp/esp_driver/network_adapter/main/log_pipe.c: the emitter, which records that a flood of these frames competes for the same shmem link the kernel boots over"
+  verification: "Verified on hardware 2026-11-09: before the change the console carried `process_rx_buf: bad if_type 6` hundreds of times per boot and `/dev/esp-log` did not exist; after it, zero such errors in the first minutes and `/dev/esp-log` exists and delivers real firmware lines. The enum divergence itself was established by reading both headers side by side."
 
 - record_id: TOL-001
   kind: TOOLCHAIN

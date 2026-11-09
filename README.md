@@ -343,6 +343,25 @@ core 1's program counter over JTAG. A PC inside `rootfs.cramfs` proves userspace
 ran; a single repeated PC proves nothing, because openocd's `init` resets both
 cores.
 
+**Firmware diagnostics are on `/dev/esp-log`.** Linux takes the USB console at
+about 1.75 s into boot, so every ESP-IDF log line after that goes to a port
+Linux owns — which means nothing in the firmware was diagnosable exactly when
+WiFi, the IPC link and the BLE stack are running. The firmware tags those lines
+and sends them over the same shmem link as a separate interface, and the kernel
+delivers them here:
+
+```sh
+cat /dev/esp-log
+@LOG hid: scan 1 complete (connected 0)
+@LOG hid: scan requested by Linux
+```
+
+This only started working after an interface-enum mismatch was fixed: the
+firmware fork added `ESP_LOG_IF` as interface 6, the kernel's enum stopped at 6,
+and every log frame was being dropped as `bad if_type 6`. The driver that reads
+the stream was also never compiled, so the device did not exist. Both are
+`patches/kernel/0007`.
+
 ## Not done
 
 - **The console has no local input of its own.** The two side pushers emit

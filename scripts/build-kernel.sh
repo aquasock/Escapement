@@ -94,12 +94,28 @@ cd "$K"
 for f in $(ls -1 "$here"/patches/kernel/*.patch \
                   "$here"/patches/kernel/*/*.patch 2>/dev/null | sort); do
     [ -e "$f" ] || continue
+
+    # A patch aimed outside the kernel tree is the port's to apply, not ours:
+    # 0002-config-* edits new-files/.../devkit_c1_16m_linux.config, and
+    # buildroot copies that in. Applying it here was always a no-op, so it is
+    # skipped rather than tolerated, and the strict failure below then means
+    # what it says for everything that does target the tree.
+    case "$(grep -m1 '^--- a/' "$f" 2>/dev/null)" in
+    *new-files/*)
+        echo "  skipped $(basename "$f") (port-side file, applied by the port)"
+        continue ;;
+    esac
+
     if git apply --whitespace=nowarn "$f" 2>/dev/null; then
         echo "  applied $(basename "$f")"
     elif git apply --reverse --check "$f" 2>/dev/null; then
         echo "  already applied: $(basename "$f")"
     else
-        echo "  FAILED to apply $(basename "$f")" >&2
+        # Die, do not warn. A patch that does not apply used to print one line
+        # and the build carried on without it -- which is how the entire
+        # AXP2101 series and the display registration once vanished from a
+        # kernel that built and booted (TOL-003).
+        die "patch did not apply: $(basename "$f")"
     fi
 done
 cd "$here"
@@ -123,9 +139,21 @@ cp "$here"/patches/kernel/axp2101/final/axp20x.h \
 
 cp "$here"/patches/kernel/display/final/spi-esp32.c "$K/drivers/spi/spi-esp32.c"
 cp "$here"/patches/kernel/display/final/co5300.c "$K/drivers/video/fbdev/co5300.c"
+# 0006-dts-side-buttons.patch was deleted rather than kept: every element it
+# adds -- gpio-keys, pusher_b_pins, pmic_irq_pins, the PMU interrupt -- is
+# present in the whole-file DTS below, so the patch could never apply and never
+# needed to. With the loop merely warning, that went unnoticed; with it failing
+# hard, it surfaced on the first clean build.
+#
 # The panel API's structs and bounds check, shared with scripts/co5300-selftest.py.
 cp "$here"/patches/kernel/display/final/co5300_rect.h \
    "$K/drivers/video/fbdev/co5300_rect.h"
+
+# The firmware log pipe. Its Makefile entry and dispatch arrive in
+# patches/kernel/0007, but the source is carried whole here for the same reason
+# as the drivers above: a whole-file copy cannot silently fail to apply.
+cp "$here"/patches/kernel/display/final/esp_log_pipe.c \
+   "$K/drivers/net/wireless/espressif/esp32-ng/esp_log_pipe.c"
 cp "$here"/patches/kernel/display/final/esp32s3-devkit-c1.dts \
    "$K/arch/xtensa/boot/dts/esp32s3-devkit-c1.dts"
 
