@@ -240,7 +240,49 @@ Bisect `ble_hid` with the targeted log path in place, one variable per flash:
 That separates "the central role costs more RAM than is free" from "scanning
 under radio coexistence wedges core 0", which are very different fixes.
 
-## Measured: permanent BLE advertising breaks WiFi data
+## CORRECTION: the "advertising breaks WiFi" result was wrong
+
+An earlier version of this section claimed an A/B showing that BLE advertising
+took WiFi from 0% to 100% packet loss. **That conclusion was wrong and is
+retracted.** The measurements were real; the attribution was not.
+
+What was believed:
+
+  * before reboot: 4 pings to the gateway, 0 received, plus `reason=2` deauths
+  * after reboot:  4 pings, 4 received
+  * therefore: the thing that changed was BLE advertising
+
+What actually changed was the reboot. The firmware calls `ble_prov_init()`
+unconditionally, so the watch advertises for its whole life, and it was
+advertising during **both** measurements. Verified after the fact:
+
+```
+$ bluetoothctl --timeout 12 scan on
+[NEW] Device 80:45:6B:46:DF:56 Esp32-Linux        <- advertising
+
+$ ping -c10 -i0.3 10.10.0.15
+10 packets transmitted, 10 received, 0% packet loss
+rtt min/avg/max/mdev = 96.254/144.711/203.978/27.845 ms
+```
+
+So advertising and working WiFi coexist. The honest reading of the original
+failure is a **stale association**: the link had stopped passing traffic, the AP
+had deauthenticated it (`reason=2`, "previous authentication no longer valid"),
+and the reboot re-established it. A plausible contributor is the repeated
+`wifi scan` invocations run immediately before that failure -- scanning moves the
+single radio off-channel and disrupts an associated STA link -- but that is a
+hypothesis, not something measured.
+
+**What survives from that investigation** is narrower but still useful:
+
+  * ~150 ms average round-trip to the watch. High for a LAN, consistent with
+    radio sharing, but functional.
+  * Repeated `wifi scan` while associated is disruptive and should not be used
+    as a connectivity test. Ping the gateway instead.
+  * The lesson worth keeping: an A/B needs the variable confirmed, not assumed.
+    Here the assumed variable (advertising) was never actually off.
+
+## Superseded: the original (incorrect) analysis
 
 This is the clearest result of the whole investigation, and it came from an A/B
 that changed one variable.
