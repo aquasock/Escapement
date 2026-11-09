@@ -1,0 +1,48 @@
+#!/bin/sh
+#
+# S49tty1shell - an interactive root shell on the AMOLED console.
+#
+# tty1 is the framebuffer console on the watch face. The image's /etc/inittab
+# puts a getty on /dev/console only, which binds to the LAST console= on the
+# kernel command line -- ttyGS3, the USB-Serial-JTAG port. So without this the
+# AMOLED shows kernel output and nothing else, and there is no way to type into
+# it from the Bluetooth keyboard.
+#
+# A getty line for tty1 was added to /etc/inittab and BusyBox init does not
+# spawn it (cause not established; the line is well formed and the binary
+# exists). A shell started here is what has been verified to work, and it needs
+# no password, which makes the console usable the moment the watch boots.
+#
+# stdin/stdout are the console itself, not a pipe, so keystrokes from the
+# uinput device reach this shell directly.
+
+case "$1" in
+start)
+	# Already there? Then leave it alone -- this script runs on every boot
+	# and must not stack shells if it is ever re-run.
+	if [ -e /var/run/tty1shell.pid ] &&
+	   kill -0 "$(cat /var/run/tty1shell.pid)" 2>/dev/null; then
+		exit 0
+	fi
+	printf 'Starting tty1 console: '
+	setsid sh -i < /dev/tty1 > /dev/tty1 2>&1 &
+	echo $! > /var/run/tty1shell.pid
+	echo "OK"
+	;;
+stop)
+	kill "$(cat /var/run/tty1shell.pid)" 2>/dev/null
+	rm -f /var/run/tty1shell.pid
+	;;
+status)
+	if [ -e /var/run/tty1shell.pid ] &&
+	   kill -0 "$(cat /var/run/tty1shell.pid)" 2>/dev/null; then
+		echo 'tty1 console: running'
+	else
+		echo 'tty1 console: not running'
+	fi
+	;;
+*)
+	echo "Usage: $0 {start|stop|status}"
+	exit 1
+	;;
+esac
