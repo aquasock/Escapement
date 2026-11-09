@@ -94,15 +94,22 @@
 #define MAX_FINGERS	2
 
 /*
- * Seven bytes is the whole of what is used: byte 0 is the event, bytes 1..3
- * carry the nibble-packed coordinates, byte 5 is the finger count and byte 6 is
- * the freshness marker. The vendor block is 15 bytes (two fingers of five plus
- * five), but a second finger is not a thing this program understands, and on
- * this bit-banged bus a shorter transfer is measurably more reliable -- the
- * 15-byte read failed with EIO often enough to be useless while 7 bytes
- * succeeds.
+ * The report block is 15 bytes: two fingers of five bytes each, plus five.
+ * Only the first seven are read out of it -- byte 0 the event, bytes 1..3 the
+ * nibble-packed coordinates, byte 5 the finger count, byte 6 the freshness
+ * marker -- but the TRANSFER must be the full 15.
+ *
+ * This was 7, on the reasoning that a shorter transfer is more reliable on this
+ * bus, and that was wrong in a way that produced the worst symptom so far: the
+ * acknowledge that advances the controller's report buffer is issued against
+ * the block, so reading only 7 bytes and then acking left the buffer mid-block
+ * and it never advanced. The visible effect was a touch that reported one
+ * position, then nothing, then "released", for as long as a finger was held --
+ * not because the controller had nothing to say, but because it was never told
+ * that the previous report had been consumed.
  */
-#define BLOCK_LEN	7
+#define BLOCK_LEN	15		/* full vendor block; 7 are decoded */
+#define DECODE_LEN	7
 
 #define EVT_DOWN	0x06
 #define EVT_UP		0x07
@@ -119,10 +126,25 @@
 static int edge1 = 158;
 static int edge2 = 294;
 
-/* First row of the button strip. co5300.c derives it as FB_Y + FB_H, which is
- * 445; it is a default here rather than a constant in the kernel because the
- * touch Y axis is the least accurate one and this is the knob to turn. */
-static int y_strip = 445;
+/*
+ * First row treated as the button strip.
+ *
+ * The bar is painted from panel row 445 (FB_Y + FB_H), but the threshold is set
+ * five rows HIGHER, at 440, and that gap is deliberate.
+ *
+ * The touch controller's Y axis is the least accurate of the two: TinyPetz
+ * measured a least-squares fit with roughly 4.6 px RMS residual against a
+ * fingertip, and this unit shows the same. Pressing near the top edge of a bar
+ * routinely reports Y in the 441..444 range -- measured, not assumed: two taps
+ * in a ten-tap run decoded to ctrl_y 442 and 443 and were discarded as "not in
+ * the strip" while the finger was plainly on the bar.
+ *
+ * Five rows of tolerance costs at most the last five console rows being read as
+ * a button press, and buys the property these buttons are actually for: the
+ * boundary is a region, not a target. The bands are 135 px wide for the same
+ * reason.
+ */
+static int y_strip = 440;
 
 /* x correction from TinyPetz's four-point calibration of this board's panel:
  * ctrl_x = raw_x / 1.0871 + 22. The sensor's origin is the glass edge while the
@@ -133,6 +155,19 @@ static double xs = 1.0871, xb = 22.0;
 static double ys = 1.0515;
 
 static int release_ms = 200;
+
+/*
+ * Gap between polls, in milliseconds.
+ *
+ * The controller reports on a 66 ms cadence while the glass is touched, so
+ * polling near that cadence is the natural choice. Measured on hardware at ten
+ * quick taps: nine readable reports and eight presses, the loss being a tap that
+ * fell between polls. That is accepted rather than chased -- a deliberate press
+ * always lands, and polling harder to catch a deliberate flick is not worth the
+ * bus traffic on a device whose reads are already unreliable.
+ */
+#define POLL_MS 60
+
 static int verbose, dry_run, oneshot;
 
 /*
@@ -558,18 +593,18 @@ int main(int argc, char **argv)
 				 */
 				if (verbose)
 					say("tbtns: read failed (skipped)");
-				usleep(60 * 1000);
+				usleep(POLL_MS * 1000);
 				continue;
 			}
 		}
 
 		/*
-		 * Settle, then acknowledge so the controller advances its report
-		 * buffer. The gap is not decoration: an ack issued immediately
-		 * after the read NAKs on this bus, and a NAKed ack leaves the
-		 * controller handing back the same block forever.
+		 * Acknowledge immediately, with nothing between the read and the
+		 * ack. This is the vendor sequence and it is not cosmetic: the ack
+		 * is what tells the controller the block has been consumed, and an
+		 * ack that does not follow the read directly leaves the buffer
+		 * unadvanced so the same report is handed back forever.
 		 */
-		usleep(2 * 1000);
 		if (i2c_write(TOUCH_ADDR, ack, 3) < 0)
 			n_ackfail++;
 
@@ -631,9 +666,20 @@ int main(int argc, char **argv)
 				release();
 			} else if (event == EVT_UP) {
 				release();
-			} else if (event == EVT_DOWN || event == 0x00) {
-				/* A down, or a move while held: both carry live
-				 * coordinates and both restart the timeout. */
+			} else {
+				/*
+				 * Any fresh report that is not a lift carries live
+				 * coordinates and restarts the timeout: a down, a
+				 * move, or a code this program does not name. That
+				 * mirrors the vendor logic, which treats the
+				 * catch-all case as "still holding, new position".
+				 *
+				 * Restarting the timer on every fresh report is what
+				 * keeps a held finger held: the controller reports on
+				 * a 66 ms cadence while the glass is touched, so a
+				 * 200 ms timeout only fires when the reports really
+				 * stop.
+				 */
 				if (cy >= y_strip)
 					press(band_for(cx));
 				else
@@ -650,7 +696,7 @@ int main(int argc, char **argv)
 			release();
 		}
 
-		usleep(60 * 1000);
+		usleep(POLL_MS * 1000);
 	}
 
 	release();

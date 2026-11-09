@@ -126,7 +126,8 @@ Topic IDs are the `record_id` prefix. An entry reserves a name; it does not clai
 | Where is the touch controller, and what is at 0x5A? | TCH | TCH-001 |
 | Why does the touch controller answer but never report? | TCH | TCH-002 |
 | Why does an untouched screen read as a phantom press? | TCH | TCH-003 |
-| Why are touch reads unreliable when the RTC is fine? | TCH | TCH-003 |
+| Why does a held touch freeze, then report a release? | TCH | TCH-003 |
+| Why are taps at the top of a bar ignored? | TCH | TCH-004 |
 | Can userspace draw on /dev/fb0? | LCD | LCD-001 |
 | Why does a thin fill draw nothing while a thick one works? | LCD | LCD-002 |
 | Why does a coloured fill report success and change nothing? | LCD | LCD-003 |
@@ -185,7 +186,8 @@ LCD-006: "A whole frame cannot be a single transfer: spi-mem refuses a data-only
 LCD-007: "The glass is 410x502 with 45-degree chamfers; the largest unclipped rectangle is 320x412 and fb0 is 320x400 at (45,45), leaving a 57-row strip below it that the touch buttons are painted into"
 TCH-001: "The touch controller is a CST9217 at I2C 0x1A (register 0x0000 reads 0xCA, the family checkcode); 0x5A is the DRV2605 haptic driver, whose register 0x00 reads 0xE0 (DEVICE_ID bits), and only 0x1A completes the CST92xx unlock handshake"
 TCH-002: "A reset CST9217 is in command mode and reports nothing: write 0xD1=0x01, then 0xD1=0x1E twice, require byte 1 of a read of 0x0002 to be 0x1E, then write 0xD1=0x09 for normal mode"
-TCH-003: "Report block at 0xD000 is 7 bytes: byte 0 = 0x06 for a down event and 0xAB means no new report; x=(b1<<4)|(b3>>4), y=(b2<<4)|(b3&0x0F); reads of this device fail often (about 2 in 8) while the RTC and PMU on the same bus are 40/40"
+TCH-003: "Report block at 0xD000 is 15 bytes and the transfer must be all 15 even though only 7 are decoded; byte 0 = 0x06 for a down event and 0xAB means no new report; x=(b1<<4)|(b3>>4), y=(b2<<4)|(b3&0x0F); a short read leaves the ack mid-block so a held touch freezes"
+TCH-004: "The strip threshold must sit above the painted bar edge: taps on a bar decode to panel Y a few px high near the bottom (measured 442..443 against a bar painted from 445), so the threshold is set to 440"
 
 PMU-001: "AXP2101 capacity is register 0xa4 bits 6:0 (0x64 = 100, above 100 = not settled); voltage is registers 0x34/0x35, 14 bits, already in mV, and the power_supply property is uV so multiply by 1000"
 PMU-002: "The AXP2101 has no mainline driver, so it lives in patches/kernel/axp2101/; a non-recursive patch glob plus '|| true' silently dropped the series and a rebuild produced a kernel with no PMU driver and no error"
@@ -441,16 +443,29 @@ EXT-001: "The SPLB32 Tamagotchi core runs at 4.05x realtime headless on this boa
 - record_id: TCH-003
   kind: TOUCH
   topic_id: TCH
-  title: "A touch report starts with 0x06; a 0xAB in byte 0 means no report, and reads on this bus fail often"
+  title: "A touch report starts with 0x06, a 0xAB in byte 0 means no report, and the read must be the full 15-byte block"
   status: VERIFIED
   verified_date: 2026-11-09
-  statement: "The report block at 0xD000 is seven bytes: byte 0 is the event (0x06 down), bytes 1..3 carry nibble-packed 12-bit coordinates as x = (b1 << 4) | (b3 >> 4) and y = (b2 << 4) | (b3 & 0x0F), byte 5 is the finger count and byte 6 is the freshness marker 0xAB. A report whose byte 0 is 0xAB is not a report at all -- it is the controller saying it has nothing new -- and mainline's own CST3xx driver uses exactly that test: it rejects a block when buf[6] != 0xAB or buf[0] == 0xAB. Separately, reads of this device on the bit-banged bus fail frequently: 40 consecutive reads of the PCF85063A and of the AXP2101 both succeeded, while the same operation against the touch part succeeded roughly two times in eight, returning all-0xFF or a truncated block."
-  consequence: "Two separate mistakes cost a round each. Treating 0xAB-prefixed blocks as fresh produces phantom presses from an untouched screen, because the frozen block still contains plausible coordinates. Treating a failed read as a release produces flickering buttons, so a failed transfer must skip the poll and let the release timeout decide. The unreliability is specific to this device, not the bus: the RTC and PMU on the same pins at the same clock are perfect. That is consistent with the controller sitting on the display flex beside the 20 MHz SPI bus while the other two are on the main board."
+  statement: "The report block at 0xD000 is fifteen bytes -- two fingers of five each plus five -- of which the first seven carry everything used: byte 0 the event (0x06 down), bytes 1..3 nibble-packed 12-bit coordinates as x = (b1 << 4) | (b3 >> 4) and y = (b2 << 4) | (b3 & 0x0F), byte 5 the finger count and byte 6 the freshness marker 0xAB. A block whose byte 0 is 0xAB is not a report at all: mainline's CST3xx driver rejects exactly that, on buf[6] != 0xAB || buf[0] == 0xAB. An idle controller returns all-0xFF, which is the same 'nothing new' answer in a different shape. Critically, the TRANSFER must be the full fifteen bytes even though only seven are decoded: the acknowledge that advances the controller's buffer is issued against the block, so acking after a short read leaves the buffer mid-block and it never advances."
+  consequence: "Three separate mistakes each cost a round. Treating 0xAB-prefixed blocks as fresh produces phantom presses from an untouched screen, because the block still contains plausible coordinates. Treating a failed read as a release produces flickering buttons, so a failed transfer must skip the poll and let the release timeout decide. And reading seven bytes instead of fifteen freezes a held touch: the first report is taken, then the buffer stops advancing, so a finger held on the glass yields one position, then nothing, then a spurious release. That last one is the defect that made the buttons feel like they had a slow detect, and it was in this project's reader, not the hardware."
   sources:
     - "build/kernel/linux-7.2.4/drivers/input/touchscreen/hynitron_cstxxx.c: CST3XX_TOUCH_DATA_CHK_VAL 0xab, and cst3xx_read_touch() rejecting on buf[6] != 0xab || buf[0] == 0xab"
-    - "TinyPetz firmware/bringup/main/touch.c: the event codes and the nibble-packed decode"
-    - "on the watch: 40-read control runs against 0x51 and 0x34 versus the same against 0x1A"
-  verification: "Verified on hardware: with a finger held on the middle bar the block read 0x06 0x0a 0x1e 0xb6 0x00 0x01 0xab on all 25 samples, decoding to raw x=171 y=486; with nothing touching the glass the same read returned either all-0xFF or the same 0xAB-prefixed block repeatedly. The reliability comparison is 40/40 for both control devices against 2-in-8 for the touch part."
+    - "TinyPetz firmware/bringup/main/touch.c: CST92XX_BLOCK_LEN (MAX_FINGERS * 5 + 5) = 15, the read of the full block, and ack16() issued immediately after it"
+    - "on the watch: /home/tbtns.log census counts, which separate transfer failures from idle answers"
+  verification: "Verified on hardware: with a finger held on the middle bar the block read 0x06 0x0a 0x1e 0xb6 0x00 0x01 0xab on all 25 samples, decoding to raw x=171 y=486. Revised 2026-11-09 (core-log entry 4): the earlier '2 in 8 reads succeed' figure was measured against the seven-byte transfer and was therefore partly this project's own bug, not a property of the part. With the full fifteen-byte block and the ack issued immediately, a 20 s sample showed 6 transfer failures in about 314 polls, roughly 2 percent, with zero ack failures; the remaining all-0xFF blocks are the controller answering 'nothing new'. A frozen held-touch disappeared at the same time."
+
+- record_id: TCH-004
+  kind: TOUCH
+  topic_id: TCH
+  title: "The strip threshold must sit above the painted bar edge, because the touch Y axis reads a few pixels high near the bottom"
+  status: VERIFIED
+  verified_date: 2026-11-09
+  statement: "The buttons are painted from panel row 445, but taps landing on a bar routinely decode to panel Y in the 441..444 range. In a ten-tap run against a threshold of 445, two taps that were plainly on a bar decoded to ctrl_y 442 and 443 and were discarded as outside the strip."
+  consequence: "A strip threshold set exactly at the painted edge loses taps at the top of the bar. This project sets it to 440, five rows of tolerance, which costs at most the last few console rows being read as a press and buys the property the buttons exist for: they are regions, not targets. The error is consistent with the touch controller's own calibration residual, which TinyPetz measured at roughly 4.6 px RMS on Y, and it is worst at the extremes of the glass."
+  sources:
+    - "userspace/tbtns.c: the y_strip default and the note explaining the five-row gap"
+    - "TinyPetz firmware/bringup/main/touch.c: TOUCH_CAL_YS and the stated fit residual"
+  verification: "Measured on hardware: in a ten-tap run with the threshold at 445, two taps produced no press and their decoded values were ctrl_y 442 and 443 while both x values were solidly inside a band. Re-running with the threshold at 440, the same blind spot did not recur."
 
 - record_id: PMU-001
   kind: PMU

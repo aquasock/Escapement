@@ -98,3 +98,34 @@ The three buttons are functional and the user accepted them. The next improvemen
 - User Test: PASS
 
 ---
+
+## 4 COMMIT Unreleased 2026-11-09T13:11:15-07:00
+
+#### Coming From:
+
+Unreleased d786239
+
+#### Purpose:
+
+Fix the buttons' delayed detect, where a finger held on a bar produced one position and then silence until it was lifted.
+
+#### Outcome:
+
+The freeze was in this project's reader, not the hardware, and the user's suspicion -- that it was the way the sensor is read rather than how often -- was correct. `tbtns` read seven bytes of the controller's fifteen-byte report block and then acknowledged, on the reasoning that a shorter transfer is more reliable on this bus. The acknowledge that advances the controller's buffer is issued against the block, so acking after a short read left the buffer mid-block and it never advanced: the first report was taken, then nothing, then the release timeout fired while the finger was still down. The fix is the vendor sequence exactly -- read all fifteen bytes, acknowledge immediately with nothing between the read and the ack -- which is what TinyPetz's `touch.c` does and what this project had deviated from in two ways at once. Verified on hardware: holding the green bar and sliding across all three now produces a continuous coordinate stream (ctrl_x 224 to 78 to 198 to 325) with a press and release firing at each band transition instead of one press followed by silence. The correction rewrites an earlier conclusion rather than adding to it: the "2 in 8 reads succeed" failure rate recorded for this part was mostly this bug. Measured over 20 s with the full block, transfer failures are about 2 percent (6 in roughly 314 polls) with zero ack failures, and the all-0xFF blocks that dominate the census are the controller answering "nothing new" rather than a failed transfer. A second, independent defect surfaced in the same test and was fixed by loosening rather than tightening: taps landing on a bar decode to panel Y in the 441..444 range while the bar is painted from row 445, so two taps in a ten-tap run were discarded as outside the strip. The threshold is now 440, five rows of tolerance, which matches the user's original intent that these be regions rather than targets and is consistent with TinyPetz's measured 4.6 px RMS Y residual. What remains is accepted, not fixed: at ten quick taps the run produced nine readable reports and eight presses, the loss being a tap shorter than one poll interval. The user chose to keep the working behaviour rather than chase that, and the poll interval is left at the 60 ms cadence that matches the controller's own report rate. The shipped binary was confirmed byte-identical to the build that was tested by comparing its sha256 against the earlier deployment, and the band arithmetic selftest still passes. The core-syntax audit passed: the `.ai/` diff was inspected, `.ai/core.md` was not modified, entry 4 was validated against the template with six sections in canonical order, sequential numbering from 3, an ISO-8601 timestamp carrying the America/Phoenix offset, prose-only Outcome and Next Steps, eligible Files Modified, and Status values within the allowed set.
+
+#### Next Steps:
+
+The buttons are accepted as they are and no further work is owed on them. If the missed fast tap ever matters, the lever is the poll interval, which is deliberately left where it is. The next capability gap remains the console repaint ceiling of about 5 fps, with a concrete lead in LCD-005: fewer, larger transfers through a persistent RAMWR window. The esp-hosted `process_rx_buf: bad if_type 6` console spam is still unaddressed and still pollutes the display during testing, so it is the cheapest next cycle. BLE media keys, firmware-side bond persistence and any wake-from-sleep path remain deferred by user decision.
+
+#### Files Modified:
+
+- userspace/tbtns.c
+- README.md
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: PASS
+
+---

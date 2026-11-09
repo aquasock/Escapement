@@ -134,16 +134,18 @@ device-tree touch node, and changing a band boundary is a flag rather than a
 rebuild and a flash. The bars are drawn by the driver (`co5300_paint_frame()`),
 because the strip is outside fb0 and only the driver can paint there.
 
-Two things about the CST9217 at I2C 0x1A that cost time and are worth knowing:
-`0x5A` on the same bus is the DRV2605 haptic driver, not touch, and the report
-block must start with `0x06` — a `0xAB` in byte 0 means "no new report" and will
-otherwise read as a phantom press at a fixed coordinate. Reads of this one part
-are also unreliable on the bit-banged bus (roughly 2 in 8, against 40/40 for the
-RTC and PMU on the same pins), so a failed read skips the poll and the release
-timeout decides — treating it as a release would make the buttons flicker.
+Three things about the CST9217 at I2C 0x1A that cost time and are worth knowing:
+`0x5A` on the same bus is the DRV2605 haptic driver, not touch; the report block
+must start with `0x06`, where a `0xAB` in byte 0 means "no new report" and will
+otherwise read as a phantom press at a fixed coordinate; and the block must be
+read **whole**, all fifteen bytes. That last one is subtle and was the worst bug
+here: the acknowledge that advances the controller's buffer is issued against
+the block, so reading seven bytes of it left the buffer mid-block and a finger
+held on the glass produced one position, then silence, then a spurious release.
 
-Known limitation: a very quick tap can fall between polls and be missed. A
-deliberate press always lands.
+Known limitation: the controller reports on a 66 ms cadence and `tbtns` polls at
+the same rate, so a tap shorter than one interval can fall between samples —
+nine readable reports from ten quick taps. A deliberate press always lands.
 
 **Works: the display.** The CO5300 AMOLED is a `spi_mem` client on SPI2 with an
 fbdev framebuffer:
@@ -370,11 +372,19 @@ cores.
   `/etc/init.d/S03keepconfig` carries back only a named list. The timezone file
   and the RTC write-back script have to be re-installed with
   `./scripts/watch-time.sh` after one. Kernel-only flashes are unaffected.
-- **Touch reads on the controller are unreliable.** The RTC and PMU on the same
-  bit-banged bus are 40/40; the CST9217 at 0x1A is roughly 2 in 8. The buttons
-  work because a press lasts several frames and failed reads are skipped rather
-  than read as releases, but a quick tap between polls is lost. Slowing the bus
-  is untested and would be the first thing to try.
+- **A very quick tap can be missed.** The controller reports on a 66 ms cadence
+  and `tbtns` polls at the same rate, so a tap shorter than one poll interval
+  can fall between samples. Measured at ten quick taps: nine readable reports
+  and eight presses. A deliberate press always lands, and the poll interval is
+  left alone rather than tightened, because this part's reads are already the
+  weak link.
+- **Read the block whole, or a held touch freezes.** This cost a round and is
+  worth stating plainly: the acknowledge that advances the controller's report
+  buffer is issued against the block, so reading seven bytes of a fifteen-byte
+  block left the buffer mid-block. The symptom was a finger held on the glass
+  producing one position, then silence, then a spurious release. With the full
+  block the transfer failure rate is about 2 percent, not the 75 percent an
+  earlier seven-byte reader measured — that figure was the bug, not the part.
 - **`tbtns` cannot pulse the controller's hardware reset.** The XL9555 at 0x20
   is owned by `pca953x`, so a plain `I2C_SLAVE` on that address returns `EBUSY`
   and the reset is skipped; the daemon brings the part up in software instead.
