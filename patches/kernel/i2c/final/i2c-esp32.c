@@ -656,10 +656,20 @@ static int esp32_i2c_transfer(struct esp32_i2c *i2c, u16 addr,
 	if (rlen)
 		esp32_i2c_write(i2c, I2C_DATA, (addr << 1) | 1);
 
-	if (i2c->debug) {
-		for (i = 0; i <= n; i++)
-			dev_info(i2c->dev, "  comd[%d]=%08x\n", i,
-				 esp32_i2c_read(i2c, I2C_COMD(i)));
+	/*
+	 * Rate limited on purpose. With the debug flag enabled this printed eight
+	 * lines per transfer, and at boot that came to 241 lines spread over a
+	 * hundred seconds -- on a board whose console is a 115200 serial port
+	 * that also mirrors to the AMOLED, so the log itself was the slowest
+	 * thing in the boot. A dump that can stall the machine is not a
+	 * diagnostic.
+	 */
+	if (i2c->debug && printk_ratelimit()) {
+		int k;
+
+		for (k = 0; k <= n; k++)
+			pr_info("i2c-esp32: comd[%d]=%08x\n", k,
+				esp32_i2c_read(i2c, I2C_COMD(k)));
 	}
 
 	if (esp32_i2c_run(i2c))
@@ -669,9 +679,9 @@ static int esp32_i2c_transfer(struct esp32_i2c *i2c, u16 addr,
 		u32 sr = esp32_i2c_read(i2c, I2C_SR);
 		u32 cnt = FIELD_GET(SR_RXFIFO_CNT_MASK, sr);
 
-		if (i2c->debug)
-			dev_info(i2c->dev, "RX len=%zu sr=%08x cnt=%u\n",
-				 rlen, sr, cnt);
+		if (i2c->debug && printk_ratelimit())
+			pr_info("i2c-esp32: RX len=%zu sr=%08x cnt=%u\n",
+				rlen, sr, cnt);
 		if (cnt != rlen)
 			dev_warn_ratelimited(i2c->dev,
 					     "short read: %u of %zu\n", cnt, rlen);

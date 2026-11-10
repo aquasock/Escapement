@@ -59,7 +59,6 @@
 		 * through IO_MUX. */
 		espressif,sda-pin = <3>;
 		espressif,scl-pin = <2>;
-		espressif,debug;
 
 		pinctrl-0 = <&i2c0_pins>;
 		pinctrl-names = "default";

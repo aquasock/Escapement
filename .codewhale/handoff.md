@@ -1,10 +1,10 @@
-# Handoff — Escapement, 2026-11-10T13:03
+# Handoff — Escapement, 2026-11-10T13:06
 
 Linux 7.2.4 on a T-Watch Ultra (ESP32-S3). Real Linux on the watch's own Xtensa
 cores, not emulated. This file is orientation; verify before acting on it.
 
 Canonical detail lives in `.ai/core-reference.md` (63 records, fourteen topics).
-Project history lives in `.ai/core-log.md` (30 entries; newest first — 30, 29, 28, 27, 26, 25, 24, 23,
+Project history lives in `.ai/core-log.md` (31 entries; newest first — 31, 30, 29, 28, 27, 26, 25, 24, 23,
 22, 21, 20, 19, 18, 17, then 1 through 16). Do not re-derive what those hold.
 
 ## Current objective (verbatim)
@@ -17,10 +17,10 @@ persistence, any wake-from-sleep path, and moving the emulator to core 0.
 
 ## Reconstruct (in this order)
 
-1. `git log --oneline -8` — `main` was at `be88103`, clean and fully pushed,
+1. `git log --oneline -8` — `main` was at `224f585`, clean and fully pushed,
    before the commit carrying this file.
 2. `.ai/core.md` (policy), then `.ai/core-reference.md` (hardware facts — open
-   the record, not the index line), then `.ai/core-log.md` entries 30, 29, 28.
+   the record, not the index line), then `.ai/core-log.md` entries 31, 30, 29.
 3. `git -C build/esp-hosted/esp_hosted_ng branch --show-current` — expect
    `ble-bond-wip`, five local-only commits.
 
@@ -44,6 +44,11 @@ registers; `SOC_I2C_CMD_REG_NUM` is 8. So `tbtns` is not running.
 **Two bugs cost a dozen builds each, both one line:** `bus_busy` is bit 4 not
 bit 3 (so `SR_BUS_BUSY` read `arb_lost`), and recovery must restore the timing
 registers. See `docs/cores.md` and KRN-006.
+
+**Boot is fast again.** A leftover `espressif,debug` in the DTS was printing 8
+lines per I2C transfer — 241 lines over 100 s, each forcing an fbcon repaint.
+Removed, and the dump is now behind `printk_ratelimit()` so it cannot recur.
+`working-2026-11-10-1251.bin` still has the chatty driver.
 
 **Verified backups, newest first:**
 

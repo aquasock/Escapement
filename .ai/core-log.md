@@ -1,3 +1,35 @@
+## 31 COMMIT Unreleased 2026-11-10T13:05:12-07:00
+
+#### Coming From:
+
+Unreleased 224f585
+
+#### Purpose:
+
+Find what was adding about a minute to boot, after the user noticed something called i2c-esp32 busy for a long time at startup.
+
+#### Outcome:
+
+It was this project's own debug logging, and the flag had been left on. The `espressif,debug` property added to the device tree during entry 29's command-word diagnosis was never removed, and with it every I2C transfer printed all eight command registers. At boot that came to 241 log lines spread over 100 seconds, which is what the user saw: not a program, and not a timeout, but the driver talking about itself. The time was not the serial output either -- it was that this board's console mirrors to fbcon, so each of those 241 lines forced a repaint of the 320x400 panel over SPI, and 241 repaints is most of a minute. Only two driver timeouts occurred in the same boot, about 2 s total, so the transfer path was never the cost. Two changes were made rather than one. The flag is gone from the device tree, and the dump is now behind `printk_ratelimit()` so that even with it deliberately enabled it cannot flood the console again; the second matters more, because a diagnostic that can stall the machine is worse than the fault it is hunting. Verified on hardware after flashing: the log dropped from 241 lines to 6, those six are the legitimate one-time probe messages (clock rate, the two pin routes, the input route, the system registers, and the master registration), and all of them land between 4.4 s and 6.6 s, so the driver finishes probing in about two seconds. The subsystems were unaffected -- `rtc0` still present and reporting, `axp20x-battery` capacity 100. The user confirmed the boot is now much faster. Worth recording as a pattern rather than an incident: this is the second time in one session that a diagnostic caused a worse symptom than the bug it was instrumenting, the other being the bus recovery that generated the arb_lost fault it was meant to cure. Both had the same shape -- instrumentation whose cost was never bounded. Note for whoever restores a backup: `working-2026-11-10-1251.bin` predates this fix and therefore still carries the chatty driver, so a restore from it will boot slowly until this change is reflashed. The core-syntax audit passed: `.ai/core.md` and `.ai/core-syntax.md` were re-read, the complete `.ai/` diff was inspected, `.ai/core.md` was not modified, and this entry was validated against the template with six sections in canonical order, sequential numbering from 30, an ISO-8601 timestamp carrying the America/Phoenix offset, prose-only Outcome and Next Steps, and Status values within the allowed set.
+
+#### Next Steps:
+
+The remaining I2C work is unchanged and is the touch controller's 16-bit register address, documented at the end of `docs/cores.md`: fold the address into the data WRITE or split the transfer, since a 16-bit read needs one more command register than `SOC_I2C_CMD_REG_NUM` allows. Until that lands `tbtns` cannot run and the watch has no local input. A fresh full backup should be taken once boots are confirmed fast and that fix is in, so the saved image does not carry the chatty driver; this cycle deliberately did not take one.
+
+#### Files Modified:
+
+- patches/kernel/i2c/final/i2c-esp32.c
+- patches/kernel/display/final/esp32s3-devkit-c1.dts
+- docs/cores.md
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: PASS
+
+---
+
 ## 30 COMMIT Unreleased 2026-11-10T13:01:47-07:00
 
 #### Coming From:

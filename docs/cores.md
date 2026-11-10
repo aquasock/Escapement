@@ -267,6 +267,21 @@ The strongest lead is the command-register budget: a 16-bit register read needs
 what the sequencer will chain. Either merge the address into the data WRITE, or
 split the transfer.
 
+**Boot cost: the debug flag was left on, and it cost a minute.** For a while
+after the driver started working, boot took about a hundred seconds. It was not
+the driver and not a timeout: the `espressif,debug` property added to the device
+tree while dumping command words was still there, and every I2C transfer printed
+all eight command registers. At boot that came to **241 log lines spread over
+100 seconds**, and because this board's console mirrors to fbcon each line forced
+a repaint of the 320x400 panel over SPI. Removing the flag cut it to six
+one-time probe messages, all inside the first two seconds.
+
+The dump is now also behind `printk_ratelimit()`, so even with the flag
+deliberately enabled it cannot flood the console again. That is the same lesson
+as the bus-recovery bug above: a diagnostic that can stall the machine is worse
+than the fault it is hunting, and both of this session's worst detours were
+diagnostics that did not bound their own cost.
+
 **The board state this leaves.** Running the hardware-I2C kernel: PMU, RTC and
 expander all bind and their values are live; the touch controller does not,
 because of the 16-bit addressing gap above, so `tbtns` is not running. The
