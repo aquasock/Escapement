@@ -122,30 +122,35 @@ struct co5300_bench {
 #define CO5300_RECT_ROWS_PER_BAND	2
 
 /*
- * SPI clock, as a runtime knob rather than a #define.
+ * SPI clock: 40 MHz, which is the value that was qualified on this panel.
  *
- * Three things on this project collide over this number. The panel is
- * documented as running at 20 MHz in the reference firmware and that is
- * "proven", so it is the default. But 20 MHz caps a full-frame transfer at
- * about 45 ms, which is the difference between the emulator keeping real time
- * and not. And the evidence that 45 MHz was unsafe comes from the reference
- * firmware -- which also carried the SPI_USR_COMMAND/SPI_USR_ADDR-resent-per-
- * chunk bug that restarts the panel's write pointer every 64 bytes. That bug
- * is fixed here. A write-pointer desync and a clock-margin failure look the
- * same on the glass, so the 45 MHz verdict may have been about the bug.
+ * This is the default, not a boot-time setting, because the clock is settled:
+ * eight full-width bands in eight distinct colours were painted at 40 MHz and
+ * came out as eight clean bands in the right order. A write-pointer desync
+ * cannot produce that picture -- it repeats the first rows instead of reaching
+ * the bottom -- so the transfer is sound at 40 and the old 45 MHz shearing
+ * reported by the reference firmware was almost certainly the
+ * SPI_USR_COMMAND/SPI_USR_ADDR-resent-per-chunk bug, which is fixed here,
+ * rather than a clock-margin limit.
  *
- * Making it writable at runtime means one flash answers the question: write a
- * value to /sys/module/co5300/parameters/spi_hz, force a repaint, and look.
- * Testing three clocks by rebuilding three kernels would cost three 16 MiB
- * backups and three boot cycles to learn the same thing.
+ * The knob survives because a panel revision could still shear where this one
+ * does not, and dropping to 20 MHz should not require a kernel rebuild:
  *
- * The setter has to reach the LIVE spi_device, not just the module variable:
- * a plain module_param() would store the new number and change nothing, since
- * the value actually used is spi->max_speed_hz. esp32_spi_exec_op() compares
- * that against the programmed speed on every op and reprograms the divider, so
- * assigning it here takes effect on the next transfer without re-probing.
+ *     echo 20000000 > /sys/module/co5300/parameters/spi_hz
+ *
+ * That is an escape hatch, not the mechanism. Nothing has to write it at boot.
+ *
+ * The setter reaches the LIVE spi_device rather than only the module variable:
+ * a plain module_param() would store the number and change nothing, since the
+ * value actually used is spi->max_speed_hz. esp32_spi_exec_op() compares that
+ * against the programmed speed on every op and reprograms the divider, so the
+ * assignment takes effect at the next transfer without re-probing.
+ *
+ * What the clock is worth, measured: a full 320x400 frame goes from 115.15 ms
+ * at 20 MHz to 100.85 ms at 40 -- 13%, not the 2x the divider suggests. The
+ * transfer is not clock bound; the time is in the 64-byte FIFO chunk loop.
  */
-#define CO5300_SPI_HZ_DEFAULT	20000000u
+#define CO5300_SPI_HZ_DEFAULT	40000000u
 #define CO5300_SPI_HZ_MIN	 1000000u
 #define CO5300_SPI_HZ_MAX	80000000u
 
