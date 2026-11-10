@@ -148,6 +148,8 @@ Topic IDs are the `record_id` prefix. An entry reserves a name; it does not clai
 | Should the emulator's ROM live in flash or PSRAM? | EMU | EMU-009 |
 | Why is the emulator slower with the touch buttons running? | EMU | EMU-010 |
 | Why does a 512 KB allocation work once and then fail? | KERNEL | KRN-004 |
+| Why not put the hardware behind the RTOS on core 0? | KERNEL | KRN-005 |
+| Is Linux really only using one core? | KERNEL | KRN-005 |
 | Why are taps at the top of a bar ignored? | TCH | TCH-004 |
 | Can userspace draw on /dev/fb0? | LCD | LCD-001 |
 | Why does a thin fill draw nothing while a thick one works? | LCD | LCD-002 |
@@ -239,6 +241,7 @@ FLS-003: "A full-image flash rewrites /etc and S03keepconfig carries back only s
 
 KRN-001: "NOMMU with no overcommit: every ELF load segment and every large allocation must be CONTIGUOUS, so 'nommu: Allocation of length N failed' is a contiguity failure, not an out-of-memory one, and a big static array blocks exec rather than failing at run time"
 KRN-002: "init_linux_mmap() extends the linear flash window over the whole 16 MiB only inside map_flash_and_go(), immediately before the jump to Linux; firmware dereferencing 0x42xx0000 earlier reads unmapped memory and reset-loops with no output"
+KRN-005: "Core 0 runs the radios because the WiFi driver is a closed blob only ESP-IDF can run; Linux is a FreeRTOS task pinned to core 1 that never returns, and esp-hosted carries network, Bluetooth and typed custom interfaces but no I2C/SPI/GPIO RPC -- so there is no channel for an RTOS hardware server, and I/O stays on Linux"
 KRN-004: "The largest contiguous block is 512 KB (order 7), and exactly 524288 bytes is the worst size to request: malloc(524288) fails where malloc(524000) succeeds because the allocator header does not fit, and splitting the ROM into two halves fails for the same reason; one such allocation also consumes the block for the rest of the session"
 KRN-003: "The kernel is linked against a fixed address in the firmware's RAM (CONFIG_VECTORS_ADDR) which is the linker symbol space_for_vectors; moving it via a firmware change gives a kernel that boots and then dies silently at 'Run /sbin/init'"
 
@@ -771,6 +774,20 @@ EMU-010: "The touch daemon costs the emulator about 30 percent of its throughput
     - "KRN-001 for the contiguity rule itself"
   verification: "Measured on hardware 2026-11-10 across four boots, reading the buddy list directly rather than inferring from free memory. The one-shot behaviour was observed three times: an allocation that succeeded on a fresh boot failed on every subsequent attempt in the same session. Revised 2026-11-10 (core-log entry 25): exactly 524288 bytes is the worst size to request on this board. Probed directly with a malloc ladder on a board whose buddy list showed a free order-7 block: malloc(524288) fails and malloc(524000) succeeds, so the boundary lies in that 288-byte window and it is the allocator's own header -- a request equal to the largest block leaves nothing over for it. Splitting the ROM does not help: malloc(262144) twice yields one success and one failure, because each block pays its own header out of the same budget. The earlier order-8 claim in this record was also wrong: the buddyinfo line has eleven fields, orders 0 to 10, and the readings that were called order 8 were order 7, 512 KB. Nothing larger than 512 KB was ever free."
 
+
+- record_id: KRN-005
+  kind: KERNEL
+  topic_id: KRN
+  title: "The core split is forced by the closed WiFi blob, not a design choice, and esp-hosted has no peripheral channel"
+  status: VERIFIED
+  verified_date: 2026-11-10
+  statement: "The upstream port documents its own architecture in `build/Linux-on-esp32-S3/ARCHITECTURE.md`: core 0 runs ESP-IDF/FreeRTOS and owns the WiFi radio, whose driver is a closed binary that only runs under ESP-IDF; core 1 runs Linux natively, not emulated. The firmware source makes the boundary explicit -- `linux_boot.c` calls `xTaskCreatePinnedToCore(linux_task, \"linux_task\", 4096, NULL, 5, NULL, 1)`, and `linux_task()` is `map_flash_and_go(); esp_restart();`, so Linux is a FreeRTOS task pinned to core 1 that never returns. Everything other than the radio -- panel, PMU, RTC, touch, haptics, filesystem, USB -- is owned directly by Linux through its own drivers and MMIO. The esp-hosted link between the cores carries a network interface, Bluetooth, and typed custom interfaces (this project added ESP_LOG_IF for firmware logs); it has no I2C, SPI or GPIO RPC, and no generic peripheral channel."
+  consequence: "This settles a recurring proposal to put hardware behind the RTOS and let Linux do software. It fails on five grounds, each already recorded here: there is no channel to build it on (NET-003, BLE-005 -- the link is contended enough that one extra log line stopped WiFi bring-up); every I2C transaction would become a round trip that the 15 ms touch poll cannot absorb; core 0 cannot write flash (JFS-001); core 0 is the radio core and a polling server would contend with WiFi and BLE under a watchdog (BLE-004); and every device driver already exists and works on Linux, so moving the bus would mean rewriting them as firmware in a tree that must never be pushed. The bit-banged I2C is a missing hardware driver, not a placement mistake, and the fix is to write one. The distinction to keep is that computation may cross the boundary -- EMU-004's emulator-to-core-0 design batches work into a shared buffer -- while I/O should not, because I/O needs a round trip per transaction. See docs/cores.md."
+  sources:
+    - "build/Linux-on-esp32-S3/ARCHITECTURE.md: 'The big picture: two cores, two operating systems, one chip' and the boot flow"
+    - "build/esp-hosted/esp_hosted_ng/esp/esp_driver/network_adapter/main/linux_boot.c: the xTaskCreatePinnedToCore(..., 1) call and linux_task()"
+    - "Xinyuan-LilyGO/LilyGoLib examples/factory/ui_nes.cpp, screen_web_server.cpp, LilyGoWatchUltra.cpp: how the official firmware uses both cores"
+  verification: "Read from the firmware and port sources in this workspace, not inferred: ARCHITECTURE.md states the split, and linux_boot.c shows the pinning call and the never-returning task body. The absence of a peripheral RPC was established by reading the esp-hosted interface set, which carries network, Bluetooth and the project's own ESP_LOG_IF and nothing else. LilyGo's usage was read from its published examples: it runs FreeRTOS on both cores with no OS boundary, pins the NES emulator and its audio task to core 0 alongside the radios, and pins the web server to the core that ARDUINO_RUNNING_CORE is not; its board file calls Wire.begin(SDA, SCL) with setClock(1000000) for touch, which confirms the hardware I2C peripheral works on this board's pins."
 
 - record_id: FLS-001
   kind: FLASH

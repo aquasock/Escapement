@@ -1,10 +1,10 @@
-# Handoff — Escapement, 2026-11-10T10:44
+# Handoff — Escapement, 2026-11-10T11:05
 
 Linux 7.2.4 on a T-Watch Ultra (ESP32-S3). Real Linux on the watch's own Xtensa
 cores, not emulated. This file is orientation; verify before acting on it.
 
 Canonical detail lives in `.ai/core-reference.md` (63 records, fourteen topics).
-Project history lives in `.ai/core-log.md` (26 entries; newest first — 26, 25, 24, 23,
+Project history lives in `.ai/core-log.md` (27 entries; newest first — 27, 26, 25, 24, 23,
 22, 21, 20, 19, 18, 17, then 1 through 16). Do not re-derive what those hold.
 
 ## Current objective (verbatim)
@@ -17,10 +17,10 @@ persistence, any wake-from-sleep path, and moving the emulator to core 0.
 
 ## Reconstruct (in this order)
 
-1. `git log --oneline -8` — `main` was at `a47de90`, clean and fully pushed,
+1. `git log --oneline -8` — `main` was at `1c37c50`, clean and fully pushed,
    before the commit carrying this file.
 2. `.ai/core.md` (policy), then `.ai/core-reference.md` (hardware facts — open
-   the record, not the index line), then `.ai/core-log.md` entries 26, 25, 24.
+   the record, not the index line), then `.ai/core-log.md` entries 27, 26, 25.
 3. `git -C build/esp-hosted/esp_hosted_ng branch --show-current` — expect
    `ble-bond-wip`, five local-only commits.
 
@@ -132,7 +132,14 @@ counters perturb it.
 - `/etc/TZ`, `S01hwclock` and `S50tbtns` must be re-installed by hand after any
   **full-image** flash (`scripts/watch-time.sh` covers the first two).
 
-## Two settled results, so they are not re-litigated
+## Three settled results, so they are not re-litigated
+
+**The core split is forced by the closed WiFi blob, not chosen.** Core 0 runs
+the radios because only ESP-IDF can; Linux is a FreeRTOS task pinned to core 1
+that never returns. esp-hosted carries network, BT and typed custom interfaces
+and has **no I2C/SPI/GPIO RPC**, so an RTOS hardware server has no channel to
+exist on. LilyGo doesn't do it either — it runs FreeRTOS on both cores with no
+OS boundary. KRN-005, `docs/cores.md`.
 
 **The ROM will not fit in PSRAM as a plain malloc.** malloc(524288) fails where
 malloc(524000) succeeds — the boundary is the allocator header — and splitting

@@ -1,3 +1,33 @@
+## 27 COMMIT Unreleased 2026-11-10T11:04:36-07:00
+
+#### Coming From:
+
+Unreleased 1c37c50
+
+#### Purpose:
+
+Settle, from the port's own sources and the vendor's firmware, whether the RTOS on core 0 should own the hardware with a fast link to Linux, before any driver work is committed to.
+
+#### Outcome:
+
+The answer is no, and it is not a judgement call: there is no channel to build it on. The port documents its own split in `build/Linux-on-esp32-S3/ARCHITECTURE.md`, and the firmware confirms it in one function. Core 0 runs ESP-IDF and FreeRTOS and owns the WiFi radio, whose driver is a closed binary that only runs under ESP-IDF. Core 1 runs Linux natively, and `linux_boot.c` starts it as `xTaskCreatePinnedToCore(linux_task, ..., 1)` where `linux_task()` is `map_flash_and_go(); esp_restart();` -- Linux is a FreeRTOS task pinned to core 1 that never returns, and `esp_restart()` is the path taken only if it ever does. So the split is forced by one blob rather than chosen as a design principle, and everything except the radio -- panel, PMU, RTC, touch, haptics, USB, filesystem -- is already owned directly by Linux through ordinary drivers. The link between the cores carries a network interface, Bluetooth, and typed custom interfaces, of which this project added one for firmware logs; it carries no I2C, SPI or GPIO RPC and has no generic peripheral channel. LilyGo was checked as asked, and its architecture answers a different question: `Xinyuan-LilyGO/LilyGoLib` runs FreeRTOS on both cores with no OS boundary and no IPC, so there is nothing to offload to, and its touch code reaches the controller through a direct `Wire` call from whatever task is running. Two facts from it are still useful. It pins the NES emulator and its audio task to core 0 alongside the radios, which shows core 0 has headroom for compute in a single address space but says nothing about moving I/O. And `LilyGoWatchUltra.cpp` calls `Wire.begin(SDA, SCL)` with `setClock(1000000)` for the touch panel, which confirms from the vendor that the hardware I2C peripheral works on this board's pins at a megahertz against the 100 kHz we bit-bang. Meshtastic has no T-Watch Ultra target and MeshCore has no variant for it either, so neither adds a third data point. The proposal fails on five grounds already recorded in this project, and they are now written down together rather than scattered: no channel exists and the shmem link is contended enough that one extra log line stopped WiFi bring-up; every transaction would become a round trip that the deliberate 15 ms touch poll cannot absorb; core 0 cannot write flash; core 0 is the radio core and a polling server would contend with WiFi and BLE under a watchdog that resets the chip; and every device driver already exists and works on Linux, so moving the bus means rewriting them as firmware in a tree that must never be pushed. The distinction worth keeping is that computation may cross the boundary while I/O should not, because computation batches into a shared buffer and I/O needs a round trip per transaction, which is why EMU-004's emulator-on-core-0 design remains the one legitimate offload and stays deferred. The bit-banged I2C is therefore a missing driver and not a placement mistake: the fix is to write `i2c-esp32.c`, which removes the CPU cost instead of moving it and gains 4 to 10x on the bus as well. A system-wide CPU sample was taken to size the problem rather than argue about it, and it is worth stating with its disagreement intact: `/proc/stat` over five seconds shows 26.0 percent of the one core busy with 22.9 percent of it in kernel time, while `tbtns` alone measured 34.6 percent in kernel time earlier in the session -- the two do not reconcile, and the likely cause is that NAK-driven console traffic varies with load, so the honest reading is that kernel time from the bus is somewhere in the twenties to mid-thirties percent and is the dominant consumer either way. The core-syntax audit passed: `.ai/core.md` and `.ai/core-syntax.md` were re-read, the complete `.ai/` diff was inspected, `.ai/core.md` was not modified, the reference validates at 64 records with 64 index keys and no orphans in either direction, and this entry was validated against the template with six sections in canonical order, sequential numbering from 26, an ISO-8601 timestamp carrying the America/Phoenix offset, prose-only Outcome and Next Steps, and Status values within the allowed set.
+
+#### Next Steps:
+
+Write the hardware I2C driver. The design is now constrained by evidence rather than preference: it lives in `patches/kernel/i2c/final/i2c-esp32.c` and installs the same way `spi-esp32.c` does, it programs `I2C0` at `0x60013000` from the register map in the local ESP-IDF `i2c_ll.h` and `i2c_reg.h`, and it routes GPIO3 and GPIO2 through the GPIO matrix using the `I2CEXT0_SDA_OUT_IDX` and `I2CEXT0_SCL_OUT_IDX` signals that `i2c_periph.c` names. The first milestone is deliberately small and reversible: `i2cdetect -y 0` must see all six devices at 100 kHz with the DTS switched over, before interrupts or 400 kHz are attempted. That switch is the risky edit, because PMU, RTC, haptic and touch all move to the new driver at once, so it wants the backup taken at 10:57 and the console watched rather than assumed. The core-0 question is answered and closed; the emulator-offload question remains open under EMU-004 and should not be reopened on the strength of this cycle's finding about compute headroom, which was inferred from a single-address-space design and does not transfer to ours.
+
+#### Files Modified:
+
+- docs/cores.md
+
+#### Status:
+
+- Build: N/A
+- Deployment: N/A
+- User Test: NOT RUN
+
+---
+
 ## 26 COMMIT Unreleased 2026-11-10T10:43:07-07:00
 
 #### Coming From:
