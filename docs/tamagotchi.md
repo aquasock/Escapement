@@ -146,18 +146,91 @@ realtime factor   1.00x    (target 4,000,000 cycles/s)
 The core alone reaches 4.05x headless, so the panel bounds it — consistent with
 LCD-005 and LCD-010. At 4 fps the egg hatches in roughly real time.
 
+## The core is fixed-point, and that doubled its speed
+
+The reference implementation keeps its cycle and timer accumulators in
+`double`. On this watch that is expensive: measured on hardware, a double add
+costs **711 ns** against **121 ns** for the integer equivalent, because the
+Xtensa has no hardware double and every operation is a soft-float library call.
+`timers_clock()` runs once per emulated instruction and touches three such
+counters, so the interpreter paid that for every instruction the guest ran.
+
+The conversion is exact rather than approximate, which is why it is safe. The
+sleep tick is `CLOCK_HZ / SUB_CLOCK = 4000000 / 32768 = 122.0703125`, which is
+precisely `15625/128`. At `CYC_SHIFT = 7` fractional bits that value is the
+integer 15625 and nothing is truncated, so the drift the original comments warn
+about cannot occur.
+
+Measured on the watch, per frame at 10 fps:
+
+```
+before (double)   emu 50.8 ms
+after  (fixed)    emu 26.4 ms
+```
+
+Equivalence was proven, not assumed. Against the original core, over 200M
+cycles (50 emulated seconds):
+
+```
+instrs      1790467 -> 1790467
+pc             8239 -> 8239
+ram_fnv    41DA6499 -> 41DA6499
+dpram_fnv  EEE59CD3 -> EEE59CD3
+```
+
+and a button-press run matched to the tenth of a millisecond, including the
+580.1 ms gap the ROM leaves before it redraws.
+
+One bug was caught this way. `TM0L/TM0H/TM1L/TM1H` are read by the firmware as
+raw 16-bit cycle counters, so they need the fraction shifted off; leaving them
+in fixed-point units made the guest read a value 128x too large. The trace
+agreed for the first 400k instructions and diverged at the first timer poll.
+
+Two things that do **not** work and should not be retried:
+
+- **`double` is soft-float.** 711 ns per operation.
+- **`float` is worse than slow -- it faults.** The ESP32-S3 has a
+  single-precision FPU and the compiler emits `add.s`/`sub.s` for it, but this
+  kernel does not enable the coprocessor for user tasks, so executing those
+  instructions raises a coprocessor-disabled fault and the process dies with
+  SIGSEGV. Making float usable means coprocessor context switching on a NOMMU
+  port with a patched `fork()`, which is a much larger risk than using integers.
+
+## Parked: the ~1.5 s wait entering the time screen
+
+Still open, by decision, because it runs fine otherwise.
+
+What is established:
+
+- The ROM itself goes **silent for 580.1 ms** after a press while it rebuilds
+  the clock screen. Measured on the host in emulated cycles, so it is a
+  property of the ROM and not of this port.
+- The host runs that window at 211x realtime, so the ROM's own cost is not the
+  problem there.
+- On the watch the same windows show single frames of `emu 123-240 ms` and
+  `panel 43-135 ms` against a 100 ms frame budget, so the loop falls behind and
+  emulated time stretches. 580 ms of ROM at the observed slowdown plus paint is
+  the right order for 1.5 s.
+- The panel figure is 10x its own benchmark (9.5 ms). **Unexplained.**
+
+Ruled out by measurement, so nobody re-treads it:
+
+- Touch polling. A 15-byte read is 3957 us and the DRV2605 click 1796 us;
+  polling is now 15 ms and costs 8% of the emulator's throughput.
+- The paint path. Band masking already skips 62% of transfers; mid-frame
+  painting was tried and reverted because it tore the picture.
+- SPI clock. 40 MHz gives 13%, not 2x -- the transfer is not clock bound.
+
+Next thing to measure, if it is picked up again: what the guest is actually
+doing in those 580 ms. The stall log splits the time but has not yet been read
+against a press on the fixed-point build.
+
 ## Still to do
 
-- **Buttons are not wired.** The three touch bars emit `BTN_0/1/2` and nothing
-  consumes them; `splb32_pin(cpu, 0, mask, level)` with PA bits `0x01/0x02/0x04`
-  is the hook, and `tamagui.c` already does exactly this from a keyboard.
 - **Not a service.** It is launched by hand. The flash ROM removed the 512 KB
   allocation, but a `S51tamafb` needs care for a second reason: the binary is
-  222 KB static and *exec* is subject to the same contiguity rule (KRN-001).
-  Measured at a fragmented moment with the largest free block at 256 KB, the
-  same binary started in the foreground every time and died with SIGSEGV about
-  one launch in three when backgrounded with `&`. Starting it early, from rcS,
-  avoids this; starting it late does not.
-- **The `pwrite` cost is unmeasured separately from rendering.** LCD-005's
-  ~190 ms per frame conflicts with LCD-010's 45.7 ms projection by 4.2x, and
-  instrumenting `render_band` against the `pwrite` would settle which dominates.
+  249 KB static and *exec* is subject to the same contiguity rule (KRN-001).
+  Measured at a fragmented moment, the same binary started in the foreground
+  every time and died with SIGSEGV about one launch in three when backgrounded
+  with `&`. Starting it early, from rcS, avoids this; starting it late does not.
+  `/home/run-tama.sh` retries up to 8 times, which works but is luck.

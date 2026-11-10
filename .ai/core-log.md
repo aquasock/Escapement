@@ -1,3 +1,86 @@
+## 17 COMMIT Unreleased 2026-11-09T23:15:52-07:00
+
+#### Coming From:
+
+Unreleased 8e99aba
+
+#### Purpose:
+
+Make the Tamagotchi emulator keep real time on the watch. It ran, and it ran at
+1.00x, but any burst of guest activity fell behind by enough to stretch a screen
+transition to about 1.5 s.
+
+#### Outcome:
+
+The interpreter's cost was in the wrong arithmetic. The SPLB32 core follows its
+reference implementation in keeping cycle and timer accumulators in `double`,
+and this target has no hardware double: measured on the watch, a double add is
+711 ns against 121 ns for the integer equivalent, every operation a soft-float
+library call. `timers_clock()` runs once per emulated instruction and touches
+three such counters, so the interpreter paid that for every instruction the
+guest executed. Converting the accumulators to 64-bit fixed-point at
+`CYC_SHIFT = 7` halves it -- emulator time per frame at 10 fps went from 50.8 ms
+to 26.4 ms. The conversion is exact rather than approximate: the sleep tick is
+4000000/32768 = 122.0703125 = 15625/128, so at 7 fractional bits it is the
+integer 15625 and nothing is truncated, which is what the original comments
+feared. Equivalence was proven, not assumed: against the unmodified core, 200M
+cycles (50 emulated seconds) agree exactly on instrs, pc, registers, ram_fnv and
+dpram_fnv, and a simulated button press matches to the tenth of a millisecond
+including the 580.1 ms gap the ROM leaves before redrawing. That comparison
+caught a real bug: `TM0L/TM0H/TM1L/TM1H` are guest-visible as raw 16-bit cycle
+counters and need the fraction shifted off, or the firmware reads a value 128x
+too large -- the trace agreed for 400k instructions and diverged at the first
+timer poll. Two neighbouring options are traps and are now recorded as such:
+`double` is slow, and `float` is not slow but fatal, because the ESP32-S3 FPU
+exists and the compiler emits `add.s`, but the kernel does not enable the
+coprocessor for user tasks so the process dies with SIGSEGV; making it usable
+means coprocessor context switching on a NOMMU port with a patched `fork()`.
+Alongside it, the panel SPI clock became a runtime knob after the reference
+firmware's 45 MHz shearing was traced to the write-pointer bug rather than clock
+margin: 40 MHz was tested with eight full-width bands in eight colours and came
+out clean and in order, which a desynced write pointer cannot produce, so
+`/etc/init.d/S51panelclk` now sets it at boot and survives a reboot. It bought
+13%, not the 2x it was hoped for -- a full 320x400 frame went 115.15 ms to
+100.85 ms -- which says the transfer is not clock bound. Two tooling bugs cost
+as much time as the engineering and are fixed: `watch-exec.py` hardcoded
+`/dev/ttyACM0` and went silently dead whenever the board re-enumerated as
+`ttyACM1` after a replug, and `watch-deploy.sh` lost the last chunk of every USB
+transfer because `fold` emits an unterminated final line that `while read`
+discards, so a 23616-character file always arrived exactly 216 short while every
+chunk reported success. Touch polling went from 60 ms to 15 ms after measuring a
+15-byte read at 3957 us and the DRV2605 click at 1796 us. The user-visible
+result is that the watch now runs the pet at a true 1.00x with headroom the
+transition can borrow from.
+
+#### Next Steps:
+
+The ~1.5 s wait entering the time screen is parked by user decision and runs
+fine otherwise; `docs/tamagotchi.md` and EMU-002 record what is established, what
+is excluded by measurement, and the one unexplained figure -- panel time of
+43-135 ms per frame during a stall against 9.5 ms in the benchmark. The next
+measurement, if it is picked up, is to read the per-frame stall log against a
+press on the fixed-point build; the press-to-paint instrumentation is already in
+`tamafb.c` behind an argv flag. The larger standing item is making the emulator a
+service: `/home/run-tama.sh` retries up to 8 times because `exec` is subject to
+the contiguity rule, and starting it early from rcS would avoid the lottery
+entirely. Anything touching the kernel still needs `./scripts/watch-backup.sh`
+first -- the 16 MiB backup from this cycle is
+`~/twatch-backup/working-2026-11-09-2212.bin`, sha256 `19105568...`.
+
+#### Files Modified:
+
+`patches/kernel/display/final/co5300.c`, `scripts/watch-deploy.sh`,
+`scripts/watch-exec.py`, `userspace/tbtns.c`, `userspace/S51panelclk`,
+`userspace/run-tama.sh`, `docs/tamagotchi.md`, `.ai/core-reference.md`
+
+#### Status:
+
+- Build: PASS (kernel and userspace)
+- Deployment: PASS (kernel flashed and hash-verified; binaries deployed)
+- User Test: PASS (40 MHz bands clean; emulator runs, buttons work)
+
+---
+
 ## 1 COMMIT Unreleased 2026-11-09T10:31:52-07:00
 
 #### Coming From:

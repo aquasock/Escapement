@@ -128,6 +128,9 @@ Topic IDs are the `record_id` prefix. An entry reserves a name; it does not clai
 | Why does the touch controller answer but never report? | TCH | TCH-002 |
 | Why does an untouched screen read as a phantom press? | TCH | TCH-003 |
 | Why does a held touch freeze, then report a release? | TCH | TCH-003 |
+| Why is the emulator's interpreter so slow? | EMU | EMU-001 |
+| Can the emulator use float instead of double? | EMU | EMU-001 |
+| Why does entering the time screen take 1.5 s? | EMU | EMU-002 |
 | Why are taps at the top of a bar ignored? | TCH | TCH-004 |
 | Can userspace draw on /dev/fb0? | LCD | LCD-001 |
 | Why does a thin fill draw nothing while a thick one works? | LCD | LCD-002 |
@@ -978,3 +981,31 @@ last_reviewed: 2026-11-09
 | record_id | Folded into | Why |
 |---|---|---|
 | — | — | No records retired yet. |
+
+- record_id: EMU-001
+  kind: EMU
+  topic_id: EMU
+  title: "The SPLB32 interpreter must use fixed-point, because doubles are soft-float and floats fault"
+  status: VERIFIED
+  verified_date: 2026-11-09
+  statement: "On this kernel a double operation costs 711 ns and the integer equivalent 121 ns, because the Xtensa has no hardware double and every double add is a soft-float library call (__adddf3 in the binary). SPLB32's reference implementation keeps its cycle and timer accumulators in double, and timers_clock() runs once per emulated instruction touching three of them. Converting those to 64-bit fixed-point with CYC_SHIFT=7 fractional bits halves the interpreter's cost: measured on the watch, emulator time per frame at 10 fps fell from 50.8 ms to 26.4 ms. The conversion is exact, not approximate: the sleep tick is 4000000/32768 = 122.0703125 = 15625/128, so at 7 fractional bits it is the integer 15625 and nothing is truncated."
+  consequence: "Fixed-point is the only option, and the two alternatives are traps. Single-precision float is not slow -- it faults: the compiler happily emits add.s/mul.s because the ESP32-S3 FPU exists, but the kernel does not enable the coprocessor for user tasks, so executing them raises a coprocessor-disabled fault and the process dies with SIGSEGV (exit 139, reproduced). Making float usable means coprocessor context switching on a NOMMU port with a patched fork(), which is far more risk than using integers. Equivalence of the fixed-point core was proven rather than assumed: over 200M cycles the original and converted cores agree exactly on instrs, pc, registers, ram_fnv and dpram_fnv, and a button-press run matches to the tenth of a millisecond. One bug was caught by that comparison and would otherwise have shipped: TM0L/TM0H/TM1L/TM1H are guest-visible as raw 16-bit cycle counters and need the fraction shifted off, or the firmware reads a value 128x too large."
+  sources:
+    - "TamaHarness/portable/splb32.c: timers_clock(), splb32_step(), the SFR_TM0L/TM0H/TM1L/TM1H read cases"
+    - "TamaHarness/portable/splb32.h: CYC_SHIFT, CYC_ONE"
+    - "TamaHarness/portable/con_v3_ir.c: the IR model's counters, converted to the same scale"
+    - "docs/tamagotchi.md: the measurements and the equivalence runs"
+  verification: "Measured on hardware 2026-11-09. Double 711 ns vs int 121 ns; emu per frame 50.8 -> 26.4 ms; float arithmetic segfaults. Equivalence checked on the host against the unmodified core at 40M and 200M cycles and across a simulated button press."
+
+- record_id: EMU-002
+  kind: EMU
+  topic_id: EMU
+  title: "Entering the Tamagotchi time screen takes about 1.5 s, and the cause is known but not fixed"
+  status: OPEN
+  verified_date: 2026-11-09
+  statement: "Pressing the middle touch bar takes roughly 1.5 s before the clock screen appears, and during that time the pet stops animating. The ROM is responsible for 580.1 ms of it: measured on the host in emulated cycles, the guest makes no change to display RAM for 580.1 ms after a press, ending at +620.1 ms. On the host that window runs at 211x realtime, so the ROM's own work is not where the time goes there. On the watch, frames during the transition take 196-399 ms against a 100 ms budget, with emu 123-240 ms and panel 43-135 ms, so the loop falls behind and emulated time stretches -- which is how 580 ms becomes about 1.5 s."
+  consequence: "Parked by decision on 2026-11-09: the emulator runs well otherwise and the remaining work is not worth the risk right now. Do not re-tread the paths already excluded by measurement: touch polling (15-byte read 3957 us, DRV2605 click 1796 us, polling now 15 ms at 8% of throughput), the paint path (band masking already skips 62% of transfers, and mid-frame painting was reverted because it tore the picture), and SPI clock (40 MHz buys 13%, not 2x, because the transfer is not clock bound). The unexplained observation is the panel figure: 43-135 ms per frame during a stall against 9.5 ms in the benchmark, a 10x gap with no established cause. The next measurement, if this is picked up, is to read the stall log against a press on the fixed-point build to see what the guest is executing in those 580 ms."
+  sources:
+    - "docs/tamagotchi.md: 'Parked: the ~1.5 s wait entering the time screen'"
+    - "TamaHarness/portable/tamafb.c: the per-frame stall log and the press-to-paint timestamps"
+  verification: "The 580.1 ms ROM gap is measured on the host and reproducible. The 1.5 s on hardware is reported by the user and consistent with the measured stall frames, but the exact breakdown was never captured on device -- the press-to-paint instrumentation was deployed and never read against a press."
