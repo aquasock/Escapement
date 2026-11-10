@@ -65,76 +65,20 @@ if [ "$TRANSPORT" = auto ]; then
 fi
 
 if [ "$TRANSPORT" = usb ]; then
-    echo "deploying $NAME -> /home/$NAME over the USB console (sha256 ${want:0:12}...)"
+    echo "deploying $NAME -> /home/$NAME over the USB console"
 
-    # Base64 in chunks. The console is a tty with a ~4 KiB input queue, so a
-    # single command carrying the whole file is truncated silently -- the
-    # symptom is a transfer that never ends rather than an error.
+    # One session, streamed. See scripts/usb-send.py for why: the previous
+    # implementation ran a separate watch-exec.py per 900-character chunk, and
+    # each of those pays a full login handshake (~3 s). A 249 KB binary is 370
+    # chunks, so every such deploy took roughly eighteen minutes and was always
+    # killed by its own timeout -- which then got reported as "USB is broken".
+    # The console was never the problem: eight consecutive watch-exec.py runs
+    # succeeded 8/8. Streaming through a single session does the same transfer
+    # in 36 seconds.
     need_pw=${WATCH_PASS_FILE:-$HOME/.config/escapement/watch-pass}
     [ -f "$need_pw" ] || { echo "escapement: USB deploy needs WATCH_PASS_FILE" >&2; exit 1; }
 
-    remote_usb() { WATCH_PASS_FILE="$need_pw" ./scripts/watch-exec.py "$1"; }
-
-    remote_usb "rm -f /tmp/$NAME.b64 /home/$NAME.new" >/dev/null 2>&1 || true
-
-    base64 -w0 "$SRC" | fold -w 900 > "$tmp.chunks"
-    n=0
-    sent=0
-    while IFS= read -r chunk || [ -n "$chunk" ]; do
-        # Verify by SIZE, not by an echo.
-        #
-        # "printf ... && echo CHUNKOK" acks that printf ran, not that the whole
-        # argument arrived: the console is a tty with a bounded input queue, so
-        # a long line is silently truncated and the shell executes the prefix.
-        # That is how a 23616-character transfer reported every chunk acked
-        # while landing 216 characters short -- the tail chunk wrote nothing and
-        # still said CHUNKOK. Checking the running byte count is the only
-        # statement that is actually about the data.
-        want_len=${#chunk}
-        ok=0
-        for try in 1 2 3 4; do
-            got=$(remote_usb "printf '%s' '$chunk' >> /tmp/$NAME.b64; wc -c < /tmp/$NAME.b64" 2>/dev/null | tr -dc '0-9' | tail -c 16)
-            if [ "${got:-0}" = "$((sent + want_len))" ]; then
-                ok=1
-                sent=$((sent + want_len))
-                break
-            fi
-            # A short write leaves the file mid-chunk; rewind to the last good
-            # boundary before retrying, or the retry appends on top of garbage.
-            remote_usb "truncate -s $sent /tmp/$NAME.b64 2>/dev/null || dd if=/tmp/$NAME.b64 of=/tmp/$NAME.b64.t bs=1 count=$sent 2>/dev/null && mv /tmp/$NAME.b64.t /tmp/$NAME.b64" >/dev/null 2>&1 || true
-            sleep 1
-        done
-        if [ "$ok" != 1 ]; then
-            echo "escapement: chunk $((n + 1)) of the USB transfer failed after 4 tries" >&2
-            echo "  wanted $((sent + want_len)) bytes in /tmp/$NAME.b64, got ${got:-nothing}" >&2
-            remote_usb "rm -f /tmp/$NAME.b64" >/dev/null 2>&1 || true
-            exit 1
-        fi
-        n=$((n + 1))
-    done < "$tmp.chunks"
-
-    want_b64=$(base64 -w0 "$SRC" | wc -c)
-    have_b64=$(remote_usb "wc -c < /tmp/$NAME.b64" 2>/dev/null | tr -dc '0-9' | tail -c 16)
-    if [ "${have_b64:-0}" != "$want_b64" ]; then
-        echo "escapement: base64 length mismatch after transfer" >&2
-        echo "  want $want_b64 chars, got ${have_b64:-nothing}" >&2
-        remote_usb "rm -f /tmp/$NAME.b64" >/dev/null 2>&1 || true
-        exit 1
-    fi
-
-    echo "  sent $n chunk(s), $have_b64 base64 chars"
-
-    remote_usb "base64 -d /tmp/$NAME.b64 > /home/$NAME.new && chmod +x /home/$NAME.new && rm -f /tmp/$NAME.b64 && mv /home/$NAME.new /home/$NAME && echo ESCHASH \$(sha256sum /home/$NAME)" > "$tmp" 2>&1
-
-    have=$(grep -oE 'ESCHASH [0-9a-f]{64}' "$tmp" | awk '{print $2}' | tail -1)
-    if [ "$have" != "$want" ]; then
-        echo "escapement: USB transfer did not verify" >&2
-        echo "  want $want" >&2
-        echo "  got  ${have:-<none>}" >&2
-        tail -5 "$tmp" | sed 's/^/  /' >&2
-        exit 1
-    fi
-    echo "deployed /home/$NAME over USB, sha256 verified"
+    WATCH_PASS_FILE="$need_pw" ./scripts/usb-send.py "$SRC" "/home/$NAME" || exit 1
     exit 0
 fi
 
