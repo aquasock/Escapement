@@ -5,7 +5,7 @@ build/
 # Upstream release blobs. scripts/fetch-images.sh downloads and verifies them.
 images/*.bin
 
-# Built by scripts/build-userspace.sh; deploy /home/blekbd and /home/tbtns
+# Built by scripts/build-userspace.sh; deploy /home/blekbd and /home/panel-test
 # on the watch with scripts/watch-deploy.sh.
 userspace/blekbd
 userspace/blekbd.strip

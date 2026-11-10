@@ -248,24 +248,74 @@ matching ESP-IDF's `I2C_MASTER_LAST_NACK`; the earlier "0 for multi-byte" rule
 came from a test that also had the address-phase bug, so the evidence was
 contaminated.
 
-**What still fails: 16-bit register addresses.** The CST9217 touch controller
-needs a two-byte register address, and that transfer shape hangs:
+**RESOLVED: 16-bit register addresses, and the multi-byte read with them.**
+
+The CST9217 needs a two-byte register address, and that shape used to hang:
 
 ```
-i2ctransfer w1@0x1a 0x00 r4   ->  data (8-bit address, works)
-i2ctransfer w2@0x1a 0x00 0x02 r1  ->  times out
+i2ctransfer w1@0x1a 0x00 r4      ->  data (8-bit address, works)
+i2ctransfer w2@0x1a 0x00 0x02 r1 ->  used to time out
 ```
 
-The register state at failure is unambiguous — `int_raw=0x200` (trans_start
-only, nothing completed), `txfifo_cnt=3` (bytes never sent), `resp_rec=1` (the
-address WAS acknowledged), `bus_busy=0` (bus idle). So the controller sends the
-address, gets its ACK, and never chains to the next command. This affects only
-the touch controller; the PMU and RTC use one-byte addresses and work.
+**The command-register budget was not the cause, and this document used to
+say it was.** A 1-byte-address read and a 2-byte-address read need exactly the
+same number of commands, so the budget could never explain why one worked and
+the other did not. That lead is withdrawn.
 
-The strongest lead is the command-register budget: a 16-bit register read needs
-8 command registers and `SOC_I2C_CMD_REG_NUM` is 8, so the list may be one over
-what the sequencer will chain. Either merge the address into the data WRITE, or
-split the transfer.
+**The real cause was the multi-byte READ, and it was the same bug for every
+device.** `ack_val` is the level the master drives on the last byte of *its own
+command*, so one `READ(N)` with `ack_val = 1` NACKs after the first byte: the
+slave stops transmitting and the master keeps clocking the pull-ups, giving one
+real byte then `0xff`. `rxfifo_cnt` correctly reported `N`, so no short read was
+ever logged and the symptom could not be attributed from outside.
+
+ESP-IDF has no single "read N, NACK the last" command either.
+`i2c_master_read()` splits into `READ(data_len - 1)` with `I2C_MASTER_ACK` and a
+one-byte `READ` with `I2C_MASTER_NACK`. This driver now does the same. The
+comment that used to sit in the transfer function claiming `ack_val = 1`
+"matches ESP-IDF" was a misreading of that very function.
+
+Making the split fit took the command list to exactly its limit: seven real
+commands plus `END` at index 7. So the address byte is merged into the register
+write, which puts the same bytes on the wire and is what `i2c_master_write()`
+does for any `data_len > 1`. That merge had been tried before, failed, and been
+reverted with the wrong conclusion drawn: that build also set `ack_exp` on every
+command and had no GPIO input route, so no address was ever acknowledged and
+every shape hung.
+
+**Three further defects, each independently fatal to bus reliability:**
+
+- **`time_out_en` is bit 5 of `I2C_TO`.** The driver wrote bit 10, a reserved
+  field, so the hardware timeout had never been enabled and a stretched bus
+  could only be caught by the driver's own one-second spin.
+- **The nine-clock bus clear never ran.** `recover()` programmed `SCL_SP_CONF`
+  without pulsing `conf_upgate`, which is write-triggered. Recovery therefore
+  could not free a held bus, which is why every earlier wedge needed a power
+  cycle instead of self-recovering.
+- **`INT_SCL_ST_TO` (bit 13) and `INT_SCL_MAIN_ST_TO` (bit 14) were never
+  tested at all,** so a stretching slave ran the driver to its own timeout.
+  Both are now handled and both trigger recovery.
+
+`tout` is now derived the way `i2c_ll_cal_bus_clk()` derives it rather than being
+the constant 16.
+
+**Verified:** a seven-byte RTC read returns seven distinct real bytes that
+decode as the correct BCD time, `hwclock -r` succeeds where it used to fail with
+`EINVAL`, and twenty operations across all four devices produced zero errors.
+
+**One defect knowingly left open, and it is not a regression:** a transfer to an
+absent address returns `-ETIMEDOUT` instead of `-ENXIO`, so `i2cdetect` shows
+`--` from a timeout rather than a fast NACK. It costs scan time and clean probe
+semantics, nothing else.
+
+**Touch is a separate problem and `tbtns` has been retired.** With the bus
+sound, the wedge was traced to `tbtns`'s 15-byte touch read, so by user decision
+it is stopped, moved to `/etc/disabled/`, and removed from the tree (recoverable
+from `1c37c50`) to be replaced by a kernel input driver. The CST9217 also needs
+its reset line released through the XL9555 before it will answer, which is why
+with `tbtns` gone it returns `0xff 0xff` at register `0x00` instead of its `0xca`
+checkcode. The 15-byte block must be read whole, because the acknowledge that
+advances the controller's buffer is issued against the block.
 
 **Boot cost: the debug flag was left on, and it cost a minute.** For a while
 after the driver started working, boot took about a hundred seconds. It was not
@@ -276,16 +326,23 @@ all eight command registers. At boot that came to **241 log lines spread over
 a repaint of the 320x400 panel over SPI. Removing the flag cut it to six
 one-time probe messages, all inside the first two seconds.
 
-The dump is now also behind `printk_ratelimit()`, so even with the flag
-deliberately enabled it cannot flood the console again. That is the same lesson
-as the bus-recovery bug above: a diagnostic that can stall the machine is worse
-than the fault it is hunting, and both of this session's worst detours were
-diagnostics that did not bound their own cost.
+The dump is now behind a bounded counter rather than `printk_ratelimit()`.
+Ratelimit is shared state and the hardware bus is polled as fast as 66 times a
+second, which exhausts it permanently -- so every diagnostic in the driver went
+silent exactly when it mattered, and the log said so: `37 callbacks suppressed`.
+A budget of a few dozen lines per category is bounded, so it cannot stall the
+console the way the unbounded dump did, and it cannot be starved. That is the
+same lesson as the bus-recovery bug above: a diagnostic that can stall the
+machine is worse than the fault it is hunting, and both of this session's worst
+detours were diagnostics that did not bound their own cost.
 
-**The board state this leaves.** Running the hardware-I2C kernel: PMU, RTC and
-expander all bind and their values are live; the touch controller does not,
-because of the 16-bit addressing gap above, so `tbtns` is not running. The
-verified backup of exactly this state is
-`~/twatch-backup/working-2026-11-10-1251.bin`. The previous image,
-`working-2026-11-10-1053.bin`, is the `i2c-gpio` build and restores a fully
-functional watch including touch.
+**The board state this leaves.** Running the hardware-I2C kernel: PMU, RTC,
+expander, haptic and the panel all bind and their values are live, WiFi and BLE
+work, and `dmesg` records zero I2C errors. Touch is absent by decision — `tbtns`
+was retired and a kernel input driver will replace it.
+
+**No backup currently matches this state.** `working-2026-11-10-1251.bin`
+predates the multi-byte fix and still carries the chatty driver, and
+`working-2026-11-10-1053.bin` is the `i2c-gpio` build that restores a fully
+functional watch including touch. A full backup should be taken before the next
+kernel change; restoring from 1053 is the fallback if touch is needed sooner.

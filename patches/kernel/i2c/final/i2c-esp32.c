@@ -100,6 +100,16 @@
 #define INT_TIME_OUT		BIT(8)
 #define INT_TRANS_START		BIT(9)
 #define INT_NACK		BIT(10)
+/*
+ * The two SCL timeouts, which the first version of this driver did not test at
+ * all. Bit 13 is the slave-stretch timeout -- a slave held SCL longer than the
+ * TO register allows -- and bit 14 is the FSM sitting in a main state too long.
+ * A touch controller preparing a report is exactly what produces these, and
+ * ignoring them made a stretched bus look like a slow one: the transfer ran to
+ * the driver's own per-transfer timeout and left the bus wedged.
+ */
+#define INT_SCL_ST_TO		BIT(13)
+#define INT_SCL_MAIN_ST_TO	BIT(14)
 
 /*
  * SR, from the field list in soc/esp32s3/i2c_struct.h:
@@ -186,7 +196,41 @@ struct esp32_i2c {
 	bool			have_pins;
 	void __iomem		*sys;		/* SYSTEM block, for gate + reset */
 	bool			debug;
+	/*
+	 * A hard budget for the diagnostic lines below, rather than
+	 * printk_ratelimit(). The hardware I2C is polled as often as 66 times a
+	 * second by tbtns, which permanently exhausts the shared ratelimit
+	 * state -- so every diagnostic in this driver went silent exactly when
+	 * it mattered. A counter is bounded (the console mirrors to fbcon, so
+	 * an unbounded dump costs a minute of boot) and cannot be starved.
+	 */
+	u32			dbg_budget;
+	u32			ok_budget;
+	bool			first_err;
 };
+
+/*
+ * Two separate bounded budgets, because they answer different questions and
+ * one must not starve the other. The success counter shows whether the bus is
+ * carrying traffic; the error counter shows how it breaks. A single shared
+ * counter was spent entirely during probe, which is exactly when nothing was
+ * wrong.
+ */
+#define DBG(i2c, fmt, ...)					\
+	do {							\
+		if ((i2c)->dbg_budget) {				\
+			(i2c)->dbg_budget--;				\
+			dev_err((i2c)->dev, fmt, ##__VA_ARGS__);	\
+		}						\
+	} while (0)
+
+#define DBG_OK(i2c, fmt, ...)					\
+	do {							\
+		if ((i2c)->ok_budget) {				\
+			(i2c)->ok_budget--;				\
+			dev_err((i2c)->dev, fmt, ##__VA_ARGS__);	\
+		}						\
+	} while (0)
 
 static inline u32 esp32_i2c_read(struct esp32_i2c *i2c, u32 off)
 {
@@ -210,7 +254,7 @@ static inline void esp32_i2c_write(struct esp32_i2c *i2c, u32 off, u32 val)
 static void esp32_i2c_set_timing(struct esp32_i2c *i2c, u32 freq)
 {
 	u32 src = i2c->clk ? clk_get_rate(i2c->clk) : 80000000;
-	u32 div, sclk, half, wait_high, high, clk_conf, ctr;
+	u32 div, sclk, half, wait_high, high, clk_conf, ctr, tout;
 
 	if (!src)
 		src = 80000000;
@@ -262,9 +306,30 @@ static void esp32_i2c_set_timing(struct esp32_i2c *i2c, u32 freq)
 	clk_conf |= FIELD_PREP(GENMASK(7, 0), div - 1);
 	esp32_i2c_write(i2c, I2C_CLK_CONF, clk_conf);
 
-	/* The peripheral's own bus timeout, which the HAL always enables. */
-	esp32_i2c_write(i2c, I2C_TO, FIELD_PREP(GENMASK(4, 0), 0x10) |
-			BIT(10) /* time_out_en */);
+	/*
+	 * The peripheral's own bus timeout, which the HAL always enables.
+	 *
+	 * Two corrections here, both read out of i2c_struct.h and
+	 * i2c_ll_cal_bus_clk() rather than guessed:
+	 *
+	 *   time_out_en is bit 5, not bit 10. Writing bit 10 was writing a
+	 *   reserved field, so the hardware timeout was never enabled -- which
+	 *   is why INT_TIME_OUT never fired on a stretching bus and why the
+	 *   driver sat on its own one-second timeout instead of failing fast
+	 *   and recovering.
+	 *
+	 *   tout is derived from the bus timing, not a constant. ESP-IDF's
+	 *   comment is "we set the timeout value to about 10 bus cycles" and
+	 *   computes log2(5 * half_cycle) + 2. The field is 5 bits, so it is
+	 *   clamped rather than allowed to wrap.
+	 */
+	tout = 32 - __builtin_clz(5 * half) + 2;
+	if (tout > 31)
+		tout = 31;
+	if (tout < 1)
+		tout = 1;
+	esp32_i2c_write(i2c, I2C_TO,
+			FIELD_PREP(GENMASK(4, 0), tout) | BIT(5) /* time_out_en */);
 
 	/*
 	 * conf_upgate latches the timing registers into the peripheral's own
@@ -425,6 +490,23 @@ static void esp32_i2c_recover(struct esp32_i2c *i2c)
 	esp32_i2c_write(i2c, I2C_SCL_SP_CONF,
 			FIELD_PREP(GENMASK(5, 1), SCL_SP_RST_NUM) | SCL_SP_RST_EN);
 
+	/*
+	 * Latch it. conf_upgate is write-triggered and synchronises the
+	 * configuration into the peripheral's own clock domain;
+	 * i2c_ll_master_clr_bus() sets it immediately after programming
+	 * scl_rst_slv_en and scl_rst_slv_num, and without it the nine pulses
+	 * are written and never taken up.
+	 *
+	 * This is the third time in this project that a register written and
+	 * never latched looked like working code: the timing registers had the
+	 * same problem, and so did the transfer trigger. The consequence here
+	 * was worse than a slowdown -- the bus clear had never actually run, so
+	 * recovery could not free a held bus and every incident needed a power
+	 * cycle instead.
+	 */
+	esp32_i2c_write(i2c, I2C_CTR,
+			esp32_i2c_read(i2c, I2C_CTR) | CTR_CONF_UPDATE);
+
 	/* Clock on and reset released: periph_ll_enable_clk_clear_rst(). */
 	if (sys) {
 		iowrite32(ioread32(sys + 0x18) | BIT(7), sys + 0x18);
@@ -447,9 +529,19 @@ static void esp32_i2c_recover(struct esp32_i2c *i2c)
 	/* THE MISSING STEP: without it the bus runs at default timing. */
 	esp32_i2c_set_timing(i2c, i2c->bus_freq ? i2c->bus_freq : 100000);
 
+	/*
+	 * Restore the glitch filter too. i2c_hw_fsm_reset() saves and restores
+	 * it across the reset, and this driver configures it at probe, so
+	 * leaving it at the reset default after a recovery silently changes the
+	 * bus' tolerance to noise for the rest of the boot.
+	 */
+	esp32_i2c_write(i2c, I2C_FILTER_CFG, 0);
+
 	esp32_i2c_write(i2c, I2C_INT_CLR, 0xffffffff);
 
-	dev_info_ratelimited(i2c->dev, "bus recovered\n");
+	DBG(i2c, "bus recovered (int_raw=%08x sr=%08x)\n",
+	    esp32_i2c_read(i2c, I2C_INT_RAW),
+	    esp32_i2c_read(i2c, I2C_SR));
 }
 
 /*
@@ -532,24 +624,70 @@ static int esp32_i2c_run(struct esp32_i2c *i2c)
 			esp32_i2c_write(i2c, I2C_INT_CLR, 0xffffffff);
 			return -EAGAIN;
 		}
-		if (st & (INT_TRANS_COMPLETE | INT_TIME_OUT))
+		if (st & (INT_TIME_OUT | INT_SCL_ST_TO | INT_SCL_MAIN_ST_TO)) {
+			/*
+			 * A timeout of one of the three kinds the controller can
+			 * report, which on this board means a slave is holding
+			 * SCL (clock-stretching) and the transfer is not going to
+			 * finish.
+			 *
+			 * Returning without resetting leaves the bus wedged for
+			 * every later transfer: the FSM is idle, so SR_BUS_BUSY is
+			 * 0 and esp32_i2c_wait_idle() never fires recovery, while
+			 * each new transfer fails the same way. One bad transfer
+			 * then costs the whole boot, which is exactly what was
+			 * observed.
+			 *
+			 * ESP-IDF's i2c_master_cmd_begin() has the same branch and
+			 * calls i2c_hw_fsm_reset() when the status is TIMEOUT or the
+			 * bus is still busy. This driver was missing it.
+			 */
+			/*
+			 * The first failure after boot, logged once and outside the
+			 * budget. A wedged bus produces a storm of identical errors, so
+			 * the only line worth having is the first one, with every
+			 * register that could explain it.
+			 */
+			if (!i2c->first_err) {
+				i2c->first_err = true;
+				dev_err(i2c->dev,
+					"FIRST SCL timeout: int_raw=%08x sr=%08x ctr=%08x clk_conf=%08x to=%08x fifo_conf=%08x\n",
+					st, esp32_i2c_read(i2c, I2C_SR),
+					esp32_i2c_read(i2c, I2C_CTR),
+					esp32_i2c_read(i2c, I2C_CLK_CONF),
+					esp32_i2c_read(i2c, I2C_TO),
+					esp32_i2c_read(i2c, I2C_FIFO_CONF));
+			}
+			DBG(i2c,
+			    "SCL timeout: int_raw=%08x sr=%08x fifo_conf=%08x\n",
+			    st, esp32_i2c_read(i2c, I2C_SR),
+			    esp32_i2c_read(i2c, I2C_FIFO_CONF));
+
+			esp32_i2c_write(i2c, I2C_INT_CLR, 0xffffffff);
+			esp32_i2c_recover(i2c);
+			return -ETIMEDOUT;
+		}
+		if (st & INT_TRANS_COMPLETE)
 			break;
 
 		if (time_after(jiffies, timeout)) {
-			dev_err_ratelimited(i2c->dev,
-				"I2C timeout: int_raw=%08x sr=%08x ctr=%08x\n",
-				st, esp32_i2c_read(i2c, I2C_SR),
-				esp32_i2c_read(i2c, I2C_CTR));
+			if (!i2c->first_err) {
+				i2c->first_err = true;
+				dev_err(i2c->dev,
+					"FIRST spin timeout: int_raw=%08x sr=%08x ctr=%08x clk_conf=%08x to=%08x\n",
+					st, esp32_i2c_read(i2c, I2C_SR),
+					esp32_i2c_read(i2c, I2C_CTR),
+					esp32_i2c_read(i2c, I2C_CLK_CONF),
+					esp32_i2c_read(i2c, I2C_TO));
+			}
+			DBG(i2c, "spin timeout: int_raw=%08x sr=%08x ctr=%08x\n",
+			    st, esp32_i2c_read(i2c, I2C_SR),
+			    esp32_i2c_read(i2c, I2C_CTR));
 			esp32_i2c_recover(i2c);
 			esp32_i2c_write(i2c, I2C_INT_CLR, 0xffffffff);
 			return -ETIMEDOUT;
 		}
 		cpu_relax();
-	}
-
-	if (st & INT_TIME_OUT) {
-		esp32_i2c_write(i2c, I2C_INT_CLR, 0xffffffff);
-		return -ETIMEDOUT;
 	}
 
 	esp32_i2c_write(i2c, I2C_INT_CLR, 0xffffffff);
@@ -587,72 +725,108 @@ static int esp32_i2c_transfer(struct esp32_i2c *i2c, u16 addr,
 
 	if (!wlen && !rlen)
 		return -EINVAL;
-	if (wlen > 255 || rlen > 255)
+	/*
+	 * addr|W shares a command with the payload, so that command carries
+	 * 1 + wlen bytes and wlen cannot exceed 254.
+	 */
+	if (wlen > 254 || rlen > 255)
 		return -EINVAL;
 
 	esp32_i2c_reset_fifos(i2c);
 
-	/*
-	 * The address byte is its OWN command, not merged with the payload.
-	 *
-	 * ESP-IDF's i2c_master_write_read_device() builds
-	 *   START, write_byte(addr|W), write(reg), START, write_byte(addr|R), read
-	 * and each write_byte is a one-byte WRITE command that consumes exactly
-	 * one FIFO byte. Merging the address into the data command -- which an
-	 * earlier version of this function did -- means the slave never sees
-	 * its address at all, and every transfer hangs.
-	 *
-	 * FIFO order matches command order: addr|W, [wbuf...], addr|R.
-	 */
 	esp32_i2c_write(i2c, I2C_COMD(n++), CMD_OP_CODE(OP_RSTART));
-	esp32_i2c_write(i2c, I2C_COMD(n++),
-			CMD_OP_CODE(OP_WRITE) | CMD_BYTE_NUM(1) | CMD_ACK_EN);
 
+	/*
+	 * addr|W and the register number are ONE WRITE command.
+	 *
+	 * A WRITE command streams byte_num bytes back to back, so there is
+	 * nothing special about the address byte: it is simply the first byte
+	 * of the command and the payload follows it. ESP-IDF's
+	 * i2c_master_write() emits one command for any data_len > 1 for the
+	 * same reason. The wire sequence is identical either way -- START,
+	 * addr|W, reg, ... -- and only the command-register segmentation
+	 * differs.
+	 *
+	 * An earlier version of this driver gave the address its own one-byte
+	 * command and then concluded, from a build where merging hung, that
+	 * merging was wrong. That build also set ack_exp on every command and
+	 * had no GPIO input route, so no address was ever acknowledged and
+	 * every shape hung. The merge is not a trick: it is what frees the
+	 * command register that the split READ below needs, and a 16-bit
+	 * register address needs exactly that one register.
+	 */
 	if (wlen) {
 		esp32_i2c_write(i2c, I2C_COMD(n++),
-				CMD_OP_CODE(OP_WRITE) | CMD_BYTE_NUM(wlen) |
+				CMD_OP_CODE(OP_WRITE) | CMD_BYTE_NUM(1 + wlen) |
 				CMD_ACK_EN);
 	}
 
 	if (rlen) {
 		/* Repeated start: the register number and the read have to be
 		 * one transaction, or another master could interleave. */
-		esp32_i2c_write(i2c, I2C_COMD(n++), CMD_OP_CODE(OP_RSTART));
+		if (wlen)
+			esp32_i2c_write(i2c, I2C_COMD(n++),
+					CMD_OP_CODE(OP_RSTART));
 		esp32_i2c_write(i2c, I2C_COMD(n++),
 				CMD_OP_CODE(OP_WRITE) | CMD_BYTE_NUM(1) |
 				CMD_ACK_EN);
 		/*
-		 * ack_val = 1: NACK the LAST byte of this command, which is what
-		 * tells the slave to stop transmitting.
+		 * The read is SPLIT into READ(N-1) with ACK plus READ(1) with
+		 * NACK. This is what makes a multi-byte read work at all.
 		 *
-		 * This matches ESP-IDF exactly. i2c_master_read() is called with
-		 * I2C_MASTER_LAST_NACK, and i2c_master_read_static() maps that to
-		 *   ack_val = (ack == LAST_NACK) ? NACK : (ack & 1)
-		 * which is 1. The controller ACKs every byte up to the last and
-		 * NACKs the final one, per the command's byte_num.
+		 * ack_val is the value the master drives on the LAST received
+		 * byte of the command it belongs to. A single READ command of N
+		 * bytes with ack_val = 1 therefore NACKs the end of that command,
+		 * the slave stops after the first byte, and the remaining N-1
+		 * bytes are whatever the pull-ups supply -- 0xff. That was the
+		 * entire multi-byte symptom: one real byte then 0xff to the end,
+		 * with rxfifo_cnt correctly reporting N and so no short read to
+		 * warn about.
 		 *
-		 * Two earlier readings of this field were wrong, and both were
-		 * driven by contaminated evidence rather than by the source:
-		 *   "ack_val=1 gives 0x07 ff ff" -- but that run ALSO had the
-		 *   address phase merged into the data command, so the device was
-		 *   never addressed for reading at all;
-		 *   "ack_val=0 works for 7 bytes, so use it" -- true, but the
-		 *   master was then ACKing the final byte too and relying on
+		 * ESP-IDF has no single "read N, NACK the last" command either.
+		 * i2c_master_read() with I2C_MASTER_LAST_NACK splits into
+		 * READ(data_len - 1) with I2C_MASTER_ACK followed by a one-byte
+		 * READ with I2C_MASTER_NACK. This is that split, one command
+		 * each: READ(N-1) carries no ack_val (ACK), READ(1) carries
+		 * ack_val=1 (NACK).
+		 *
+		 * Two earlier readings of this field were wrong, and both came
+		 * from contaminated evidence rather than from i2c.c:
+		 *   "ack_val=1 matches ESP-IDF" -- it matches only the final
+		 *   one-byte command, never a multi-byte one;
+		 *   "ack_val=0 works for 7 bytes, so use it" -- it did, because
+		 *   the master then ACKed the final byte too and relied on
 		 *   byte_num to cut the transfer short, which is not what the
-		 *   protocol asks for and which hung on a 1-byte read.
+		 *   protocol asks for and which hung on a one-byte read.
 		 */
+		if (rlen > 1)
+			esp32_i2c_write(i2c, I2C_COMD(n++),
+					CMD_OP_CODE(OP_READ) |
+					CMD_BYTE_NUM(rlen - 1));
 		esp32_i2c_write(i2c, I2C_COMD(n++),
-				CMD_OP_CODE(OP_READ) | CMD_BYTE_NUM(rlen) |
+				CMD_OP_CODE(OP_READ) | CMD_BYTE_NUM(1) |
 				CMD_ACK_VAL);
 	}
+
+	/*
+	 * SOC_I2C_CMD_REG_NUM is 8 and I2C_COMD(n) is a register set, so the
+	 * END command must land at index 7 or lower. The worst case above is
+	 * six commands consumed before STOP, so this cannot fire -- it is here
+	 * so that a future change to the shape fails loudly instead of
+	 * scribbling the END opcode over a timing register.
+	 */
+	if (WARN_ON_ONCE(n > 6))
+		return -EINVAL;
 
 	esp32_i2c_write(i2c, I2C_COMD(n++), CMD_OP_CODE(OP_STOP));
 	esp32_i2c_write(i2c, I2C_COMD(n), CMD_OP_CODE(OP_END));
 
 	/* FIFO bytes, in the order the commands above consume them. */
-	esp32_i2c_write(i2c, I2C_DATA, addr << 1);
-	for (i = 0; i < wlen; i++)
-		esp32_i2c_write(i2c, I2C_DATA, wbuf[i]);
+	if (wlen) {
+		esp32_i2c_write(i2c, I2C_DATA, addr << 1);
+		for (i = 0; i < wlen; i++)
+			esp32_i2c_write(i2c, I2C_DATA, wbuf[i]);
+	}
 	if (rlen)
 		esp32_i2c_write(i2c, I2C_DATA, (addr << 1) | 1);
 
@@ -682,9 +856,16 @@ static int esp32_i2c_transfer(struct esp32_i2c *i2c, u16 addr,
 		if (i2c->debug && printk_ratelimit())
 			pr_info("i2c-esp32: RX len=%zu sr=%08x cnt=%u\n",
 				rlen, sr, cnt);
+		/*
+		 * Proof of life: shows whether a transfer completed at all, which
+		 * is the difference between "the bus is wedged" and "the bus is
+		 * fine and something above us is failing".
+		 */
+		DBG_OK(i2c, "ok addr=%02x wlen=%zu rlen=%zu cnt=%u sr=%08x\n",
+		       addr, wlen, rlen, cnt, sr);
 		if (cnt != rlen)
-			dev_warn_ratelimited(i2c->dev,
-					     "short read: %u of %zu\n", cnt, rlen);
+			DBG(i2c, "short read: %u of %zu (sr=%08x fifo_conf=%08x)\n",
+			    cnt, rlen, sr, esp32_i2c_read(i2c, I2C_FIFO_CONF));
 		for (i = 0; i < rlen && i < cnt; i++)
 			rbuf[i] = esp32_i2c_read(i2c, I2C_DATA) & 0xff;
 	}
@@ -730,6 +911,16 @@ static int esp32_i2c_xfer(struct i2c_adapter *adap, struct i2c_msg *msgs,
 
 	ret = num;
 out:
+	if (ret < 0) {
+		/*
+		 * Every failure, with the shape that produced it. The driver
+		 * returns -ENXIO, -EAGAIN and -ETIMEDOUT from three different
+		 * places, and the error a caller sees is the same -110 either
+		 * way, so this is the only way to tell which branch fired.
+		 */
+		DBG(i2c, "xfer FAIL ret=%d num=%d addr=%02x flags=%02x len=%u\n",
+		    ret, num, msgs[0].addr, msgs[0].flags, msgs[0].len);
+	}
 	mutex_unlock(&i2c->lock);
 	return ret;
 }
@@ -792,6 +983,8 @@ static int esp32_i2c_probe(struct platform_device *pdev)
 
 	of_property_read_u32(pdev->dev.of_node, "clock-frequency", &freq);
 	i2c->debug = of_property_read_bool(pdev->dev.of_node, "espressif,debug");
+	i2c->dbg_budget = 40;
+	i2c->ok_budget = 30;
 
 	/* Master mode, clock enabled, pads held by the controller. Exactly
 	 * i2c_ll_master_init()'s CTR value. */

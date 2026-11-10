@@ -1,3 +1,40 @@
+## 32 COMMIT Unreleased 2026-11-10T13:47:00-07:00
+
+#### Coming From:
+
+Unreleased 7e5efdc
+
+#### Purpose:
+
+Fix the multi-byte I2C read that returned one real byte followed by `0xff`, by reading ESP-IDF's `i2c_master_read()` instead of guessing at the ACK field, and retire `tbtns` after establishing that it was the one thing wedging the bus.
+
+#### Outcome:
+
+The multi-byte read works and the bus is stable, and the fault was never in the ACK field it had been blamed on. ESP-IDF never issues a single `READ(N)` with `LAST_NACK`: `i2c_master_read()` splits into `READ(data_len - 1)` with `I2C_MASTER_ACK` followed by a one-byte `READ` with `I2C_MASTER_NACK`, because `ack_val` is the level the master drives on the last byte of *its own command*, so one `READ(N)` with `ack_val = 1` NACKs after the first byte and the slave stops transmitting while the master keeps clocking the pull-ups. That is exactly `0x57 ff ff ff ff ff ff`, and `rxfifo_cnt` correctly reported `N`, which is why no short-read warning was ever logged and why the symptom could not be attributed from outside. The driver's code comment asserting that `ack_val = 1` "matches ESP-IDF" was a misreading of the same function and is corrected. Making that split fit took the command budget to exactly its limit, `seven real commands plus END at index 7` for a 16-bit register address plus a 15-byte read, so the address byte was merged into the register write, which is the same bytes on the wire and is what `i2c_master_write()` does for any `data_len > 1`. Three further defects fell out of the same reading and each was independently sufficient to keep the bus unreliable: `time_out_en` is bit 5 of `I2C_TO` and the driver wrote bit 10, a reserved field, so the hardware timeout had never been enabled and a stretched bus could only be caught by the driver's own one-second spin; `recover()` programmed `SCL_SP_CONF` without pulsing `conf_upgate`, so the nine-clock bus clear had never actually run and recovery could not free a held bus, which is why every earlier wedge required a power cycle instead of self-recovering; and `tout` was the constant 16 rather than `i2c_ll_cal_bus_clk()`'s derived value. The driver now also tests `INT_SCL_ST_TO` (bit 13) and `INT_SCL_MAIN_ST_TO` (bit 14), which it had never tested at all, and recovers on either. Verified on hardware: a seven-byte RTC read returns seven distinct real bytes that decode as the correct time in BCD (`0x52 0x45 0x20 0x10 0x02 0x11 0x26` = 20:45:52 on 2026-11-10), `hwclock -r` succeeds where it previously failed with `EINVAL`, and twenty operations across all four devices produced zero errors. `tbtns` was then retired by user decision, because the bus wedge was traced to its 15-byte touch read and a new touch driver is planned: it is stopped and moved to `/etc/disabled/`, its source, init script and selftest are removed from the tree, and it is recoverable from `1c37c50`. With it gone every remaining subsystem verifies clean — PMU capacity 100 / 4176000 uV / Full / usb online 1, RTC ticking and readable, expander `0xff 0xff`, haptic `0xe0`, panel bound at 320x400 16 bpp and painting, WiFi at 10.10.0.15, BLE keyboard running, load average down from 1.09 to 0.28 — and `dmesg` records zero `xfer FAIL`, zero `SCL timeout` and zero `short read`. One defect is knowingly left open and is not a regression: a transfer to an absent address returns `-ETIMEDOUT` rather than `-ENXIO`, so `i2cdetect` reports `--` from a timeout instead of a fast NACK. It costs scan speed and clean probe semantics, nothing else. The diagnostics added while chasing this are bounded counters rather than `printk_ratelimit()`, because `tbtns` polling at 66 Hz permanently exhausted the shared ratelimit state and silenced every log line exactly when it mattered, and because this board's console mirrors to fbcon so an unbounded dump costs a minute of boot. The core-syntax audit passed: `.ai/core.md` and `.ai/core-syntax.md` were re-read, the complete `.ai/` diff was inspected, `.ai/core.md` was not modified, and this entry was validated against the template with six sections in canonical order, sequential numbering from 31, an ISO-8601 timestamp carrying the America/Phoenix offset, prose-only Outcome and Next Steps, and Status values within the allowed set.
+
+#### Next Steps:
+
+The hardware I2C bus is working and is the default, so the next cycle is a real touch driver to replace `tbtns`, and it should be a kernel input driver rather than a userspace daemon: the CST9217 needs its reset line released through the XL9555 first, which is why the device currently answers `0xff 0xff` at register `0x00` instead of its `0xca` checkcode, and the 15-byte report block must be read whole because the acknowledge that advances the controller's buffer is issued against the block. The split-READ shape and the command budget that made that read possible are now proven, so the remaining work is initialisation sequence and input plumbing, not bus debugging. Worth fixing in the same pass or before it: absent addresses should return `-ENXIO` from the NACK interrupt instead of running to the SCL timeout, which would make `i2cdetect` immediate and give every driver's probe path correct semantics. A fresh full 16 MiB backup should be taken of this state, because the newest saved image `working-2026-11-10-1251.bin` predates the multi-byte fix and still carries the chatty driver; this cycle deliberately did not take one. The deferred items are unchanged and none should be started without asking: BLE media keys, the Rii K06 touchpad and Logitech keyboard, firmware-side BLE bond persistence, wake-from-sleep, and moving the Tamagotchi emulator to core 0.
+
+#### Files Modified:
+
+- patches/kernel/i2c/final/i2c-esp32.c
+- scripts/build-userspace.sh
+- scripts/watch-deploy.sh
+- userspace/haptic.c
+- .gitignore
+- userspace/tbtns.c (removed)
+- userspace/S50tbtns (removed)
+- scripts/tbtns-selftest.py (removed)
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: PASS
+
+---
+
 ## 31 COMMIT Unreleased 2026-11-10T13:05:12-07:00
 
 #### Coming From:

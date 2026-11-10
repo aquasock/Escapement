@@ -1,11 +1,12 @@
-# Handoff — Escapement, 2026-11-10T13:06
+# Handoff — Escapement, 2026-11-10T13:50
 
 Linux 7.2.4 on a T-Watch Ultra (ESP32-S3). Real Linux on the watch's own Xtensa
 cores, not emulated. This file is orientation; verify before acting on it.
 
 Canonical detail lives in `.ai/core-reference.md` (63 records, fourteen topics).
-Project history lives in `.ai/core-log.md` (31 entries; newest first — 31, 30, 29, 28, 27, 26, 25, 24, 23,
-22, 21, 20, 19, 18, 17, then 1 through 16). Do not re-derive what those hold.
+Project history lives in `.ai/core-log.md` (32 entries; newest first — 32, 31,
+30, 29, 28, 27, 26, 25, 24, 23, 22, 21, 20, 19, 18, 17, then 1 through 16).
+Do not re-derive what those hold.
 
 ## Current objective (verbatim)
 
@@ -17,179 +18,117 @@ persistence, any wake-from-sleep path, and moving the emulator to core 0.
 
 ## Reconstruct (in this order)
 
-1. `git log --oneline -8` — `main` was at `224f585`, clean and fully pushed,
+1. `git log --oneline -8` — `main` was at `7e5efdc`, clean and fully pushed,
    before the commit carrying this file.
 2. `.ai/core.md` (policy), then `.ai/core-reference.md` (hardware facts — open
-   the record, not the index line), then `.ai/core-log.md` entries 31, 30, 29.
+   the record, not the index line), then `.ai/core-log.md` entries 32, 31, 30.
 3. `git -C build/esp-hosted/esp_hosted_ng branch --show-current` — expect
    `ble-bond-wip`, five local-only commits.
 
-## State verified on hardware — last checked 2026-11-10
+## State verified on hardware 2026-11-10 13:47
 
-Boot to login and fork; AMOLED console `40x25` in a 320x400 fb0 at (45,45);
-`axp20x-battery` 100 % / 4175000 uV / Full and `axp20x-usb` online, four IRQs;
-`rtc0` seeds the clock; Rii K06 pairs, types, and reconnects on its stored bond
-after a reboot; WiFi 10.10.0.15 at ~409 KB/s; three touch bars paint, click and
-emit BTN_0/1/2; the Tamagotchi runs at a true 1.00x from the flash-resident ROM
-at 40 MHz with eight clean full-width bands.
-
-**The hardware I2C bus WORKS**, sustained and verified: `rtc0` readable and
-ticking, PMU publishing capacity 100 / 4178000 uV / Full / usb online, expander
-bound, ten consecutive reads with no failure, credible `i2cdetect`.
-
-**Touch is the one gap.** The CST9217 needs a 16-bit register address and that
-transfer shape hangs (`txfifo_cnt=3` stuck, `resp_rec=1`). Needs 8 command
-registers; `SOC_I2C_CMD_REG_NUM` is 8. So `tbtns` is not running.
-
-**Two bugs cost a dozen builds each, both one line:** `bus_busy` is bit 4 not
-bit 3 (so `SR_BUS_BUSY` read `arb_lost`), and recovery must restore the timing
-registers. See `docs/cores.md` and KRN-006.
-
-**Boot is fast again.** A leftover `espressif,debug` in the DTS was printing 8
-lines per I2C transfer — 241 lines over 100 s, each forcing an fbcon repaint.
-Removed, and the dump is now behind `printk_ratelimit()` so it cannot recur.
-`working-2026-11-10-1251.bin` still has the chatty driver.
-
-**Verified backups, newest first:**
+Everything below was measured on the running watch, not inferred:
 
 ```
-~/twatch-backup/working-2026-11-10-1251.bin   40 MHz + hardware I2C (current)
-~/twatch-backup/working-2026-11-10-0940.bin   40 MHz + i2c-gpio, touch works
+PMU        capacity 100 / voltage_now 4176000 uV / Full / usb online 1
+RTC        rtc0 ticking, hwclock -r works (used to fail EINVAL)
+0x51 read  w1 0x04 r7 -> 0x52 0x45 0x20 0x10 0x02 0x11 0x26 = 20:45:52 UTC
+expander   0x20: 0xff 0xff        haptic 0x5a: 0xe0
+panel      co5300 bound, fb0 320x400 @16 bpp, painting works
+WiFi       10.10.0.15            BLE keyboard  running
+i2c errors dmesg: 0 xfer FAIL, 0 SCL timeout, 0 short read
+load       0.28 (was 1.09 with tbtns running)
+```
+
+**The hardware I2C bus works and is the default.** Multi-byte reads are fixed —
+see `docs/cores.md` for the whole proof. In short: `ack_val` is the master's
+level on the last byte of *its own command*, so `READ(N)` with `ack_val=1` NACKs
+after byte one; ESP-IDF splits into `READ(N-1)` ACK + `READ(1)` NACK and now so
+does this driver. Three more defects went with it: `time_out_en` is bit 5 of
+`I2C_TO` (driver wrote bit 10, reserved), the nine-clock bus clear was never
+latched (`conf_upgate` missing, so recovery could never free a held bus — that
+is why every earlier wedge needed a power cycle), and `INT_SCL_ST_TO` /
+`INT_SCL_MAIN_ST_TO` were never tested at all.
+
+**What the old docs got wrong, so nobody chases it again:** the
+command-register budget was never the problem. A 1-byte-address read and a
+2-byte-address read need the same number of commands. That lead is withdrawn.
+
+## Touch — retired, replaced next
+
+`tbtns` is **gone by user decision**, not broken-and-parked. It is stopped,
+moved to `/etc/disabled/` on the watch, and deleted from the tree (recoverable
+from `1c37c50`). It was the thing wedging the bus: its 15-byte touch read
+started the failure storm, and with it removed the bus has been clean.
+
+Next cycle is a **kernel input driver** to replace it. Two facts already
+established for whoever writes it:
+
+- The CST9217 needs its reset line released through the XL9555 first. That is
+  why, with `tbtns` gone, it returns `0xff 0xff` at register `0x00` instead of
+  its `0xca` checkcode.
+- The 15-byte report block must be read **whole**. The acknowledge that advances
+  the controller's internal buffer is issued against the block; reading part of
+  it leaves the buffer mid-block and it never advances.
+
+The split-READ shape and the command budget that make that read possible are
+proven. The remaining work is initialisation sequence and input plumbing, not
+bus debugging.
+
+## One known open defect, not a regression
+
+A transfer to an **absent address** returns `-ETIMEDOUT` instead of `-ENXIO`, so
+`i2cdetect` shows `--` from a timeout rather than a fast NACK. It costs scan
+time and clean probe semantics and nothing else. Fix it in the touch cycle.
+
+## Backups — read the directory, do not trust this file
+
+**No backup matches the current state.** The newest two both predate the
+multi-byte fix, and the one before that is the old bit-banged build:
+
+```
+~/twatch-backup/working-2026-11-10-1251.bin   hardware I2C, no touch, chatty boot
+~/twatch-backup/working-2026-11-10-1053.bin   i2c-gpio — full function incl. touch
+~/twatch-backup/working-2026-11-10-0940.bin   i2c-gpio, 40 MHz
 ~/twatch-backup/twatch-factory-16MB.bin       stock
 ```
 
-**Restore command, corrected this session** (the previously documented form was
-wrong and cost an hour):
+Take a full backup (`./scripts/watch-backup.sh`, 16 MiB, ~3.5 min) **before the
+next kernel change**. If touch is needed before then, restore 1053: it is the
+fully functional watch. Restore command:
 
 ```sh
 PY=build/idf-tools/python_env/idf5.1_py3.14_env/bin/python
 $PY -m esptool --chip esp32s3 --port /dev/ttyACM0 --baud 921600 \
-    --after no_reset write_flash 0 ~/twatch-backup/working-2026-11-10-0940.bin
+    --after no_reset write_flash 0 ~/twatch-backup/<image>.bin
 ```
 
-`--after no_reset` is not optional: without it esptool resets the board into the
-app at the end, Linux claims the USB-Serial-JTAG port, and every later command
-hangs at `Connecting...`. A *boot-looping* board needs no button because it
-re-enters the ROM bootloader every cycle. See `docs/watch-recovery.md`.
+`--after no_reset` is not optional: without it esptool resets into the app,
+Linux claims the USB-Serial-JTAG port, and later commands hang at
+`Connecting...`.
 
-## Two traps that will cost you a session if missed
+## Two traps that cost a session each
 
-**The firmware tree must never be pushed.** `build/esp-hosted/esp_hosted_ng`
-has origin `jcmvbkbc/esp-hosted` — upstream, not this project. Commit locally,
-never push.
+**Diagnostics must bound their own cost.** This bit twice. An unbounded
+`espressif,debug` dump cost a minute of boot because the console mirrors to
+fbcon over SPI. Then `printk_ratelimit()` was used for the next round — and it
+is *shared state*, so `tbtns` polling at 66 Hz exhausted it permanently and
+every diagnostic went silent exactly when it mattered
+(`37 callbacks suppressed`). The driver now uses small per-category counters.
+Anything you add must be bounded by construction.
 
-**Back up the whole flash, not the kernel.** Before any kernel or firmware
-change: `./scripts/watch-backup.sh` (16 MiB, ~3.5 min). A kernel-only backup is
-not enough — `/etc` damage is what once made a saved known-good kernel look
-broken, and the recovery cost the display, the WiFi credentials, the root
-password and the keyboard deployment. Restore with `esptool ... write_flash 0
-0x1000000 <file>`. Backups live in `~/twatch-backup/`; do not restore
-`working-2026-11-09.bin`, which predates `fb_write`.
+**A kernel rebuild is not reproducible from a dirty tree.** The kernel tree is a
+post-build overlay, so `./scripts/build-kernel.sh` fails at patch 0001 with
+"patch did not apply". Use `./scripts/build-kernel.sh --clean`; it takes ~45 s
+and is the only honest build.
 
-## Where the engineering actually stands
+## Tooling notes
 
-**The interpreter is measured, at last.** EMU-005/006/007/008 now hold counts
-rather than estimates, taken on hardware 2026-11-10:
-
-```
-454305 instructions  736660 steps  282355 sleep steps   204045 instr/s   4.49x
-1.622 steps/instr    2.408 accesses/instr   4922 ns/instr = ~1181 cycles
-rom 72.6%   ram 21.4%   memory = 2.6% of cost   interpreter stream = 97%
-```
-
-That settles the question entry 18 left open, in the useful direction. Memory is
-2.6 percent of an emulated instruction's cost, instruction fetch is nearly free
-(8x the code footprint costs 3.8 percent), and the other 97 percent is the
-interpreter's own instruction stream — the order of **150 native instructions
-per emulated instruction** against the 30-80 a tuned core needs. The
-block-register rewrite is justified and has a baseline to be judged against.
-
-**The ROM's location is now measured, and it is the biggest win available.**
-ROM 204033 instr/s (4.49x) in the flash window against 273098 (6.01x) in PSRAM —
-**+33.8%**, nine flash runs across three boots, two PSRAM samples on two boots,
-identical instruction counts. The saving of 1239 ns per instruction matches the
-1290 ns the ROM-access cost predicted, within 4 percent. So the ROM should move
-to PSRAM; the cost is that a 512 KB contiguous block exists only briefly at boot
-(1 MB at 0 min, 256 KB by 9 min, 128 KB by 32 min) and one allocation consumes
-it — KRN-004 — which means the emulator must start from rcS.
-
-**And the touch daemon costs a third of the emulator's speed.** Same boot, same
-binary: 141k instr/s with `S50tbtns` running, 204k with it stopped. Worth fixing
-by having it stand down while a fullscreen app owns the panel.
-
-Those two together are larger and far cheaper than the block-register rewrite,
-which should now be re-justified against a 6.01x baseline rather than 4.49x.
-
-**How to run the instrument.** `./scripts/build-corebench.sh` builds four
-variants; only `corebench-flash` (77 KB, ROM read through the window at
-0x42480000) actually execs here. The 601 KB compiled-in build is refused by the
-kernel as 565248 bytes not contiguous, and the file-based one cannot malloc
-512 KB. `corebench-prof` prints the counters — never trust its wall clock, the
-counters perturb it.
-
-## Open items, in the order they are worth doing
-
-- **`S51tamafb` from rcS** — the one blocking item. It makes the emulator start
-  at boot instead of by hand, and if it starts early enough the 512 KB ROM
-  allocation can succeed, which is the only route to the 33.8 percent. It must
-  write `/var/run/tamafb.pid` or the `tbtns` stand-down will not trigger.
-- LCD-009's tearing root cause; the 4.2x disagreement between LCD-005's 190 ms
-  and LCD-010's 45.7 ms — re-measure through the real repaint path first.
-- The parked ~1.5 s time-screen wait.
-- The top-bar status daemon — never started.
-- The 2026-11-10 boot loop is unexplained and its dump is gone. If it recurs,
-  dump the flash *before* restoring anything.
-- `/etc/TZ`, `S01hwclock` and `S50tbtns` must be re-installed by hand after any
-  **full-image** flash (`scripts/watch-time.sh` covers the first two).
-
-## Three settled results, so they are not re-litigated
-
-**The core split is forced by the closed WiFi blob, not chosen.** Core 0 runs
-the radios because only ESP-IDF can; Linux is a FreeRTOS task pinned to core 1
-that never returns. esp-hosted carries network, BT and typed custom interfaces
-and has **no I2C/SPI/GPIO RPC**, so an RTOS hardware server has no channel to
-exist on. LilyGo doesn't do it either — it runs FreeRTOS on both cores with no
-OS boundary. KRN-005, `docs/cores.md`.
-
-**The ROM will not fit in PSRAM as a plain malloc.** malloc(524288) fails where
-malloc(524000) succeeds — the boundary is the allocator header — and splitting
-the ROM into two halves fails for the same reason. KRN-004. The front end's code
-is deployed and correctly falls back with `rom: flash window`.
-
-**`tbtns` costs 34.7 percent and it is NOT the poll rate.** Slowing 15 ms to
-66 ms moved throughput 1.1 percent, so the cost is per-wakeup, not per-read.
-Unexplained; profile before acting on it. The daemon now *slows* rather than
-stops during gameplay, because `tamafb`'s only input is the device `tbtns`
-injects — stopping it made the buttons dead. Both transitions are in
-`/home/tbtns.log`.
-
-## Tooling
-
-- `./scripts/watch-telnet.py '<cmd>'` — shell on the watch over telnet. Prefer
-  this to the serial console; the serial port is 115200 and fights printk.
-- `./scripts/watch-exec.py '<cmd>'` — same over the USB console, needs
-  `~/.config/escapement/watch-pass`.
-- `./scripts/usb-send.py` / `./scripts/watch-deploy.sh` — deploys. USB streaming
-  through one console session; netcat is unavailable on that channel.
-- `./scripts/build-userspace.sh` — cross-compile; `--selftest` runs the HID
-  decoder and touch-band tests.
-- `./scripts/build-corebench.sh` — the emulator instrument; see above.
-- **`export XTENSA_GNU_CONFIG=$PWD/build/toolchain/xtensa-dynconfig/esp32s3.so`
-  before any cross-compile.** Unset, the compiler emits big-endian objects and
-  the link fails with "file in wrong format", which reads as a broken toolchain.
-- Kernel: `make ARCH=xtensa CROSS_COMPILE=xtensa-esp32s3-linux-uclibcfdpic-`
-  `xipImage` in `build/kernel/linux-7.2.4`; flash to `0x140000` only. Current
-  image is 2,833,064 B, well clear of the 0x480000 ROM slot.
-- Check `space_for_vectors` in the firmware ELF against `CONFIG_VECTORS_ADDR`
-  (`0x40380000`) after any firmware change that moves RAM use.
-- The emulator and its harness live outside this repo at `../TamaHarness`;
-  `portable/` holds `splb32.c`, `tamafb.c`, `corebench.c` and the ROM.
-
-## Evidence base
-
-- `.ai/core-reference.md` — hardware facts and ruled-out causes
-- `.ai/core-log.md` — entry-by-entry history, newest first
-- `docs/tamagotchi.md` — the emulator, its measurements, its parked defect
-- `docs/watch-recovery.md` — recovery doctrine
-- `docs/panel-api.md`, `docs/panel-geometry.md`, `docs/panel-transfer-cost.md`
-- `docs/bluetooth-keyboard.md`, `docs/bluetooth-bond.md`
+- `./scripts/watch-telnet.py '<cmd>'` — shell on the watch. Prefer to serial.
+- Flash a kernel alone: `--after no_reset write_flash 0x140000 <xipImage>`, then
+  reset with `--after hard_reset read_mac`. Kernel-only leaves `/etc` and
+  `/home` intact.
+- `/dev/mem` does not exist on this image, so there is no `devmem` escape hatch —
+  the driver has to report its own register state.
+- `export XTENSA_GNU_CONFIG=$PWD/build/toolchain/xtensa-dynconfig/esp32s3.so`
+  before any manual cross-compile, or you get a misleading "wrong format" error.

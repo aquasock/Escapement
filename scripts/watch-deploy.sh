@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # Deploy a userspace binary to the watch's /home, verified by sha256.
 #
-#   ./scripts/watch-deploy.sh tbtns
-#   ./scripts/watch-deploy.sh --usb tbtns      force the USB console
-#   ./scripts/watch-deploy.sh --telnet tbtns   force telnet
+#   ./scripts/watch-deploy.sh blekbd
+#   ./scripts/watch-deploy.sh --usb blekbd      force the USB console
+#   ./scripts/watch-deploy.sh --telnet blekbd   force telnet
 #
 # /home is the writable jffs2 partition; the rootfs is a read-only cramfs, so
 # this is where binaries live. Deployment is netcat because the shell channels

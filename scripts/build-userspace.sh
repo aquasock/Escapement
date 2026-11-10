@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Build the userspace programs: userspace/blekbd and userspace/tbtns.
+# Build the userspace programs: userspace/blekbd and userspace/panel-test.
 #
 #   ./scripts/build-userspace.sh            build both
 #   ./scripts/build-userspace.sh --selftest build for the host and run the
@@ -42,19 +42,15 @@ case "${1:-}" in
     say() { printf '\n=== %s\n' "$*"; }
     say "host build"
     cc -O1 -Wall -Wextra -o /tmp/blekbd_host userspace/blekbd.c
-    cc -O1 -Wall -Wextra -o /tmp/tbtns_host userspace/tbtns.c userspace/haptic.c
     say "generate frames"
     python3 scripts/blekbd-selftest.py /tmp/blekbd-frames.bin
     say "decode"
     /tmp/blekbd_host -f /tmp/blekbd-frames.bin -v
-    say "touch bands"
-    python3 scripts/tbtns-selftest.py /tmp/tbtns_host
     ;;
 *)
     "$CC" -Os -Wall -Wextra -o userspace/blekbd userspace/blekbd.c
-    "$CC" -Os -Wall -Wextra -o userspace/tbtns userspace/tbtns.c userspace/haptic.c
     "$CC" -Os -Wall -Wextra -o userspace/panel-test userspace/panel-test.c
-    ls -l userspace/blekbd userspace/tbtns userspace/panel-test
+    ls -l userspace/blekbd userspace/panel-test
     printf '\ndeploy them to the watch; see the header of this script.\n'
     ;;
 esac

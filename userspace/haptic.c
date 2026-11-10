@@ -1,9 +1,9 @@
 /*
  * haptic.c - tap feedback on the DRV2605.
  *
- * This is a library, not a program: `tbtns` calls haptic_tap() when a button
- * goes down. It is kept separate because the same three calls serve anything on
- * this board that wants a click.
+ * This is a library, not a program: a caller invokes haptic_tap() when a
+ * button goes down. It is kept separate because the same three calls serve
+ * anything on this board that wants a click.
  *
  * The chip
  * --------
