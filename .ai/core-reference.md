@@ -222,6 +222,7 @@ BLE-001: "NimBLE's store is the application's job: without ble_store_config_init
 BLE-002: "At MTU 23 an ATT read returns 22 bytes, so a 934-byte report map costs 43 round trips and one mbuf each; the pool defaults to 12 blocks, empties, and the keyboard drops the link with HCI 0x16"
 BLE-003: "HID boot protocol (0 to 0x2A4E) gives a fixed 8-byte report with no report ID and no report map; report protocol needs the map and is what exhausted the ATT buffers"
 BLE-004: "A continuous scan starves core 0's idle task and trips the task watchdog (rst:0x7 TG0WDT_SYS_RST); and an idle BLE keyboard advertises only for a few seconds, so an 8 s scan gap is deaf 35% of the time and can miss it with no log trace"
+BLE-005: "Firmware logging rides the same shmem link as WiFi bring-up, so one log line per BLE advertisement stops the interface coming up with `Command[1] timed out` -- logging is traffic on this board, and the failure also kills the log channel that would report it"
 
 NET-001: "WiFi delivers about 409 KB/s bulk and 30-50 ms to the gateway over esp-hosted on a shared shmem link and one core"
 NET-002: "`wifi scan` proves the radio and scan path only, not the data path; repeated scans while associated disrupt the link, so ping the gateway and use the board's own `wifi connect` helper"
@@ -520,6 +521,20 @@ EXT-001: "The SPLB32 Tamagotchi core runs at 4.05x realtime headless on this boa
     - "patches/kernel/display/final/spi-esp32.c: the FIFO-only exec_op that the per-chunk cost comes from"
   verification: "Measured on hardware 2026-11-09 with the transmitted buffer, not a shared-memory estimate. The contradictory figure is recorded rather than resolved: LCD-005 puts a 320x400 frame at about 190 ms, while 4000 chunks at 11.42 us is 45.7 ms, a factor of 4.2 apart. Those do not reconcile and the difference is not explained; LCD-005 predates the CS-handling fix and may have included non-transfer work. LCD-005 should be re-measured through the real repaint path before either number is quoted."
 
+- record_id: BLE-005
+  kind: BLE
+  topic_id: BLE
+  title: "Firmware logging shares the shmem link with wifi bring-up, so logging per advertisement breaks the network"
+  status: VERIFIED
+  verified_date: 2026-11-09
+  statement: "`fw_log` sends every line to Linux as an IPC message on the same shmem link the kernel uses for WiFi, and it does so from core 0 while the kernel is still initialising. Adding a `hid_log` call to the BLE scan callback -- one line per advertisement, which in a normal radio environment is dozens per second -- stopped the network interface from coming up: the kernel reported `wait_and_decode_cmd_resp: Command[1] timed out`, then `esp_add_card: esp_add_network_ifaces(adapter) failure, ret: -1`, and no `espsta0`, and no `/dev/esp-log` either, because `esp_log_pipe_init()` runs after the step that failed. Reverting the logging restored both on the next boot."
+  consequence: "On this board logging is traffic, not observation. The firmware emitter is rate limited to 40 lines per second precisely because of this, and even that is a budget rather than a guarantee: what matters is how much of the link the lines occupy while wifi is being brought up. Any diagnostic added to the scan or connection path must be either rare by construction or gated so it cannot fire during interface initialisation. The failure is also self-concealing -- the log channel dies with the network, so the log cannot report the fault that killed it."
+  sources:
+    - "build/esp-hosted/esp_hosted_ng/esp/esp_driver/network_adapter/main/log_pipe.c: LOG_MAX_PER_SEC 40 and the note that a flood 'has already been shown to stop Linux reaching userspace'"
+    - "build/esp-hosted/esp_hosted_ng/esp/esp_driver/network_adapter/main/ble_prov.c: ble_prov_log_nonblocking(), which enqueues one IPC message per line"
+    - "kernel log on hardware: Command[1] timed out, esp_add_network_ifaces failure, network interface init failed"
+  verification: "Reproduced twice on hardware 2026-11-09: the firmware with per-advertisement logging produced no espsta0 and no /dev/esp-log on two consecutive boots, and the same firmware with the logging removed restored both immediately. This is the same mechanism as NET-003."
+
 - record_id: PMU-001
   kind: PMU
   topic_id: PMU
@@ -741,11 +756,12 @@ EXT-001: "The SPLB32 Tamagotchi core runs at 4.05x realtime headless on this boa
   status: VERIFIED
   verified_date: 2026-11-09
   statement: "Writing 0 to HID Protocol Mode (0x2A4E) selects boot protocol, which defines exactly one keyboard report shape: byte 0 modifiers, byte 1 reserved, bytes 2-7 six HID usage slots with 0 meaning empty. No report ID is present and no report map is needed. Writing 1 selects report protocol, in which the device sends every report it has behind a report ID and the host must read the Report Map (0x2A4B) to interpret any of it."
-  consequence: "Boot protocol is the correct choice for typing on this board: one subscription instead of six, and no map transfer at all. The cost is that consumer-page keys — volume, media, browser — never arrive, because they exist only on the report-protocol consumer collection. Since the map read is what exhausted the ATT buffers (BLE-002), report protocol is not merely unnecessary here but actively destructive. A keyboard that accepts boot protocol may still send its 8-byte report on a report characteristic rather than the boot input, so reports must be routed by length, not by handle."
+  consequence: "Boot protocol is the correct choice for typing on this board, and the report map is never read, which is what keeps BLE-002 from recurring. The cost is that consumer-page keys — volume, media, browser — never arrive, because they exist only on the report-protocol consumer collection. Two things about subscriptions follow, and the second cost a cycle. A keyboard that accepts boot protocol may still send its 8-byte report on a report characteristic rather than the boot input, so reports must be routed by length, not by handle. And subscribing ONLY to the boot input because it exists is wrong: a device can expose Boot Keyboard Input 0x2A22 and never notify on it, sending on a report characteristic instead. The correct rule is to subscribe to the boot input and to every notifying input report, which is what TinyTang does and what this project now does. The old rule looked cheaper and was simply silent for such a device."
   sources:
     - "HID over GATT Profile, HID Protocol Mode 0x2A4E and Boot Keyboard Input Report 0x2A22"
-    - "TinyTang ports/bl616/tang_ble.c hid_setup_reports(): writes boot_protocol = 0 and routes reports by length"
-  verification: "Verified on hardware by both routes: report protocol produced the mbuf drain and dropped link of BLE-002; boot protocol produced 'protocol mode -> boot (0)', one subscribe, and working key reports on the AMOLED console."
+    - "TinyTang ports/bl616/tang_ble.c hid_setup_reports(): writes boot_protocol = 0, subscribes to the boot input and every 0x2A4D report, and routes by length"
+    - "build/esp-hosted/esp_hosted_ng/esp/esp_driver/network_adapter/main/ble_hid.c: subscribe_next(), after the fix"
+  verification: "Verified on hardware by both routes: report protocol produced the mbuf drain and dropped link of BLE-002; boot protocol produced 'protocol mode -> boot (0)' and working key reports on the AMOLED console. Revised 2026-11-09 (core-log entry 11): the 'one subscription instead of six' claim was wrong and is what made the Rii K06 type nothing. Measured with the K06 in LE mode: the old rule subscribed handle 0x0015 only (CCC 0x0016) and no report ever arrived there; subscribing to 0x0015, 0x001a, 0x001e, 0x0025 and 0x002c produced live 8-byte reports on 0x001E and decoded keystrokes. Six serialised subscriptions do not exhaust the mbuf pool -- that was six concurrent ones."
 
 - record_id: BLE-004
   kind: BLE

@@ -193,6 +193,24 @@ The HID host runs in the firmware, not in Linux: the kernel's `CONFIG_BT_HIDP`
 is Bluetooth *Classic* only, HID-over-GATT lives in BlueZ, and BlueZ cannot run
 on this NOMMU board.
 
+**The current keyboard is a Rii K06 combo**, in its Bluetooth LE mode. It
+pairs, encrypts, and types. It exposed one more defect worth knowing about,
+because the failure looked like "connected but no keys" and the cause was a
+subscription rule: the K06 *exposes* the Boot Keyboard Input characteristic
+`0x2A22` and never sends anything on it — its boot-format reports arrive on
+report characteristic `0x001E` instead. The host used to subscribe **only** to
+the boot input when one existed, reasoning that one CCCD is cheaper than six.
+That is wrong for this device and silent when it fails. The rule now is the one
+TinyTang uses on the same hardware: subscribe to the boot input *and* every
+notifying input report, so reports are seen whichever way the device sends them.
+
+```
+hid: connect (0)
+hid: connected, security initiate (0)
+hid: protocol mode -> boot (0)
+hid: subscribed handle 0x0015, 0x001a, 0x001e, 0x0025, 0x002c
+```
+
 Getting there meant five separate defects, each fatal on its own, and the last
 one failed *silently* in a way that looked like success. The whole story,
 including the false positive and why boot protocol rather than report protocol
@@ -373,13 +391,18 @@ the stream was also never compiled, so the device did not exist. Both are
   consumer-page reports that report protocol exposes — and report protocol is
   what exhausted the ATT buffers and broke the link. Adding them back needs a
   second subscription and the report map read, done serially.
-- **No bond is kept, so the keyboard re-pairs every time it reconnects.** The firmware
+- **No bond is kept, so the keyboard re-pairs after every reboot.** The pairing
+  is saved — `blekbd` reports `bond saved (332 bytes)` — but the firmware's
+  load path is unfinished, so the key it stores is never restored. The firmware
   cannot write flash after Linux starts (an NVS write parks the other core,
-  which is running Linux, and aborts). Re-pairing is automatic and takes a
-  fraction of a second; it is only visible as a brief delay.
-  A jffs2-based workaround is half built — export to `/etc/ble-bond.bin` works,
-  the boot-time load does not. See `docs/bluetooth-bond.md`; it is not enabled
-  on the watch.
+  which is running Linux, and aborts).
+  **With the current firmware this is not automatic**: `sm_bonding` is enabled
+  while the load path is unfinished, so after a reboot the keyboard has to be
+  put into pairing mode by hand. That is a regression against the earlier
+  behaviour, where the failed bond simply caused a silent re-pair, and it is
+  the reason the next Bluetooth cycle exists. A jffs2-based workaround is half
+  built — export to `/etc/ble-bond.bin` works, the boot-time load does not. See
+  `docs/bluetooth-bond.md`.
 - **The console is slow to repaint.** Every fbcon drawing op goes straight to
   the panel as one spi-mem op through a 64-byte FIFO, with no DMA and no dirty
   region tracking. Correct first; fast later.

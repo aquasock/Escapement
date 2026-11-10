@@ -328,3 +328,33 @@ The firmware diagnostic channel is now a tool rather than a gap, and it should b
 - User Test: PASS
 
 ---
+
+## 11 COMMIT Unreleased 2026-11-09T17:11:25-07:00
+
+#### Coming From:
+
+Unreleased 6d3c8b3
+
+#### Purpose:
+
+Make the new Rii K06 combo keyboard type on the watch, replacing the Logitech it was developed against.
+
+#### Outcome:
+
+The keyboard now pairs, encrypts and types, and the defect that stopped it was a subscription rule rather than pairing. The K06 exposes the Boot Keyboard Input characteristic 0x2A22, so the firmware set its boot-input flag -- and nothing ever notifies there. Its boot-format reports arrive on report characteristic 0x001E instead, exactly as TinyTang's BLE-019 records for this same unit. The host's rule was to subscribe only to the boot input whenever one existed, on the reasoning that one CCCD is cheaper than six; that rule is wrong for a device which has the characteristic and never uses it, and it fails silently, because the link comes up and only the keys are missing. The fix follows TinyTang's own implementation, which subscribes to the boot input and every notifying 0x2A4D report together "so reports are seen whichever way the device actually sends them". Verified on hardware with the K06 in LE pairing mode: the log shows connect (0), security initiate (0), protocol mode -> boot (0), and subscriptions to handles 0x0015, 0x001a, 0x001e, 0x0025 and 0x002c where the old firmware subscribed to 0x0015 alone, and blekbd then decoded 8-byte boot reports into KEY_Y and KEY_F which the operator confirmed appear on the AMOLED console. The claim in BLE-003 that boot protocol costs "one subscription instead of six" was wrong and is corrected there, along with the fear that six subscriptions would exhaust the mbuf pool: that was six concurrent CCCD writes, and subscribe_next issues one and resumes from its completion callback. A second defect was introduced and caught in this same cycle, and it is recorded because it is a property of the board rather than a slip. To find out whether the K06 was advertising at all, a log line was added to the scan callback for every advertisement. That stopped the network interface coming up: fw_log sends each line as an IPC message over the same shmem link WiFi initialises over, the kernel reported Command[1] timed out and esp_add_network_ifaces failure, and there was no espsta0 and no /dev/esp-log, because the log pipe driver initialises after the step that failed. The failure was self-concealing -- the diagnostic channel died with the network, so the log could not report what killed it. It reproduced on two consecutive boots and was reverted before anything else was tried; the same firmware without the logging restored both immediately. On this board logging is traffic, and the emitter's 40 lines per second is a budget rather than a guarantee. The firmware change is committed locally in build/esp-hosted/esp_hosted_ng, which is a fork of upstream jcmvbkbc/esp-hosted and must never be pushed; the remote is untouched. README was also corrected where it claimed re-pairing was automatic: with sm_bonding enabled and the load path unfinished, the keyboard has to be put into pairing mode by hand after each reboot, which is a regression against the earlier silent re-pair and is now stated rather than glossed. The core-syntax audit passed: the `.ai/` diff was inspected, `.ai/core.md` was not modified, entry 11 was validated against the template with six sections in canonical order, sequential numbering from 10, an ISO-8601 timestamp carrying the America/Phoenix offset, prose-only Outcome and Next Steps, eligible Files Modified, and Status values within the allowed set.
+
+#### Next Steps:
+
+The bond is the obvious next cycle and it is now the only thing standing between this keyboard and being pleasant to use. `blekbd` reports `bond saved (332 bytes)` while the firmware's `bond_load()` is the unfinished half, so the key it stores is never restored and the keyboard must be re-paired by hand after every reboot -- a regression against the previous behaviour, not the original design. TinyTang has a working implementation for this exact problem on comparable silicon, `ports/bl616/tang_ble_bonds.c`: a versioned file with a magic, per-slot records covering the address, key size, flags, LTK and its rand/ediv, and a CRC-32 over the whole thing, which the firmware reads at boot and puts into the host's key table before devices reconnect. That is the reference to follow rather than a design from scratch, and documenting the Escapement equivalent in docs/bluetooth-bond.md as it is built is cheaper than reconstructing it later. Two smaller items are worth clearing first because they are cheap: the K06 also carries a touchpad, which its report map declares as report ID 3 with X, Y and wheel, and the consumer and system collections that would give media keys are declared too -- both are reachable now that every notifying report is subscribed, but neither is decoded. Separately, the tearing root cause in LCD-009 remains open with SPI clock the remaining suspect, and re-measuring the 320x400 frame through the real repaint path to settle the 4.2x disagreement with LCD-005 is still outstanding. BLE media keys, firmware-side bond persistence itself and any wake-from-sleep path remain deferred by user decision.
+
+#### Files Modified:
+
+- README.md
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: PASS
+
+---
