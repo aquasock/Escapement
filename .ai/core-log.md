@@ -1,3 +1,33 @@
+## 24 COMMIT Unreleased 2026-11-10T09:47:12-07:00
+
+#### Coming From:
+
+Unreleased b81ac0f
+
+#### Purpose:
+
+Re-establish the 40 MHz panel state that the restore had rolled back, and leave exactly one qualified image so a recovery no longer has to guess which backup is the right one.
+
+#### Outcome:
+
+The 40 MHz state is back on the board and for the first time there is one image that can be restored without a decision. The kernel was rebuilt from the tree, `build/kernel/linux-7.2.4/arch/xtensa/boot/xipImage`, 2833064 bytes, and written alone to `0x140000`, which is the same kernel-only operation that produced the state on the night of 2026-11-09; it reported `Hash of data verified` in 23.1 seconds and the board came up with `spi_hz` reading 40000000 and both `tbtns` and `blekbd` running, with `/home`, `/etc` and the ROM slot untouched. Two pre-flight checks were made first and both passed: `space_for_vectors` in the firmware ELF is `0x40380000`, matching `CONFIG_VECTORS_ADDR`, so no firmware rebuild or vectors realignment was needed, and the image ends at `0x3F3AA8`, clear of the ROM slot at `0x480000` by 561 KB. The rebuilt kernel differs from the one that was running this morning in exactly 12 bytes, both clusters being the build timestamp, `#1 Tue Nov 10 00:22:04 MST 2026` against `#2 Tue Nov 10 09:37:47 MST 2026`, so it is the same code and not a new build risk. A full 16 MiB backup was then taken to `~/twatch-backup/working-2026-11-10-0940.bin`, sha256 `fd7e5bf9`, and verified three ways rather than by exit status: the hash checks with `sha256sum -c`, the `spi_hz` marker is present in the image, and the kernel region is byte-identical to the `xipImage` that was flashed, with the ROM slot still reading `A5 5F 10 49`. The backup directory was then pruned from 17 images and 259 MB to two images and 33 MB. This cycle also settles why the last three attempts at recovery kept going wrong. There was never a qualified 40 MHz image: the 40 MHz default landed in commit `3feff4f` at 00:29 on 2026-11-10, while the newest full backup, `working-2026-11-10-0023.bin`, was written at 00:23, six minutes earlier, exactly as entry 18 had warned. Every image on the machine was old, which is why restoring any of them returned the panel to 20 MHz and why the only 40 MHz image in existence was the boot-looping dump. All 16 images were checked for the `spi_hz` marker rather than by filename, and that check is the one that should have been run before the first restore. Two of my own errors are recorded because they cost the user time: the looping dump was described as the user's working state and restored, when it was a dump of a device that was already failing, and a `find` used to locate images compared a full-flash dump against a bare kernel image at the same offset, which is meaningless for the bare image. The pruned set keeps `working-2026-11-10-0940.bin` and `twatch-factory-16MB.bin`. The factory image was kept against the stated plan of deleting everything but the qualified image, because checking it showed its `factory` and `rootfs` partitions do not match the qualified backup: the backup carries this project's firmware while that file is the untouched stock state, so it is the one file in the directory that cannot be reproduced. Everything deleted was either reproducible from the qualified image, reproducible from the repository, or a known-bad dump. The core-syntax audit passed: `.ai/core.md` and `.ai/core-syntax.md` were re-read, the complete `.ai/` diff was inspected and contains only this entry, `.ai/core.md` was not modified, and this entry was validated against the template with six sections in canonical order, sequential numbering from 23, an ISO-8601 timestamp carrying the America/Phoenix offset, prose-only Outcome and Next Steps, and Status values within the allowed set.
+
+#### Next Steps:
+
+The board is on the 40 MHz kernel with the qualified image saved, so the emulator work can resume where entry 22 left it. Two changes are pending and both are small: redeploy `tamafb` from `patches/harness/0001-tamafb-rom-in-psram.patch` so the ROM-in-PSRAM arm reaches the hardware, confirming it prints `rom: PSRAM` on a fresh boot and `rom: flash window` once the 512 KB block is gone, which is the fallback that has still never been exercised; and make `tbtns` stand down while the emulator owns the panel, worth about 30 percent for no memory at all. The boot loop from entry 23 remains unexplained and is now uninvestigable from the image side, because the dump it was diagnosed from was deleted as part of this cycle's pruning; if it recurs the first action is a fresh dump before anything is restored. The panel and display items are unchanged: LCD-009's tearing root cause, and the 4.2x disagreement between LCD-005 and LCD-010.
+
+#### Files Modified:
+
+None.
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: PASS
+
+---
+
 ## 23 COMMIT Unreleased 2026-11-10T09:20:41-07:00
 
 #### Coming From:

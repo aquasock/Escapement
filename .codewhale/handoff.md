@@ -1,11 +1,11 @@
-# Handoff — Escapement, 2026-11-10T09:22
+# Handoff — Escapement, 2026-11-10T09:47
 
 Linux 7.2.4 on a T-Watch Ultra (ESP32-S3). Real Linux on the watch's own Xtensa
 cores, not emulated. This file is orientation; verify before acting on it.
 
 Canonical detail lives in `.ai/core-reference.md` (63 records, fourteen topics).
-Project history lives in `.ai/core-log.md` (23 entries; newest first — 23, 22,
-21, 20, 19, 18, 17, then 1 through 16). Do not re-derive what those hold.
+Project history lives in `.ai/core-log.md` (24 entries; newest first — 24, 23,
+22, 21, 20, 19, 18, 17, then 1 through 16). Do not re-derive what those hold.
 
 ## Current objective (verbatim)
 
@@ -17,10 +17,10 @@ persistence, any wake-from-sleep path, and moving the emulator to core 0.
 
 ## Reconstruct (in this order)
 
-1. `git log --oneline -8` — `main` was at `736e11c`, clean and fully pushed,
+1. `git log --oneline -8` — `main` was at `b81ac0f`, clean and fully pushed,
    before the commit carrying this file.
 2. `.ai/core.md` (policy), then `.ai/core-reference.md` (hardware facts — open
-   the record, not the index line), then `.ai/core-log.md` entries 23, 22, 21.
+   the record, not the index line), then `.ai/core-log.md` entries 24, 23, 22.
 3. `git -C build/esp-hosted/esp_hosted_ng branch --show-current` — expect
    `ble-bond-wip`, five local-only commits.
 
@@ -33,20 +33,34 @@ after a reboot; WiFi 10.10.0.15 at ~409 KB/s; three touch bars paint, click and
 emit BTN_0/1/2; the Tamagotchi runs at a true 1.00x from the flash-resident ROM
 at 40 MHz with eight clean full-width bands.
 
-**The watch was restored from a full flash backup at 2026-11-10T09:16** after a
-boot loop. It boots, `buildroot login:` is on the console, ping answers,
-`tbtns` and `blekbd` run. Two rollbacks came with the restore: the panel is back
-at **20 MHz** (the backup predates the 40 MHz kernel) and `/home/tamafb` is the
-old **flash-window** build, so both the 40 MHz kernel and the PSRAM front end
-have to be reflashed/redeployed.
+**The watch is on the 40 MHz kernel as of 2026-11-10T09:40.** `spi_hz` reads
+`40000000`, `tbtns` and `blekbd` run, and `/home` survived because the kernel
+was written alone to `0x140000`. Rebuilt from the tree and flashed; it differs
+from the pre-loop kernel in 12 bytes, all build timestamp.
 
-**The boot loop's cause is NOT established.** The failing flash was dumped to
-`~/twatch-backup/broken-2026-11-10-0858.bin`: `/etc` and the ROM slot are
-byte-identical to the good backup, so it was not `/etc` damage and not the ROM.
-The kernel differs only because the backup is the older 20 MHz build. Treat the
-loop as open. See entry 23.
+**There is now exactly one image worth restoring**, and it is qualified:
 
-Live check: `./scripts/watch-telnet.py 'uptime; /etc/init.d/S48blekbd status'`
+```
+~/twatch-backup/working-2026-11-10-0940.bin    16 MiB, sha256 fd7e5bf9
+~/twatch-backup/twatch-factory-16MB.bin        untouched stock state
+```
+
+Use the first. Do not hunt for others — the directory was pruned from 17 images
+to those two on 2026-11-10, and every older one was 20 MHz.
+
+**Restore command, corrected this session** (the previously documented form was
+wrong and cost an hour):
+
+```sh
+PY=build/idf-tools/python_env/idf5.1_py3.14_env/bin/python
+$PY -m esptool --chip esp32s3 --port /dev/ttyACM0 --baud 921600 \
+    --after no_reset write_flash 0 ~/twatch-backup/working-2026-11-10-0940.bin
+```
+
+`--after no_reset` is not optional: without it esptool resets the board into the
+app at the end, Linux claims the USB-Serial-JTAG port, and every later command
+hangs at `Connecting...`. A *boot-looping* board needs no button because it
+re-enters the ROM bootloader every cycle. See `docs/watch-recovery.md`.
 
 ## Two traps that will cost you a session if missed
 
@@ -105,8 +119,11 @@ counters perturb it.
 
 ## Open items, in the order they are worth doing
 
-- **Move the ROM to PSRAM** — 33.8 percent, small change to the front end, needs
-  a boot-time allocation.
+- **Move the ROM to PSRAM** — 33.8 percent, and the code is written but not on
+  the board: `patches/harness/0001-tamafb-rom-in-psram.patch` applies to
+  `../TamaHarness/portable/tamafb.c`. Rebuild, deploy, then confirm it prints
+  `rom: PSRAM` on a fresh boot and `rom: flash window` once the 512 KB block is
+  gone — that fallback has never once been exercised.
 - **Make `tbtns` stand down while the emulator owns the panel** — ~30 percent,
   needs no memory, same coordination the console loglevel already needs.
 - The block-register interpreter, now re-justified against 6.01x rather than
@@ -118,6 +135,9 @@ counters perturb it.
 - The top-bar status daemon — never started.
 - `/etc/TZ`, `S01hwclock` and `S50tbtns` must be re-installed by hand after any
   **full-image** flash (`scripts/watch-time.sh` covers the first two).
+- **The 2026-11-10 boot loop is unexplained and now harder to investigate** —
+  its dump was pruned. If it recurs, dump the flash *before* restoring anything;
+  that is the only evidence that bounded it last time.
 
 ## Tooling
 
