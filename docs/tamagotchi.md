@@ -279,6 +279,55 @@ switch -- is worth 2-3x, in userspace, with no firmware risk.
 for whoever continues; if it comes out near 80 instead, this port tops out
 around 0.5x and the core-0 design is the only real answer. Recorded as EMU-005.
 
+## Measuring the interpreter: corebench, and what it cannot tell you
+
+`corebench` runs the SPLB32 core with nothing behind it -- no panel, no
+framebuffer, no touch polling -- and reports emulated cycles/s, instructions/s,
+average emulated cycles per instruction and the realtime factor. That makes it
+the instrument for the interpreter itself, as distinct from the emulator as a
+whole, and it is the before/after baseline any interpreter work needs.
+
+It is built by script now, because two hand-built deploys failed for want of
+memory:
+
+```sh
+./scripts/build-corebench.sh              # both variants
+./scripts/build-corebench.sh --selftest   # and run it on the host first
+```
+
+Two variants, both needing a large *contiguous* block (KRN-001), which is why
+they are deployed on a fresh boot:
+
+- `userspace/corebench` -- 601,780 bytes, ROM compiled in, no arguments. The ROM
+  lands in `.rodata`, so the 562,700-byte segment the kernel loads is the one
+  that must be contiguous. This is the shape entry 18 asked for. Note the size:
+  it is ~600 KB, not the ~575 KB that was estimated before it was built.
+- `userspace/corebench-rom` -- 78,364 bytes, takes the ROM as a path argument
+  and `malloc()`s 512 KB. Smaller to transfer, same contiguity requirement, but
+  at malloc time instead of exec time.
+
+```sh
+./scripts/watch-deploy.sh corebench
+./scripts/watch-telnet.py "/home/corebench"
+```
+
+**What it does not do is count native instructions**, and that is precisely
+what EMU-005 needs. The board offers no way to count them: the Xtensa has
+`CCOUNT` for cycles but no retired-instruction counter, there is no PMU on this
+part, and the host has `perf_event_paranoid` at 4 with no `CAP_PERFMON`, so
+`perf stat -e instructions` refuses even for a host build. Cycles per emulated
+instruction are measurable (3676 ns at 240 MHz is about 880 native cycles); the
+instructions inside them are not, because with no cache and PSRAM stalls the IPC
+is low and varies by what the guest is executing.
+
+So the 250 figure stays a hypothesis unless one of these is paid for: weighting
+a static disassembly of `exec_op_sem` by a measured opcode histogram, or running
+the same binary under `qemu-xtensa` with instruction counting. Both are real
+work. The cheaper and arguably better experiment is to skip the count, do the
+block-register rewrite, and measure the resulting instructions/s against this
+baseline -- which answers the question that actually matters ("is there 2-3x
+here?") without first proving the mechanism.
+
 ## Parked: the ~1.5 s wait entering the time screen
 
 Still open, by decision, because it runs fine otherwise.

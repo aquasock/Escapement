@@ -1,3 +1,35 @@
+## 20 COMMIT Unreleased 2026-11-10T07:56:53-07:00
+
+#### Coming From:
+
+Unreleased f7803d2
+
+#### Purpose:
+
+Make corebench, the only instrument that runs the SPLB32 interpreter with no panel behind it, a one-command build and deploy so the interpreter cost that entry 18 left unmeasured can be taken on the next hardware session.
+
+#### Outcome:
+
+`scripts/build-corebench.sh` now cross-compiles the harness's corebench from `../TamaHarness/portable` in two shapes, with the same non-optional `XTENSA_GNU_CONFIG` export as the other userspace builds, and prints each artifact's largest `PT_LOAD` because that segment is what exec must satisfy contiguously on NOMMU. The compiled-in variant is 601,780 bytes with a 562,700-byte load, and the ROM lands in `.rodata` rather than `.bss`, which corrects the ~575 KB figure entry 18 estimated before the build existed; the small variant is 78,364 bytes and takes the ROM as a path argument, `malloc()`ing 512 KB instead. Both were rebuilt from scratch after the first attempt and came back byte-identical, and the host build runs, reporting 454,305 instructions over 40,000,011 emulated cycles at 88.05 emulated cycles per instruction, which matches the shape recorded in TamaHarness's RESULTS-3.md and is the available correctness signal for the sources. One defect was introduced and fixed inside the cycle: the script omitted `rom_embed.c` from the compiled-in variant's source list, and the cross linker did not merely report the undefined `rom_embed_len` but then segfaulted on a BFD assertion, which is worth knowing because it looks like a broken toolchain rather than a missing file. The finding that matters more than the script is negative, and it changes the plan: corebench cannot count native instructions, which is exactly what EMU-005 needs. This board has no retired-instruction counter -- the Xtensa exposes `CCOUNT` for cycles and there is no PMU on the ESP32-S3 -- and the obvious host substitute is also closed, because `perf_event_paranoid` is 4 with no `CAP_PERFMON` so `perf stat -e instructions` refuses, and valgrind is not installed. Native cycles per emulated instruction are measurable and measured, 3676 ns at 240 MHz being about 880 cycles, but the instruction count inside them is not, because with no cache and PSRAM stalls the IPC is low and varies with what the guest executes. `docs/tamagotchi.md` now carries a section stating all of that and naming the two real routes to a count, static disassembly weighted by a measured opcode histogram or a `qemu-xtensa` run with instruction counting, along with the cheaper alternative: skip the count, do the block-register rewrite, and measure instructions/s against this baseline, which answers whether the 2-3x exists without first proving the mechanism. Deployment and user test did not run because the watch is not connected. The core-syntax audit passed: `.ai/core.md` and `.ai/core-syntax.md` were re-read, the complete `.ai/` diff was inspected and contains only this log entry, `.ai/core.md` was not modified, and this entry was validated against the template with six sections in canonical order, sequential numbering from 19, an ISO-8601 timestamp carrying the America/Phoenix offset, prose-only Outcome and Next Steps, and Status values within the allowed set.
+
+#### Next Steps:
+
+The build is ready and the measurement is one command once the watch answers on 10.10.0.15 or enumerates as `/dev/ttyACM*`: deploy on a fresh boot, because both variants need a large contiguous block and the largest free block is 256 KB after a few minutes of uptime against about 850 KB at boot. The user needs to choose how the interpreter question is settled, since the count cannot be taken as originally planned: weighted static disassembly and a `qemu-xtensa` icount run both cost real work, while the block-register rewrite measured against the new baseline costs the same effort as the optimisation itself and answers the question that matters. Until that is decided, nothing else in the emulator thread should start, and the parked ~1.5 s time-screen wait remains the same problem from the other end.
+
+#### Files Modified:
+
+- scripts/build-corebench.sh
+- docs/tamagotchi.md
+- .gitignore
+
+#### Status:
+
+- Build: PASS
+- Deployment: NOT RUN
+- User Test: NOT RUN
+
+---
+
 ## 19 COMMIT Unreleased 2026-11-10T07:54:49-07:00
 
 #### Coming From:

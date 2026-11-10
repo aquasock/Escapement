@@ -23,3 +23,6 @@ scripts/__pycache__/
 userspace/memlat
 userspace/storetest
 userspace/tamafb_*
+# Built by scripts/build-corebench.sh; deploy /home/corebench on the watch.
+userspace/corebench
+userspace/corebench-rom
