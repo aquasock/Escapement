@@ -1,11 +1,11 @@
-# Handoff — Escapement, 2026-11-10T08:38
+# Handoff — Escapement, 2026-11-10T09:22
 
 Linux 7.2.4 on a T-Watch Ultra (ESP32-S3). Real Linux on the watch's own Xtensa
 cores, not emulated. This file is orientation; verify before acting on it.
 
 Canonical detail lives in `.ai/core-reference.md` (63 records, fourteen topics).
-Project history lives in `.ai/core-log.md` (22 entries; newest first — 22, 21,
-20, 19, 18, 17, then 1 through 16). Do not re-derive what those hold.
+Project history lives in `.ai/core-log.md` (23 entries; newest first — 23, 22,
+21, 20, 19, 18, 17, then 1 through 16). Do not re-derive what those hold.
 
 ## Current objective (verbatim)
 
@@ -17,10 +17,10 @@ persistence, any wake-from-sleep path, and moving the emulator to core 0.
 
 ## Reconstruct (in this order)
 
-1. `git log --oneline -8` — `main` was at `99f3d13`, clean and fully pushed,
+1. `git log --oneline -8` — `main` was at `736e11c`, clean and fully pushed,
    before the commit carrying this file.
 2. `.ai/core.md` (policy), then `.ai/core-reference.md` (hardware facts — open
-   the record, not the index line), then `.ai/core-log.md` entries 19, 18, 17.
+   the record, not the index line), then `.ai/core-log.md` entries 23, 22, 21.
 3. `git -C build/esp-hosted/esp_hosted_ng branch --show-current` — expect
    `ble-bond-wip`, five local-only commits.
 
@@ -33,10 +33,18 @@ after a reboot; WiFi 10.10.0.15 at ~409 KB/s; three touch bars paint, click and
 emit BTN_0/1/2; the Tamagotchi runs at a true 1.00x from the flash-resident ROM
 at 40 MHz with eight clean full-width bands.
 
-**The watch is up as of 2026-11-10T08:00**, `/dev/ttyACM0` present and
-`10.10.0.15` answering. It had been up about 9 minutes and the largest free
-contiguous block was already down to 256 KB, so anything needing 512 KB
-contiguous needs a reboot first — check `/proc/buddyinfo` before assuming.
+**The watch was restored from a full flash backup at 2026-11-10T09:16** after a
+boot loop. It boots, `buildroot login:` is on the console, ping answers,
+`tbtns` and `blekbd` run. Two rollbacks came with the restore: the panel is back
+at **20 MHz** (the backup predates the 40 MHz kernel) and `/home/tamafb` is the
+old **flash-window** build, so both the 40 MHz kernel and the PSRAM front end
+have to be reflashed/redeployed.
+
+**The boot loop's cause is NOT established.** The failing flash was dumped to
+`~/twatch-backup/broken-2026-11-10-0858.bin`: `/etc` and the ROM slot are
+byte-identical to the good backup, so it was not `/etc` damage and not the ROM.
+The kernel differs only because the backup is the older 20 MHz build. Treat the
+loop as open. See entry 23.
 
 Live check: `./scripts/watch-telnet.py 'uptime; /etc/init.d/S48blekbd status'`
 

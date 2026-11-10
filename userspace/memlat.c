@@ -83,6 +83,33 @@ static double chase_ctl(uint8_t *buf, unsigned bits, long iters) {
     return (t1 - t0) * 1e9 / iters;
 }
 
+/* Sequential streaming read: walk the region in order, summing bytes. This is
+ * the pattern a fetch-ahead burst engine likes, and it is the complement of the
+ * dependent chain above. Comparing the two separates "the bus is wide and
+ * bursting" from "the latency to a random address is long", which are different
+ * questions and are easy to conflate. */
+static double stream_psram(uint8_t *b, size_t n, long iters) {
+    uint32_t s = 0;
+    double t0 = now_s();
+    for (long k = 0; k < iters; k++) {
+        for (size_t i = 0; i < n; i++) s += b[i];
+    }
+    double t1 = now_s();
+    sink = s;
+    return (t1 - t0) * 1e9 / (double)(iters * (long)n);
+}
+
+static double stream_flash(const volatile uint8_t *rom, size_t n, long iters) {
+    uint32_t s = 0;
+    double t0 = now_s();
+    for (long k = 0; k < iters; k++) {
+        for (size_t i = 0; i < n; i++) s += rom[i];
+    }
+    double t1 = now_s();
+    sink = s;
+    return (t1 - t0) * 1e9 / (double)(iters * (long)n);
+}
+
 int main(void) {
     static uint8_t small[3000];              /* static: same segment as the cpu struct */
     uint8_t *big = malloc(1 << 16);
@@ -121,6 +148,14 @@ int main(void) {
     printf("control,  same arithmetic on PSRAM   : %.2f ns  (16 KB)\n", chase_ctl(ctl, 14, 2000000));
     fflush(stdout);
     printf("dependent load,  16 KB flash window : %.2f ns\n", chase_flash(rom, 14, 2000000));
+    fflush(stdout);
+
+    /* Byte-at-a-time streaming over the same 16 KB, for each memory. */
+    printf("\nsequential streaming, 16 KB:\n");
+    fflush(stdout);
+    printf("  PSRAM   : %6.2f ns/byte\n", stream_psram(ctl, 16384, 2000));
+    fflush(stdout);
+    printf("  flash   : %6.2f ns/byte\n", stream_flash(rom, 16384, 2000));
     fflush(stdout);
     return 0;
 }

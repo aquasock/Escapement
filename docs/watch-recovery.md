@@ -14,9 +14,35 @@ over the USB port, about three and a half minutes:
 Recovery then costs one write of a file this machine already holds:
 
 ```sh
-esptool --chip esp32s3 --port /dev/ttyACM0 --baud 921600 \
-    write_flash 0 0x1000000 ~/twatch-backup/working-DATE.bin
+PY=build/idf-tools/python_env/idf5.1_py3.14_env/bin/python
+$PY -m esptool --chip esp32s3 --port /dev/ttyACM0 --baud 921600 \
+    --after no_reset write_flash 0 ~/twatch-backup/working-DATE.bin
 ```
+
+**Two details in that command are load-bearing, and both were learned by
+getting them wrong on 2026-11-10.**
+
+`write_flash` takes `<address> <filename>` pairs; there is no length argument.
+The form previously documented here — `write_flash 0 0x1000000 <file>` — looks
+like it means "write 16 MiB at offset 0", but esptool 4.13 reads `0x1000000` as
+a second filename and dies with `[Errno 2] No such file or directory:
+'0x1000000'` before touching the flash. The 16 MiB in the backup filename is the
+length; the command does not take one.
+
+**`--after no_reset` is not optional when you need more than one command in a
+session.** By default esptool ends by resetting the board, which boots it into
+the app. Linux then claims the USB-Serial-JTAG port (SOC-003) and esptool can no
+longer drive it, so the next command sits at `Connecting...` forever. Every
+successful esptool command therefore locks itself out unless it ends with
+`--after no_reset`. Holding the board in boot mode does not help by itself —
+the reset at the end of the *previous* command is what does the damage.
+
+Confirm the write before you trust it. esptool prints `Hash of data verified`
+when the data it read back matches what it wrote, which is the only proof that
+the 16 MiB landed; a write whose output was not captured is not a verified
+write. After that, `--after hard_reset chip_id` (or a power cycle) starts the
+board, and a buildroot login prompt on the console is the real end of the
+recovery.
 
 ## Why a kernel backup is not enough
 

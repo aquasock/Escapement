@@ -1,0 +1,134 @@
+From: Escapement
+Subject: [PATCH] tamafb: put the ROM in PSRAM, falling back to the flash window
+
+The Tamagotchi front end read its 512 KB ROM straight out of the memory-mapped
+flash window at 0x42480000. That costs no RAM, which is why it was chosen: a
+512 KB contiguous allocation exists only in the first minutes after boot
+(KRN-004). But a read through that window is not cheap. Measured on the watch
+2026-11-10 (EMU-008, EMU-009):
+
+    dependent read, PSRAM        50.6 - 53.4 ns
+    dependent read, flash window 737 - 1057 ns
+    sequential stream, PSRAM     46.4 ns/byte
+    sequential stream, flash     1046.5 ns/byte
+
+and end to end, with the touch daemon stopped:
+
+    ROM in flash window   204033 emulated instructions/s   4.49x realtime
+    ROM in PSRAM          273098 emulated instructions/s   6.01x realtime
+
+a gain of 33.8 percent, or 1239 ns saved per emulated instruction.
+
+So try PSRAM first and fall back to the window. Falling back rather than
+choosing at build time means a boot-time start gets the fast path, a late
+start still runs, and nothing upstream has to know which arm it got. The
+chosen arm is printed, because a silent 33.8 percent regression is exactly
+the kind of thing that gets diagnosed as something else later.
+
+The ROM's four-byte signature is checked before the copy is trusted; a
+truncated or wrong file would otherwise be emulated as garbage with no
+error. A fifth argument of 0 leaves the path at /home/rom.bin, and argv[7]
+overrides it.
+
+Apply with:  git apply --directory=. -p1 <this patch>
+from a TamaHarness checkout, at the portable/ parent.
+
+--- a/portable/tamafb.c
++++ b/portable/tamafb.c
+@@ -23,6 +23,7 @@
+ #include <stdio.h>
+ #include <stdlib.h>
+ #include <string.h>
++#include <errno.h>
+ #include <time.h>
+ #include <fcntl.h>
+ #include <unistd.h>
+@@ -452,24 +453,76 @@
+ 
+     const uint8_t *rom;
+     size_t romlen;
++    int rom_is_heap = 0;
+ #if defined(ROM_FLASH_ADDR)
+     /*
+-     * The ROM already sits in flash and is readable through the memory-mapped
+-     * window, so no allocation is made at all.
++     * Two ways to give the core its ROM, tried in order of speed rather than
++     * chosen at build time.
+      *
+-     * This is the mode the T-Watch Ultra uses. On that board the kernel maps
+-     * the whole 16 MiB of flash at a fixed address once it starts, the ROM is
+-     * written to an unused slot past the kernel image, and this pointer is the
+-     * window address of that slot. It costs zero RAM and, more importantly,
+-     * zero *contiguous* RAM -- a 512 KB allocation succeeds on a fresh boot and
+-     * then fails for the rest of the session as memory fragments, which made
+-     * the emulator start exactly once per boot.
++     * 1. PSRAM. A 512 KB copy in ordinary RAM. Measured 2026-11-10: 273098
++     *    emulated instructions/s against 204033 from the flash window, a gain
++     *    of 33.8 percent, because a read through the window costs about 1 us
++     *    per byte and a read from PSRAM about 50 ns (EMU-008, EMU-009).
+      *
+-     * The core borrows this pointer and never writes through it, which is why
+-     * reading straight out of flash is safe.
++     *    The catch is contiguity (KRN-001, KRN-004). The 512 KB run exists only
++     *    in the first minutes after boot and a single such allocation consumes
++     *    it, so this arm succeeds at most once per boot and only if the
++     *    emulator starts early.
++     *
++     * 2. The flash window at ROM_FLASH_ADDR. Costs no RAM and works at any
++     *    uptime, at 33.8 percent slower. This is the fallback, not the default.
++     *
++     * Trying PSRAM first and falling back is strictly better than picking one
++     * at build time: a boot-time start gets the fast path, a late start still
++     * runs, and nothing upstream has to know which one it got. The chosen arm is
++     * printed, because a silent 33.8 percent regression is exactly the kind of
++     * thing that gets diagnosed as something else later.
+      */
+-    rom = (const uint8_t *)(ROM_FLASH_ADDR);
++    rom = NULL;
+     romlen = SPLB32_ROM_BYTES;
++
++    const char *rom_path = (argc > 7) ? argv[7] : "/home/rom.bin";
++    uint8_t *heap_rom = (uint8_t *)malloc(SPLB32_ROM_BYTES);
++    if (heap_rom) {
++        FILE *rf = fopen(rom_path, "rb");
++        if (rf) {
++            size_t got = fread(heap_rom, 1, SPLB32_ROM_BYTES, rf);
++            fclose(rf);
++            /*
++             * Check the signature before trusting the contents. A truncated or
++             * wrong file would otherwise be emulated as garbage with no error,
++             * and the only symptom would be a pet that behaves strangely.
++             * A5 5F 10 49 is the first four bytes of the V3 ROM, the same test
++             * memlat uses on the flash window.
++             */
++            if (got == SPLB32_ROM_BYTES &&
++                heap_rom[0] == 0xA5 && heap_rom[1] == 0x5F &&
++                heap_rom[2] == 0x10 && heap_rom[3] == 0x49) {
++                rom = heap_rom;
++                rom_is_heap = 1;
++            } else {
++                fprintf(stderr, "rom: %s is not a usable V3 ROM (%zu bytes, "
++                        "first %02X %02X %02X %02X); falling back to flash\n",
++                        rom_path, got, heap_rom[0], heap_rom[1],
++                        heap_rom[2], heap_rom[3]);
++            }
++        } else {
++            fprintf(stderr, "rom: %s: %s; falling back to flash\n",
++                    rom_path, strerror(errno));
++        }
++        if (!rom_is_heap) { free(heap_rom); heap_rom = NULL; }
++    } else {
++        fprintf(stderr, "rom: 512 KB PSRAM allocation refused (largest "
++                "contiguous block too small); falling back to flash, "
++                "33.8%% slower\n");
++    }
++
++    if (!rom) {
++        rom = (const uint8_t *)(ROM_FLASH_ADDR);
++        romlen = SPLB32_ROM_BYTES;
++    }
++    printf("rom: %s\n", rom_is_heap ? "PSRAM" : "flash window");
++    fflush(stdout);
+ #elif defined(EMBED_ROM)
+     rom = rom_embed;
+     romlen = rom_embed_len;

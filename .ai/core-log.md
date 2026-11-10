@@ -1,3 +1,35 @@
+## 23 COMMIT Unreleased 2026-11-10T09:20:41-07:00
+
+#### Coming From:
+
+Unreleased 736e11c
+
+#### Purpose:
+
+Restore the watch from its full flash backup after it entered a boot loop, and record what the recovery cost so the next one is cheaper.
+
+#### Outcome:
+
+The board is recovered and verified on hardware, but the cause of the loop is not established and this entry says so rather than guessing. The failure appeared as an endless reset at exactly `Starting touch buttons:` on every cycle, with `rst:0xc (RTC_SW_CPU_RST)` and `Saved PC:0x403777fd`, while the USB console was still readable and userspace answered nothing; it followed a `sync; reboot` issued after a session in which the WiFi link had already wedged and a 255 KB `tamafb` had been deployed. Before overwriting anything the failing image was dumped to `~/twatch-backup/broken-2026-11-10-0858.bin`, which allows the cause to be bounded even though it cannot be named. Compared against the restored backup, `etc` is byte-identical and the ROM slot at `0x480000` is byte-identical, so this was not `/etc` damage, which is the failure mode the recovery doctrine warns about, and not a damaged ROM. The two partitions that differ are `linux` and `home`. The `linux` difference is fully explained and is not a fault: the running kernel is byte-identical to this repository's `build/kernel/linux-7.2.4/arch/xtensa/boot/xipImage`, the 40 MHz build, while the backup's kernel is the older 20 MHz one, exactly as entry 18 recorded when it warned that restoring this backup returns the panel to 20 MHz. The `home` difference is jffs2, which is log-structured and changes on any write. So nothing in persistent storage accounts for the loop, which leaves a transient runtime or firmware condition as the remaining explanation and no instrument yet pointed at it. The restore itself took three attempts and the failures were the useful part. The documented command, `write_flash 0 0x1000000 <file>`, is wrong for esptool 4.13: `write_flash` takes `<address> <filename>` pairs with no length argument, so `0x1000000` was read as a second filename and esptool died with `[Errno 2] No such file or directory: '0x1000000'` before touching flash. A second attempt ran without `--after no_reset` and reported success, but its output was not captured and the reset esptool performs by default had already booted the board out of download mode, after which Linux owned the USB-Serial-JTAG port (SOC-003) and every later command sat at `Connecting...` forever; that is why holding the board in boot mode did not appear to help, because the lockout came from the previous command's own reset. The write that worked was `--after no_reset write_flash 0 <backup>` against a board held in boot mode, and it reported `Hash of data verified` over all 16777216 bytes in 122.9 seconds, which is the only evidence that counts. `docs/watch-recovery.md` now carries the corrected command and both traps. The measurement work from the previous cycle was preserved rather than lost with the reflash: the Tamagotchi front end's PSRAM change lives outside this repository in `../TamaHarness`, so it was captured as `patches/harness/0001-tamafb-rom-in-psram.patch`, checked by applying it to a scratch checkout of the original and confirming the result is byte-identical to the working tree. The board came back on the older kernel with `buildroot login:` on the console, ping answering, `tbtns` and `blekbd` both running, and a 1 MB contiguous block free. Two consequences are stated rather than left implicit: the deployed `tamafb` is again the old 249112-byte flash-window build because the backup predates the deploy, so the 33.8 percent is not on the board until it is rebuilt and redeployed from the preserved patch; and the panel is back at 20 MHz with no `spi_hz` parameter in `/sys/module/co5300`, so the 40 MHz kernel has to be reflashed if that clock is wanted. The core-syntax audit passed: `.ai/core.md` and `.ai/core-syntax.md` were re-read, the complete `.ai/` diff was inspected, `.ai/core.md` was not modified, and this entry was validated against the template with six sections in canonical order, sequential numbering from 22, an ISO-8601 timestamp carrying the America/Phoenix offset, prose-only Outcome and Next Steps, and Status values within the allowed set.
+
+#### Next Steps:
+
+Three things, in order. Reflash the 40 MHz kernel to `0x140000` from `build/kernel/linux-7.2.4/arch/xtensa/boot/xipImage`, which is verified byte-identical to what was running before the loop, because the restore rolled it back to 20 MHz. Then rebuild and redeploy `tamafb` from `patches/harness/0001-tamafb-rom-in-psram.patch` so the ROM-in-PSRAM arm is actually on the board, and confirm it prints `rom: PSRAM` on a fresh boot and `rom: flash window` once the block is gone, which is the fallback path this cycle never got to exercise. The boot loop itself is still unexplained and should not be considered closed: the next occurrence should be caught with the flash dumped before any restore, as this one was, and with the console captured across a whole cycle, because the evidence that would convict a cause is what happens in the last second before `rst:0xc`, which this cycle saw only as the reset itself. A full-image backup should be taken before the kernel reflash. `scripts/watch-backup.sh` was checked against the same esptool and is correct as it stands, because `read_flash` takes three arguments -- address, size, filename -- and the script passes all three, so the defect was confined to the documented write command and not to the tooling.
+
+#### Files Modified:
+
+- docs/watch-recovery.md
+- userspace/memlat.c
+- patches/harness/0001-tamafb-rom-in-psram.patch
+
+#### Status:
+
+- Build: N/A
+- Deployment: PASS
+- User Test: PASS
+
+---
+
 ## 22 COMMIT Unreleased 2026-11-10T08:37:52-07:00
 
 #### Coming From:
