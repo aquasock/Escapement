@@ -1,3 +1,34 @@
+## 43 COMMIT Unreleased 2026-11-10T16:36:09-07:00
+
+#### Coming From:
+
+Unreleased a253f61
+
+#### Purpose:
+
+Benchmark the V3 emulator against the real ROM rather than a synthetic workload, and settle the claim that the panel stops keeping up at four frames per second.
+
+#### Outcome:
+
+The emulator has six to seven times the headroom it needs and the four-frame ceiling was wrong. Measured with `tamafb` running the real V3 ROM, flat out and headless, after a reboot so the 512 KB PSRAM block was fresh: **513765 instructions/s with the ROM in PSRAM** (29.67 M cycles/s, 7.42x realtime) and **408300 with it in the flash window** (23.58 M cycles/s, 5.90x). Both arms retired exactly 692707 instructions over 40000000 emulated cycles, 57.74 cycles per instruction, and every run landed within 0.6 percent across two boots each, so the comparison is like for like. With the display running at 10 fps and paced by the `speed_pct` argument the loop held 1.01x at 100 percent, 1.50x at 150 percent and **2.01x at 200 percent**, the tool's ceiling, using about half its 100 ms frame budget at the top of that range. Frame rate is not a limit either: 1.00-1.01x held at 2, 4, 8 and 16 fps. A 20 s run at 10 fps drew 200 frames, repainted 40 and logged no stalls. The documentation previously stated "4 fps gives ~1.0x realtime; the panel is the limit", which was true of an earlier build with the touch daemon competing for the CPU and is now false; it has been replaced rather than left to mislead. The more useful consequence is what this rules out. Since the emulator is paced to 1.00x and has six times the headroom to honour it, neither the display refresh rate nor the ROM's location is what makes the Tamagotchi feel slow, and optimising either would buy nothing for realtime play. The remaining slow path is the specific guest stall in EMU-002 -- 580 ms of ROM computation with no display-RAM change -- which is untouched by this cycle and remains the only open emulator question. This cycle also records a measurement trap that has now bitten twice. The new figures do not reproduce the 204033 and 273098 instructions/s previously recorded for the emulator, and **neither set is wrong**: those came from `corebench`, which runs a synthetic workload, while these come from `tamafb`, which runs the real ROM and spends more of its steps asleep -- and a sleep step is cheap. The PSRAM delta differs for the same reason, +25.6 percent here against the recorded +33.8, because the gain depends on what fraction of the workload is ROM reads. The corollary is written into both the record and the document: compare `corebench` against `corebench` and `tamafb` against `tamafb`, never across the two. A second smaller trap was confirmed in passing: the 512 KB PSRAM allocation succeeds exactly once per boot, so any multi-run sweep silently measures the flash-window arm after the first run unless it reboots between arms -- which is why the bench numbers were taken one per boot and the reason is stated with them.
+
+#### Next Steps:
+
+The only remaining emulator question is EMU-002, and this cycle narrows what it is. It is not throughput, not the panel, not the frame rate and not the ROM's location, which leaves the guest's own 580 ms of computation during the time-screen transition. EMU-002 names the next measurement precisely: read the stall log against a press on the fixed-point build to see what the guest is executing in that window. That is now cheap to run -- touch is interrupt driven, the stall log already exists in `tamafb`, and a press on the middle bar is the only input needed -- but it requires a physical press, so it is a cycle for when the operator is available. Worth noting that the unexplained part is the **panel figure**: 43-135 ms per frame during a stall against 9.5 ms in the benchmark, a tenfold gap with no established cause, which the no-stall result above does not explain either. The deferred items are unchanged and none should be started without asking: BLE media keys, the Rii K06 touchpad and Logitech keyboard, firmware-side BLE bond persistence, wake-from-sleep, and moving the Tamagotchi emulator to core 0.
+
+#### Files Modified:
+
+- docs/tamagotchi.md
+- .ai/core-reference.md
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: PASS
+
+---
+
 ## 42 COMMIT Unreleased 2026-11-10T16:26:05-07:00
 
 #### Coming From:

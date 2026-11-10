@@ -1,10 +1,10 @@
-# Handoff — Escapement, 2026-11-10T16:26
+# Handoff — Escapement, 2026-11-10T16:37
 
 Linux 7.2.4 on a T-Watch Ultra (ESP32-S3). Real Linux on the watch's own Xtensa
 cores, not emulated. This file is orientation; verify before acting on it.
 
-Canonical detail lives in `.ai/core-reference.md` (76 records, fourteen topics).
-Project history lives in `.ai/core-log.md` (42 entries; newest first — 42, 41, 40, 39, 38, 37, 36, 35, 34, 33,
+Canonical detail lives in `.ai/core-reference.md` (77 records, fourteen topics).
+Project history lives in `.ai/core-log.md` (43 entries; newest first — 43, 42, 41, 40, 39, 38, 37, 36, 35, 34, 33,
 31, 30, 29, 28, 27, 26, 25, 24, 23, 22, 21, 20, 19, 18, 17, then 1 through 16).
 Do not re-derive what those hold.
 
@@ -18,10 +18,10 @@ persistence, any wake-from-sleep path, and moving the emulator to core 0.
 
 ## Reconstruct (in this order)
 
-1. `git log --oneline -8` — `main` was at `614c633`, clean and fully pushed,
+1. `git log --oneline -8` — `main` was at `a253f61`, clean and fully pushed,
    before the commit carrying this file.
 2. `.ai/core.md` (policy), then `.ai/core-reference.md` (hardware facts — open
-   the record, not the index line), then `.ai/core-log.md` entries 42, 41, 40.
+   the record, not the index line), then `.ai/core-log.md` entries 43, 42, 41.
 3. `git -C build/esp-hosted/esp_hosted_ng branch --show-current` — expect
    `ble-bond-wip`, five local-only commits.
 
@@ -165,6 +165,35 @@ every time touch was read, and what the old daemon hit. Recovery is now on both
 paths, gated on the bus actually being busy so an absent device still NACKs
 cheaply. Verified: 1687 report reads, 11 genuine NACKs, 11 recoveries, bus still
 healthy afterwards.
+
+## The emulator — measured, and faster than the docs said
+
+`tamafb` runs the real V3 ROM and has a bench mode. Headless, flat out, with a
+fresh PSRAM block (one reboot per measurement — see below):
+
+```
+ROM in PSRAM         513765 instr/s   29.67 M cyc/s   7.42x realtime
+ROM in flash         408300 instr/s   23.58 M cyc/s   5.90x
+```
+
+With the display at 10 fps and paced by `speed_pct` (argv 6): 1.01x at 100%,
+1.50x at 150%, **2.01x at 200%** — the tool's ceiling, at about half the 100 ms
+frame budget. Holds 1.00–1.01x at 2/4/8/16 fps. A 20 s run logged **no stalls**.
+
+**Do not compare these with the 204k/273k figures in the reference.** Those are
+`corebench`, which runs a synthetic workload; these are the real ROM, which
+spends more steps asleep and sleep steps are cheap. Both number sets are right.
+Compare corebench to corebench, tamafb to tamafb, never across. See EMU-011.
+
+The old claim "4 fps gives ~1.0x; the panel is the limit" is **retired** — it
+was true with the touch daemon competing and is false now.
+
+**What is left: EMU-002**, the ~1.5 s time-screen entry. Not throughput, not the
+panel, not the frame rate, not the ROM's location — those are all excluded now.
+It is 580 ms of guest computation plus an unexplained 10x panel figure (43–135 ms
+per stall frame against 9.5 ms benchmarked). EMU-002 names the next measurement:
+read the stall log against a press. Needs a physical press, so wait for the
+operator.
 
 ## One known open defect, not a regression
 

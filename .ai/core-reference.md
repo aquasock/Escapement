@@ -147,6 +147,7 @@ Topic IDs are the `record_id` prefix. An entry reserves a name; it does not clai
 | How fast is a read from the flash window, compared with PSRAM? | EMU | EMU-008 |
 | Should the emulator's ROM live in flash or PSRAM? | EMU | EMU-009 |
 | Why is the emulator slower with the touch buttons running? | EMU | EMU-010 |
+| How fast does the emulator actually run the real ROM? | EMU | EMU-011 |
 | Why does a 512 KB allocation work once and then fail? | KERNEL | KRN-004 |
 | Why not put the hardware behind the RTOS on core 0? | KERNEL | KRN-005 |
 | Why is the hardware I2C that slow? | KERNEL | KRN-006 |
@@ -1332,6 +1333,21 @@ EMU-010: "The touch daemon costs the emulator about 30 percent of its throughput
     - "userspace/tbtns.c: the poll interval and the read-acknowledge sequence"
     - "TCH-003 for why the polls NAK"
   verification: "Measured on hardware 2026-11-10 as a same-boot A/B: three runs with the daemon running at 140491/141968/142949, then four runs with it stopped at 203123/202019/203950/204642, with the binary hash unchanged and the instruction count identical at 454305. The effect was then confirmed indirectly on two further boots, where the flash baseline was 204k only once the daemon had been stopped."
+
+- record_id: EMU-011
+  kind: EMU
+  topic_id: EMU
+  status: VERIFIED
+  verified_date: 2026-11-10
+  title: "The emulator has 5.9-7.4x realtime headroom and holds 1.00x at every frame rate tested, so neither the panel nor the interpreter limits it"
+  statement: "Measured with tamafb running the real V3 ROM after a reboot so the 512 KB PSRAM block was fresh, flat out and headless: 513765 instructions/s with the ROM in PSRAM (29.67 M cycles/s, 7.42x realtime) and 408300 with the ROM in the flash window (23.58 M cycles/s, 5.90x). Both arms retired exactly 692707 instructions over 40000000 emulated cycles, 57.74 cycles per instruction, with every run within 0.6 percent across two boots each. With the display running at 10 fps and paced by the speed_pct argument, the loop held 1.01x at 100 percent, 1.50x at 150 percent and 2.01x at 200 percent -- the tool's ceiling -- using about half its 100 ms frame budget at the top of that range. Frame rate is not a limit either: 1.00-1.01x held at 2, 4, 8 and 16 fps. A 20 s run at 10 fps drew 200 frames, repainted 40 and logged no stalls."
+  consequence: "This retires the claim that four frames per second is where the panel stops keeping up. The emulator is paced to 1.00x by design and has between six and seven times the headroom needed to honour that, so for realtime play the display refresh rate and the ROM's location are not bottlenecks -- a high frame rate costs correctness nothing and only shortens how long a change takes to appear. That is worth knowing before optimising anything: the remaining slow path is not throughput but the specific guest stall recorded in EMU-002, where the ROM computes for 580 ms without touching display RAM. The second consequence is a measurement-hygiene point that has now bitten twice: these figures do not reproduce the 204033 and 273098 instructions/s recorded for corebench, and neither the newer numbers nor the older ones are wrong. corebench runs a synthetic workload and tamafb runs the real ROM, which spends more of its steps asleep, and a sleep step is cheap; comparability also breaks between the two because the PSRAM gain depends on what fraction of the workload is ROM reads, which is why the delta here is +25.6 percent against corebench's +33.8. Compare corebench against corebench and tamafb against tamafb, never across."
+  sources:
+    - "TamaHarness/portable/tamafb.c: the bench mode at argv[4], which runs 40000000 emulated cycles flat out, and the speed_pct pacing at argv[6]"
+    - "on the watch: ./tamafb 10 4 0 1 (bench), ./tamafb 6 <fps> 0 0 (display sweep), ./tamafb 12 10 0 0 0 <speed_pct>"
+    - "KRN-004 for why the 512 KB PSRAM block is a one-shot allocation per boot and why later runs fall back to flash"
+    - "EMU-002 for the stall that is still open, and EMU-009 for the corebench PSRAM figure this deliberately does not overwrite"
+  verification: "Measured on hardware 2026-11-10 with the touch daemon retired, so no polling competes with the run. Bench: PSRAM 511711 and 513765 on two separate boots, flash 409532 and 407079 on one boot, both arms retiring an identical 692707 instructions. Display sweep at 2/4/8/16 fps held 1.00-1.01x. Speed ramp at 100/150/200 percent held 1.01/1.50/2.01x with 120 frames drawn at each. A 20 s, 10 fps run logged zero stalls."
 ```
 
 ---

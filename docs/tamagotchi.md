@@ -13,10 +13,17 @@ authors. This document records what it takes to run it *here*.
 ```
 ROM            512 KB, raw in flash at 0x480000
                read from userspace at 0x42480000, costing zero RAM
-tamafb         cross-compiled, ~220 KB static, bss ~35 KB
+               or moved to a 512 KB PSRAM block, +26% and one shot per boot
+tamafb         cross-compiled, ~250 KB static, bss ~35 KB
 display        320x400 RGB565 via banded pwrite() to /dev/fb0
-rate           4 fps gives ~1.0x realtime; the panel is the limit
+rate           paced to 1.00x; measured headroom is 5.9x (flash) / 7.4x (PSRAM)
 ```
+
+The rate line used to read "4 fps gives ~1.0x realtime; the panel is the limit".
+That is no longer true and the measurements below replace it: the emulator holds
+1.00x at every frame rate tested up to 16 fps, and sustains **2.01x** at its
+ceiling, so for realtime play neither the panel nor the interpreter is the
+limit. See EMU-011.
 
 ## Why the ROM lives in flash
 
@@ -333,6 +340,48 @@ access. Keeping guest registers, flags and PC in host variables across a decoded
 block -- instead of reloading each field per access, in handlers spread across a
 6796-instruction switch -- is therefore the right lever, in userspace, with no
 firmware risk. Recorded as EMU-005 and EMU-006.
+
+## The emulator's real speed, measured with the real ROM
+
+`corebench` prices the interpreter against a synthetic workload. `tamafb` runs
+**the actual V3 ROM**, so its figure is the one that describes the watch running
+the Tamagotchi rather than an interpreter benchmark. Measured 2026-11-10, three
+runs, after a reboot so the 512 KB PSRAM block was fresh:
+
+```
+headless, flat out            instr/s   cycles/s    vs 4 MHz
+  ROM in PSRAM                 513765   29.67 M     7.42x
+  ROM in flash window          408300   23.58 M     5.90x
+                              +25.6% for PSRAM
+```
+
+Both arms retired exactly 692707 instructions over 40000000 emulated cycles
+(57.74 cycles per instruction), so the comparison is like for like. Every run of
+both arms landed within 0.6 percent, across two boots each.
+
+**This does not reproduce the +33.8 percent figure above, and both numbers are
+right.** The gain from a PSRAM-resident ROM depends on what fraction of the
+workload is ROM reads, and `corebench`'s synthetic loop is not the real ROM. The
+flash figure here also reads about twice the 204033 recorded earlier, which is
+the same effect in the other direction: a real-ROM workload spends more of its
+steps asleep, and a sleep step is cheap, so instructions per second rise without
+the interpreter having changed. Compare like with like -- corebench against
+corebench, tamafb against tamafb -- and never across the two.
+
+With the display running, and paced by `speed_pct` (argv 6) rather than by fps:
+
+```
+fps 10, ROM in flash window
+  speed 100%   realtime 1.01x   per frame: emu 17.3  render 2.6  panel  6.1 ms
+  speed 150%   realtime 1.50x   per frame: emu 28.1  render 4.3  panel  9.7 ms
+  speed 200%   realtime 2.01x   per frame: emu 34.4  render 5.0  panel 11.7 ms
+```
+
+Even at the tool's 200 percent ceiling the loop uses about half its 100 ms
+frame budget, so the ceiling is higher than the tool can ask for. Frame rate is
+not the limit either: 1.00-1.01x held at 2, 4, 8 and 16 fps (4.31 M, 4.15 M,
+4.05 M, 4.03 M cycles/s). A 20 s run at 10 fps drew 200 frames, repainted 40
+and logged **no stalls**. Recorded as EMU-011.
 
 ## Measuring the interpreter: corebench, measured
 
