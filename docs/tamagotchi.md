@@ -448,27 +448,50 @@ Next thing to measure, if it is picked up again: what the guest is actually
 doing in those 580 ms. The stall log splits the time but has not yet been read
 against a press on the fixed-point build.
 
-## The touch daemon costs it a third of its speed
+## The touch daemon costs it a third of its speed, and now stands down
 
 Measured 2026-11-10, same boot, same binary:
 
 ```
-S50tbtns running   141k instructions/s   load 1.37
-S50tbtns stopped   204k instructions/s   load 0.59
+S50tbtns polling   134,496 instructions/s
+S50tbtns stopped   206,091 instructions/s
 ```
 
-**About 30 percent**, or 42 percent more throughput without it. The daemon polls
-the CST9217 every 60 ms across the bit-banged I2C bus, and each poll is a
-15-byte transfer that frequently NAKs, which also makes `i2c-gpio` print at
-KERN_ERR — so the cost is the bus work and the console traffic behind it, not
-the cadence.
+**34.7 percent**, or 53 percent more throughput without it. The arithmetic says
+why rather than it being a mystery: one touch read costs about 3957 us on this
+bit-banged I2C bus (TCH-003) and the daemon polls every 15 ms, so roughly a
+quarter of the core's time goes into waiting out bus traffic that is nearly
+always going to report "nothing new".
 
-This is worth knowing for two reasons. Anything measuring the emulator must stop
-the daemon first or it benchmarks the contention: the same binary read 204k
-before a reboot and 141k after, and the difference was the daemon, not the
-reboot, which cost a wrong conclusion before it was caught. And the fix is the
-same coordination a fullscreen app already needs for the console — the daemon
-should stand down while something owns the panel.
+Both of those constants are right for what they were chosen for — 15 ms buys tap
+latency and 3957 us is the hardware — so the fix is not to poll slower. **The
+daemon now stands down while a fullscreen app owns the panel.** It reads
+`/var/run/tamafb.pid`, which `run-tama.sh` already writes, validates that pid
+against `/proc/<pid>/comm`, and sleeps in a 200 ms loop while a process named
+`tamafb` is alive.
+
+The validation is not paranoia. Pids are reused and the file survives a crash, so
+trusting it would let a stale entry turn the buttons off permanently and
+silently — a worse bug than the one being fixed. It also caught a real case
+during testing: a launch wrapped in a shell has `comm` = `bash`, not `tamafb`,
+and is correctly ignored.
+
+Standing down forces a release first, so a finger down at the moment the app
+starts cannot leave a key stuck, since nothing below runs to time it out.
+
+Verified on hardware, both transitions in the daemon log:
+
+```
+tbtns: standing down for tamafb
+tbtns: resuming, tamafb has exited
+```
+
+Two things to keep in mind. Anything *measuring* the emulator must account for
+this: the same binary read 204k before a reboot and 141k after, and the
+difference was the daemon, not the reboot, which produced a wrong conclusion
+before it was caught. And a run of `tamafb` started by hand without a pidfile
+does not trigger the stand-down — only `run-tama.sh`, or anything else that
+writes the file, does.
 
 ## Still to do
 
@@ -481,8 +504,15 @@ should stand down while something owns the panel.
   launch in three when backgrounded with `&`. Starting it early, from rcS,
   avoids both problems at once. `/home/run-tama.sh` retries up to 8 times, which
   works but is luck.
-- **Move the ROM to PSRAM.** Worth 33.8 percent (6.01x against 4.49x) and it is
-  a small change to `tamafb`, not an interpreter rewrite. It is the cheapest
-  large win left on this board.
-- **Have `tbtns` stand down while the emulator owns the panel.** Worth about 30
-  percent, which is comparable and needs no memory at all.
+- **Move the ROM to PSRAM — tried, and it does not fit.** The code is written
+  and deployed (`patches/harness/0001-tamafb-rom-in-psram.patch`), and it
+  correctly falls back with `rom: flash window`. It never takes the PSRAM arm
+  because the allocation is refused: `malloc(524288)` fails while
+  `malloc(524000)` succeeds, and splitting the ROM in two does not help --
+  `malloc(262144)` twice gives one success and one failure, since each block
+  pays its own header out of the same budget. Getting the 33.8 percent needs
+  the allocation to happen while an order-8 block still exists, which means a
+  `S51tamafb` started from `rcS`. See KRN-004.
+- **`tbtns` standing down is done.** Worth 34.7 percent, deployed and verified;
+  see the section above. A `S51tamafb` should write `/var/run/tamafb.pid` the
+  same way `run-tama.sh` does or the stand-down will not trigger.

@@ -1,10 +1,10 @@
-# Handoff — Escapement, 2026-11-10T09:47
+# Handoff — Escapement, 2026-11-10T10:27
 
 Linux 7.2.4 on a T-Watch Ultra (ESP32-S3). Real Linux on the watch's own Xtensa
 cores, not emulated. This file is orientation; verify before acting on it.
 
 Canonical detail lives in `.ai/core-reference.md` (63 records, fourteen topics).
-Project history lives in `.ai/core-log.md` (24 entries; newest first — 24, 23,
+Project history lives in `.ai/core-log.md` (25 entries; newest first — 25, 24, 23,
 22, 21, 20, 19, 18, 17, then 1 through 16). Do not re-derive what those hold.
 
 ## Current objective (verbatim)
@@ -17,10 +17,10 @@ persistence, any wake-from-sleep path, and moving the emulator to core 0.
 
 ## Reconstruct (in this order)
 
-1. `git log --oneline -8` — `main` was at `b81ac0f`, clean and fully pushed,
+1. `git log --oneline -8` — `main` was at `109f9b5`, clean and fully pushed,
    before the commit carrying this file.
 2. `.ai/core.md` (policy), then `.ai/core-reference.md` (hardware facts — open
-   the record, not the index line), then `.ai/core-log.md` entries 24, 23, 22.
+   the record, not the index line), then `.ai/core-log.md` entries 25, 24, 23.
 3. `git -C build/esp-hosted/esp_hosted_ng branch --show-current` — expect
    `ble-bond-wip`, five local-only commits.
 
@@ -119,25 +119,28 @@ counters perturb it.
 
 ## Open items, in the order they are worth doing
 
-- **Move the ROM to PSRAM** — 33.8 percent, and the code is written but not on
-  the board: `patches/harness/0001-tamafb-rom-in-psram.patch` applies to
-  `../TamaHarness/portable/tamafb.c`. Rebuild, deploy, then confirm it prints
-  `rom: PSRAM` on a fresh boot and `rom: flash window` once the 512 KB block is
-  gone — that fallback has never once been exercised.
-- **Make `tbtns` stand down while the emulator owns the panel** — ~30 percent,
-  needs no memory, same coordination the console loglevel already needs.
-- The block-register interpreter, now re-justified against 6.01x rather than
-  4.49x (150 native instructions per emulated instruction, 97 percent of cost in
-  the interpreter's own stream, fetch nearly free).
-- The parked ~1.5 s time-screen wait — the same problem from the other end.
-- LCD-009's tearing root cause; the 4.2x disagreement between LCD-005 and
-  LCD-010.
+- **`S51tamafb` from rcS** — the one blocking item. It makes the emulator start
+  at boot instead of by hand, and if it starts early enough the 512 KB ROM
+  allocation can succeed, which is the only route to the 33.8 percent. It must
+  write `/var/run/tamafb.pid` or the `tbtns` stand-down will not trigger.
+- LCD-009's tearing root cause; the 4.2x disagreement between LCD-005's 190 ms
+  and LCD-010's 45.7 ms — re-measure through the real repaint path first.
+- The parked ~1.5 s time-screen wait.
 - The top-bar status daemon — never started.
+- The 2026-11-10 boot loop is unexplained and its dump is gone. If it recurs,
+  dump the flash *before* restoring anything.
 - `/etc/TZ`, `S01hwclock` and `S50tbtns` must be re-installed by hand after any
   **full-image** flash (`scripts/watch-time.sh` covers the first two).
-- **The 2026-11-10 boot loop is unexplained and now harder to investigate** —
-  its dump was pruned. If it recurs, dump the flash *before* restoring anything;
-  that is the only evidence that bounded it last time.
+
+## Two settled results, so they are not re-litigated
+
+**The ROM will not fit in PSRAM as a plain malloc.** malloc(524288) fails where
+malloc(524000) succeeds — the boundary is the allocator header — and splitting
+the ROM into two halves fails for the same reason. KRN-004. The front end's code
+is deployed and correctly falls back with `rom: flash window`.
+
+**`tbtns` standing down is done and verified** — 34.7 percent recovered, both
+transitions in `/home/tbtns.log`.
 
 ## Tooling
 

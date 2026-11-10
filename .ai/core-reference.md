@@ -239,7 +239,7 @@ FLS-003: "A full-image flash rewrites /etc and S03keepconfig carries back only s
 
 KRN-001: "NOMMU with no overcommit: every ELF load segment and every large allocation must be CONTIGUOUS, so 'nommu: Allocation of length N failed' is a contiguity failure, not an out-of-memory one, and a big static array blocks exec rather than failing at run time"
 KRN-002: "init_linux_mmap() extends the linear flash window over the whole 16 MiB only inside map_flash_and_go(), immediately before the jump to Linux; firmware dereferencing 0x42xx0000 earlier reads unmapped memory and reset-loops with no output"
-KRN-004: "A 512 KB contiguous block exists only briefly after boot -- 1 MB at 0 min, 256 KB by 9 min, 128 KB by 32 min -- and one such allocation consumes it for the rest of the session, so a large boot-time allocation gets exactly one attempt"
+KRN-004: "The largest contiguous block is 512 KB (order 7), and exactly 524288 bytes is the worst size to request: malloc(524288) fails where malloc(524000) succeeds because the allocator header does not fit, and splitting the ROM into two halves fails for the same reason; one such allocation also consumes the block for the rest of the session"
 KRN-003: "The kernel is linked against a fixed address in the firmware's RAM (CONFIG_VECTORS_ADDR) which is the linker symbol space_for_vectors; moving it via a firmware change gives a kernel that boots and then dies silently at 'Run /sbin/init'"
 
 FLS-001: "16 MiB layout: nvs 0xa000/0x5000, phy_init 0xf000/0x1000, factory 0x10000/0xc0000, etc 0xd0000/0x70000, linux 0x140000/0x400000, rootfs 0x540000/0x780000, home 0xcc0000/0x340000; xipImage is stored RAW at 0x140000 and can be written alone"
@@ -769,7 +769,7 @@ EMU-010: "The touch daemon costs the emulator about 30 percent of its throughput
     - "on the watch: cat /proc/buddyinfo at 0, 1, 9 and 32 minutes of uptime"
     - "kernel log: 'nommu: Allocation of length 1052672 from process 234 (corebench-rom) failed' and the later 'cannot allocate 524288 bytes for the ROM' from the same binary"
     - "KRN-001 for the contiguity rule itself"
-  verification: "Measured on hardware 2026-11-10 across four boots, reading the buddy list directly rather than inferring from free memory. The one-shot behaviour was observed three times: an allocation that succeeded on a fresh boot failed on every subsequent attempt in the same session."
+  verification: "Measured on hardware 2026-11-10 across four boots, reading the buddy list directly rather than inferring from free memory. The one-shot behaviour was observed three times: an allocation that succeeded on a fresh boot failed on every subsequent attempt in the same session. Revised 2026-11-10 (core-log entry 25): exactly 524288 bytes is the worst size to request on this board. Probed directly with a malloc ladder on a board whose buddy list showed a free order-7 block: malloc(524288) fails and malloc(524000) succeeds, so the boundary lies in that 288-byte window and it is the allocator's own header -- a request equal to the largest block leaves nothing over for it. Splitting the ROM does not help: malloc(262144) twice yields one success and one failure, because each block pays its own header out of the same budget. The earlier order-8 claim in this record was also wrong: the buddyinfo line has eleven fields, orders 0 to 10, and the readings that were called order 8 were order 7, 512 KB. Nothing larger than 512 KB was ever free."
 
 
 - record_id: FLS-001

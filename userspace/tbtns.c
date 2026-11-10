@@ -177,6 +177,15 @@ static int release_ms = 200;
  */
 #define POLL_MS 15
 
+/*
+ * Poll interval used while standing down for a fullscreen app. Long enough to
+ * cost nothing, short enough that resuming after the app exits is not
+ * noticeable -- 200 ms is about three frames of the touch controller's own
+ * 66 ms report cadence, so a finger already on the glass is picked up within
+ * one deliberate press.
+ */
+#define STANDDOWN_MS 200
+
 static int verbose, dry_run, oneshot;
 
 /*
@@ -480,7 +489,69 @@ static int held = -1;
  *   ackfail  the read worked but the acknowledge that advances the buffer did not
  */
 static unsigned long n_eio, n_blank, n_idle, n_fresh, n_ackfail;
+
+/* 1 while standing down for a fullscreen app; see fullscreen_app_running(). */
+static int standdown;
 static long long stats_at;
+
+/*
+ * Is a fullscreen app owning the panel right now?
+ *
+ * Measured on the watch 2026-11-10 (corebench, same boot, same binary):
+ *
+ *     S50tbtns running   141k emulated instructions/s
+ *     S50tbtns stopped   204k emulated instructions/s
+ *
+ * The daemon costs the emulator about 30 percent of its throughput, and the
+ * arithmetic says why rather than it being a mystery: one touch read costs
+ * about 3957 us on this bit-banged I2C bus and the loop polls every POLL_MS,
+ * so roughly a quarter of the core's time goes into waiting out 135 clock
+ * edges of bus traffic that is nearly always going to report "nothing new".
+ *
+ * Both of those numbers are correct for what they were chosen for -- 15 ms
+ * buys tap latency and 3957 us is the hardware -- so the fix is not to slow
+ * the poll down. It is to stop polling while something else needs the CPU.
+ *
+ * run-tama.sh already writes /var/run/tamafb.pid. The pid is VALIDATED against
+ * /proc rather than trusted: a stale file after a crash would otherwise turn
+ * the buttons off permanently and silently, which is a worse bug than the one
+ * being fixed. Checking costs one open() of a tiny file per poll.
+ */
+static int fullscreen_app_running(void)
+{
+	static const char *const pidfile = "/var/run/tamafb.pid";
+	char buf[32], path[64], comm[32];
+	int fd, n, pid;
+
+	fd = open(pidfile, O_RDONLY);
+	if (fd < 0)
+		return 0;                       /* no app running, the common case */
+	n = read(fd, buf, sizeof buf - 1);
+	close(fd);
+	if (n <= 0)
+		return 0;
+	buf[n] = '\0';
+	pid = atoi(buf);
+	if (pid <= 0)
+		return 0;
+
+	/*
+	 * The pid being alive is not enough -- pids are reused, and after a
+	 * reboot this file could name something else entirely. Ask /proc what
+	 * that process actually is.
+	 */
+	snprintf(path, sizeof path, "/proc/%d/comm", pid);
+	fd = open(path, O_RDONLY);
+	if (fd < 0)
+		return 0;
+	n = read(fd, comm, sizeof comm - 1);
+	close(fd);
+	if (n <= 0)
+		return 0;
+	comm[n] = '\0';
+	comm[strcspn(comm, "\n")] = '\0';
+	return strcmp(comm, "tamafb") == 0;
+}
 
 static void press(int b)
 {
@@ -596,6 +667,29 @@ int main(int argc, char **argv)
 		int fingers, event;
 		int raw_x, raw_y, cx, cy;
 		int is_fresh;
+
+		/*
+		 * Stand down while a fullscreen app owns the panel.
+		 *
+		 * The emulator needs the core and the touch controller does not,
+		 * so yield. Note the forced release first: if the app started
+		 * while a finger was down, `held` would otherwise stay set and
+		 * the key would be stuck for the whole session, because nothing
+		 * below runs to time it out.
+		 */
+		if (fullscreen_app_running()) {
+			if (standdown == 0) {
+				release();
+				say("tbtns: standing down for tamafb");
+				standdown = 1;
+			}
+			usleep(STANDDOWN_MS * 1000);
+			continue;
+		}
+		if (standdown) {
+			say("tbtns: resuming, tamafb has exited");
+			standdown = 0;
+		}
 
 		/*
 		 * One retry, but with a gap before it.

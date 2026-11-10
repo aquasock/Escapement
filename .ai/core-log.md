@@ -1,3 +1,34 @@
+## 25 COMMIT Unreleased 2026-11-10T10:26:48-07:00
+
+#### Coming From:
+
+Unreleased 109f9b5
+
+#### Purpose:
+
+Recover the third of the emulator's throughput that the touch daemon was taking, without giving up the tap latency the daemon exists for.
+
+#### Outcome:
+
+`tbtns` now stands down while a fullscreen app owns the panel, and both transitions are verified in the daemon log on hardware: `tbtns: standing down for tamafb` when the app starts and `tbtns: resuming, tamafb has exited` when it stops. The cost being recovered was measured the same boot on the same binary, 134496 instructions/s with the daemon polling against 206091 with it stopped, so the daemon takes 34.7 percent, or 53 percent more throughput without it. The arithmetic says why rather than leaving it a mystery: one touch read costs about 3957 us on this bit-banged I2C bus and the loop polls every 15 ms, so roughly a quarter of the core goes into waiting out bus traffic that is almost always about to report nothing new. Both constants are correct for their purpose, so the fix is not to poll slower but to stop polling while something else needs the core. The daemon reads `/var/run/tamafb.pid`, which `run-tama.sh` already writes, and validates that pid against `/proc/<pid>/comm` before believing it. That validation earned its place twice: a stale file after a crash would otherwise disable the buttons permanently and silently, which is worse than the bug being fixed, and during testing a launch wrapped in a shell had `comm` of `bash` rather than `tamafb` and was correctly ignored. Standing down also forces a release before yielding, so a finger held at the moment the app starts cannot leave a key stuck, because nothing below runs to time it out. The fallback interval is 200 ms, long enough to cost nothing and short enough that resuming is not noticeable. The band-arithmetic selftest still passes. The same cycle closed the PSRAM question from entry 24 in the negative and, in doing so, corrected two of my own errors. The patch is deployed and does exactly what it should when the allocation fails, printing `rom: 512 KB PSRAM allocation refused ... falling back to flash, 33.8% slower` followed by `rom: flash window`, and the run was clean at 4,130,898 emulated cycles/s and 1.03x; so the fallback path, which had never once been exercised, is now proven. But it will never take the PSRAM arm as things stand. A malloc ladder on the board gives malloc(524288) FAIL and malloc(524000) OK, so the boundary lies in that 288-byte window and it is the allocator's own header: a request equal to the largest free block leaves nothing over for the header itself. Splitting the ROM, which was the user's suggestion and a good one to test rather than argue about, makes it worse: malloc(262144) twice produced one success and one failure, because each block pays its own header out of the same budget. Two corrections follow for the records. My reading of /proc/buddyinfo had been against the wrong end of the line and the block it called order 8 is order 7, 512 KB; the line has eleven fields, orders 0 to 10, and nothing larger than 512 KB has ever been free in these readings. And an attempt at fixing this by allocating 1024 bytes less than the ROM while still reading the full ROM would have overrun the buffer; it was caught before building, the source was restored from the original plus the patch, and the rebuild came back byte-identical at sha256 7447986c, so nothing unsafe was ever deployed. KRN-004 and `docs/tamagotchi.md` were revised to record the boundary, the failed split, and the correction. The core-syntax audit passed: `.ai/core.md` and `.ai/core-syntax.md` were re-read, the complete `.ai/` diff was inspected, `.ai/core.md` was not modified, the reference still validates at 63 records with 63 index keys, and this entry was validated against the template with six sections in canonical order, sequential numbering from 24, an ISO-8601 timestamp carrying the America/Phoenix offset, prose-only Outcome and Next Steps, and Status values within the allowed set.
+
+#### Next Steps:
+
+The emulator thread now has one clear blocking item: a `S51tamafb` started from `rcS`, which would both make the emulator start at boot rather than by hand and, if it runs early enough, let the 512 KB ROM allocation happen while an order-7 block still exists, which is the only route to the 33.8 percent that entry 22 measured. Nothing else in that thread is worth doing first, and the two cheap wins are now one delivered and one blocked on that service. Beyond the emulator, the display items are unchanged and both are diagnosis rather than design: LCD-009's tearing root cause, still open with SPI clock excluded, and the 4.2x disagreement between LCD-005's 190 ms frame and LCD-010's 45.7 ms projection, which needs a re-measurement through the real repaint path before either figure is quoted again. The boot loop from entry 23 remains unexplained and its dump was pruned in entry 24, so a recurrence has to be captured fresh.
+
+#### Files Modified:
+
+- userspace/tbtns.c
+- docs/tamagotchi.md
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: NOT RUN
+
+---
+
 ## 24 COMMIT Unreleased 2026-11-10T09:47:12-07:00
 
 #### Coming From:
