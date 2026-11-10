@@ -131,6 +131,8 @@ Topic IDs are the `record_id` prefix. An entry reserves a name; it does not clai
 | Why is the emulator's interpreter so slow? | EMU | EMU-001 |
 | Can the emulator use float instead of double? | EMU | EMU-001 |
 | Why does entering the time screen take 1.5 s? | EMU | EMU-002 |
+| Is 40 MHz safe on this panel? | LCD | LCD-011 |
+| How much does raising the SPI clock buy? | LCD | LCD-011 |
 | Why are taps at the top of a bar ignored? | TCH | TCH-004 |
 | Can userspace draw on /dev/fb0? | LCD | LCD-001 |
 | Why does a thin fill draw nothing while a thick one works? | LCD | LCD-002 |
@@ -514,7 +516,7 @@ EXT-003: "A fullscreen app on fb0 flickers against fbcon because every printk re
   status: VERIFIED
   verified_date: 2026-11-09
   statement: "A single 45x356 transfer into the right-hand strip returns as eight diagonal splits, worst at the bottom, and the splits are visible even in a uniform fill -- so whole rows did not receive the write rather than being torn mid-scan. The same rectangle sent as 178 windows of 45x2 is clean, repeatably. The failure is not explained by width, by X position, or by window height. Width is excluded because the behaviour is non-monotonic: with five stacked segments from the same origin, 45 wide tore, 35 wide was clean, and 25, 15 and 5 wide all tore. X position is excluded because nine 45x50 windows swept across the bottom strip at x = 0, 45, ... 360 were all clean, including one at controller columns 382..426, overlapping the right strip's 387..431. Height is excluded because the 45x71 segments also tore. The left strip tolerates the same 45x356 single transfer that the right strip does not."
-  consequence: "The rule that holds on hardware is that a single transfer must carry few rows, so `CO5300_IOC_WRITE_RECT` caps every band at two rows and loops. That is invisible to callers -- userspace still hands over one rectangle -- and it is cheap here because these are status icons, but it is a workaround and not a fix: it would be wrong for continuous drawing, which is why `co5300_blit()` keeps its own uncapped sizing. The root cause is NOT established. The strongest remaining suspect is SPI clock margin, because the reference firmware recorded the identical signature at 45 MHz -- 'dark horizontal lines shearing slightly down to the right' -- cured by dropping to 20 MHz, and this project runs at 20 MHz where that signature is still marginal for long narrow transfers."
+  consequence: "The rule that holds on hardware is that a single transfer must carry few rows, so `CO5300_IOC_WRITE_RECT` caps every band at two rows and loops. That is invisible to callers -- userspace still hands over one rectangle -- and it is cheap here because these are status icons, but it is a workaround and not a fix: it would be wrong for continuous drawing, which is why `co5300_blit()` keeps its own uncapped sizing. The root cause is NOT established, but SPI clock margin is now excluded as the explanation for the reference firmware's own 45 MHz shearing: that signature is also what a write-pointer desync looks like, and the reference firmware carried the SPI_USR_COMMAND/SPI_USR_ADDR-resent-per-chunk bug that restarts the write pointer every 64 bytes. That bug is fixed here, and the panel has since been tested at 40 MHz with eight full-width bands in eight distinct colours, which came out clean and in order -- a desync cannot produce that. 40 MHz is now the compiled-in default. What remains unexplained is this record's own narrow-transfer fragility, which persists at the higher clock and is therefore not about the clock."
   sources:
     - "patches/kernel/display/final/co5300.c: CO5300_RECT_ROWS_PER_BAND and the record of what is and is not established"
     - "userspace/panel-test.c: the -D, -T, -W and -C modes that produced these measurements"
@@ -1009,3 +1011,16 @@ last_reviewed: 2026-11-09
     - "docs/tamagotchi.md: 'Parked: the ~1.5 s wait entering the time screen'"
     - "TamaHarness/portable/tamafb.c: the per-frame stall log and the press-to-paint timestamps"
   verification: "The 580.1 ms ROM gap is measured on the host and reproducible. The 1.5 s on hardware is reported by the user and consistent with the measured stall frames, but the exact breakdown was never captured on device -- the press-to-paint instrumentation was deployed and never read against a press."
+
+- record_id: LCD-011
+  kind: DISPLAY
+  topic_id: LCD
+  title: "40 MHz is safe on this panel, and doubling the SPI clock buys only 13 percent"
+  status: VERIFIED
+  verified_date: 2026-11-09
+  statement: "A full 320x400 RGB565 frame costs 115.15 ms to push at 20 MHz and 100.85 ms at 40 MHz, measured back to back on hardware through /dev/fb0 pwrite, with the 20 MHz figure reproduced after the 40 MHz run (116.19 ms) to rule out drift. 40 MHz is clean on the glass: eight full-width bands in eight distinct colours came out as eight equal horizontal bands in the correct order, which a desynced write pointer cannot produce because it repeats the first rows instead of reaching the bottom of the screen. 40 MHz is now the driver's compiled-in default."
+  consequence: "The transfer is not clock bound, so raising the clock is not the lever it looks like. Wire speed at 20 MHz quad is 10 MB/s, which is 25 ms for 250 KB, against 115 ms measured -- 4.6x off wire speed. The time is in the 64-byte FIFO chunk loop in esp32_spi_exec_op and in the per-pixel swab16 pass, not in shifting bits, so DMA is the change that matters and the clock is only worth taking because it is nearly free. It also settles the reference firmware's 45 MHz shearing, which was a write-pointer desync from the command/address-resent-per-chunk bug rather than a clock-margin limit; that bug is fixed here and the same clock is clean. This does NOT explain LCD-009's narrow-transfer fragility, which persists at 40 MHz and so is not a clock effect."
+  sources:
+    - "userspace/fbtime.c: paints eight bands and times repeated full-frame pwrites"
+    - "patches/kernel/display/final/co5300.c: CO5300_SPI_HZ_DEFAULT, and the spi_hz module parameter that made the comparison a single-boot test"
+  verification: "Measured on hardware 2026-11-09 by the user's own eyes on the glass for the band order and the absence of shear, and by wall-clock timing for the two frame costs. The SPI frequency was changed at runtime through /sys/module/co5300/parameters/spi_hz, which assigns spi->max_speed_hz so the divider is reprogrammed at the next exec_op."

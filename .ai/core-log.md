@@ -38,8 +38,11 @@ means coprocessor context switching on a NOMMU port with a patched `fork()`.
 Alongside it, the panel SPI clock became a runtime knob after the reference
 firmware's 45 MHz shearing was traced to the write-pointer bug rather than clock
 margin: 40 MHz was tested with eight full-width bands in eight colours and came
-out clean and in order, which a desynced write pointer cannot produce, so
-`/etc/init.d/S51panelclk` now sets it at boot and survives a reboot. It bought
+out clean and in order, which a desynced write pointer cannot produce, so it is
+now the driver's compiled-in default. It was briefly a boot script poking sysfs,
+which was backwards -- a qualified constant is a default, not a startup action --
+and that script has been deleted; the module parameter remains only as an escape
+hatch for a panel revision that does shear. The clock bought
 13%, not the 2x it was hoped for -- a full 320x400 frame went 115.15 ms to
 100.85 ms -- which says the transfer is not clock bound. Two tooling bugs cost
 as much time as the engineering and are fixed: `watch-exec.py` hardcoded
@@ -70,7 +73,7 @@ first -- the 16 MiB backup from this cycle is
 #### Files Modified:
 
 `patches/kernel/display/final/co5300.c`, `scripts/watch-deploy.sh`,
-`scripts/watch-exec.py`, `userspace/tbtns.c`, `userspace/S51panelclk`,
+`scripts/watch-exec.py`, `userspace/tbtns.c`, `scripts/usb-send.py`,
 `userspace/run-tama.sh`, `docs/tamagotchi.md`, `.ai/core-reference.md`
 
 #### Status:
