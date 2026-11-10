@@ -170,3 +170,57 @@ be batched into a shared buffer while I/O needs a round trip per transaction.
   works — and is faster than what we use.
 - Bit-banged I2C is a missing driver, not a placement mistake. Write
   `i2c-esp32.c`.
+
+---
+
+## Appendix: the hardware I2C attempt, and where it stopped
+
+Written after a session that spent eight build-and-flash cycles on it, so the
+next attempt starts from evidence rather than from scratch.
+
+**What works.** `patches/kernel/i2c/final/i2c-esp32.c` is a complete polling-mode
+`i2c_algorithm` for I2C0 at `0x60013000`. It compiles, links, probes, routes
+GPIO3/GPIO2 through the GPIO matrix correctly, and its DTS node replaces
+`i2c-gpio`. Four real defects were found and fixed on the way, each of which
+would have blocked any future attempt:
+
+1. **Completion was polled on `command_done`,** which the END command never
+   sets. The real signals are `int_status.trans_complete` (bit 7) and
+   `int_status.nack` (bit 10). ESP-IDF's HAL reads the event from `INT_STATUS`;
+   that is the model to follow.
+2. **The timing registers need `scl_wait_high_period`,** which shares the
+   `SCL_HIGH_PERIOD` register in bits [15:9]. Setting only the high period
+   leaves the bus unable to run. `i2c_ll_cal_bus_clk()` has the arithmetic,
+   including the 80 kHz branch and the `half - 2` adjustment above it.
+3. **The peripheral's clock gate is closed at boot.** `SYSTEM_PERIP_CLK_EN0`
+   (0x600c0018) bit 7 reads 0. The DTS now provides it as `i2c0_clk`, a
+   `gpio-gate-clock` over `clk_gpio0` bit 7 — the same mechanism `spi2_clk`
+   already used.
+4. **The peripheral is held in reset at boot.** `SYSTEM_PERIP_RST_EN0`
+   (0x600c0020) bit 7 reads 1 (register value `0x9eff1fb8`). While held, every
+   register write is discarded but reads and FIFO writes still work, so `CTR`
+   reads back `0x20b` — master mode and clock enable clear — no matter what is
+   written. Releasing and pulsing it makes `CTR` hold `0x313` as written.
+
+**Where it stops.** With the gate open and the reset released, `CTR` is correct
+and the command list is written, but `trans_start` does not start the
+sequencer: `int_status` stays 0 and the TX FIFO keeps its bytes
+(`sr` showing `txfifo_cnt` = 6, the number queued).
+
+**What has been excluded.** Register offsets (checked against the member order
+in `i2c_struct.h`), command opcodes (the HAL's values, not the stale comment in
+`i2c_struct.h`), pin routing (read back: `out_sel` names signals 90 and 89),
+clock gate, reset state, and write ordering of `conf_upgate` versus
+`trans_start`.
+
+**The next thing to do is not another guess.** Read ESP-IDF's
+`components/driver/i2c/i2c.c` — the actual master transfer routine, not the
+headers — and follow its start sequence line by line. Every hypothesis so far
+was reconstructed from headers, and the count of excluded causes now exceeds
+what a single missing bit can explain, which means the model of the block is
+wrong somewhere rather than one value being off.
+
+**The board state this leaves.** Flashed with that driver, booting, but with no
+working I2C: the PMU, RTC, expander and touch controller all fail to bind. The
+rollback is `~/twatch-backup/working-2026-11-10-1053.bin`, which restores
+`i2c-gpio` and a fully functional watch.

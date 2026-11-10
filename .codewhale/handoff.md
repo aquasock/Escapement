@@ -1,10 +1,10 @@
-# Handoff — Escapement, 2026-11-10T11:05
+# Handoff — Escapement, 2026-11-10T11:40
 
 Linux 7.2.4 on a T-Watch Ultra (ESP32-S3). Real Linux on the watch's own Xtensa
 cores, not emulated. This file is orientation; verify before acting on it.
 
 Canonical detail lives in `.ai/core-reference.md` (63 records, fourteen topics).
-Project history lives in `.ai/core-log.md` (27 entries; newest first — 27, 26, 25, 24, 23,
+Project history lives in `.ai/core-log.md` (28 entries; newest first — 28, 27, 26, 25, 24, 23,
 22, 21, 20, 19, 18, 17, then 1 through 16). Do not re-derive what those hold.
 
 ## Current objective (verbatim)
@@ -17,10 +17,10 @@ persistence, any wake-from-sleep path, and moving the emulator to core 0.
 
 ## Reconstruct (in this order)
 
-1. `git log --oneline -8` — `main` was at `1c37c50`, clean and fully pushed,
+1. `git log --oneline -8` — `main` was at `f32af28`, clean and fully pushed,
    before the commit carrying this file.
 2. `.ai/core.md` (policy), then `.ai/core-reference.md` (hardware facts — open
-   the record, not the index line), then `.ai/core-log.md` entries 27, 26, 25.
+   the record, not the index line), then `.ai/core-log.md` entries 28, 27, 26.
 3. `git -C build/esp-hosted/esp_hosted_ng branch --show-current` — expect
    `ble-bond-wip`, five local-only commits.
 
@@ -33,10 +33,18 @@ after a reboot; WiFi 10.10.0.15 at ~409 KB/s; three touch bars paint, click and
 emit BTN_0/1/2; the Tamagotchi runs at a true 1.00x from the flash-resident ROM
 at 40 MHz with eight clean full-width bands.
 
-**The watch is on the 40 MHz kernel as of 2026-11-10T09:40.** `spi_hz` reads
-`40000000`, `tbtns` and `blekbd` run, and `/home` survived because the kernel
-was written alone to `0x140000`. Rebuilt from the tree and flashed; it differs
-from the pre-loop kernel in 12 bytes, all build timestamp.
+**THE WATCH HAS NO WORKING I2C RIGHT NOW.** The hardware I2C driver
+(`patches/kernel/i2c/final/i2c-esp32.c`) is flashed and the board boots, but
+PMU, RTC, expander and touch all fail to bind because `trans_start` does not
+start the sequencer. Restore to get a working watch back:
+
+```
+~/twatch-backup/working-2026-11-10-1053.bin    <- i2c-gpio, fully working
+```
+
+**The 40 MHz kernel is in that image too**, so restoring loses nothing except
+the I2C attempt. KRN-006 records the two boot-time blockers that were found and
+fixed (clock gate closed, reset held) — check those first on any future attempt.
 
 **There is now exactly one image worth restoring**, and it is qualified:
 

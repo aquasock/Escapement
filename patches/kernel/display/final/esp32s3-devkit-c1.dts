@@ -12,17 +12,53 @@
 		reg = <0x3d800000 0x00800000>;
 	};
 
-	i2c0 {
+	/*
+	 * Hardware I2C0 at 0x60013000, not i2c-gpio.
+	 *
+	 * The bit-banged bus was an interim that cost 34.6 percent of core 1 in
+	 * kernel time, because every clock edge is a GPIO toggle taken in
+	 * software (KRN-005, docs/cores.md). The controller exists and LilyGo's
+	 * own firmware drives this board's pins with it at 1 MHz.
+	 *
+	 * To go back to the bit-banged bus in a hurry, restore:
+	 *	compatible = "i2c-gpio";
+	 *	sda-gpios = <&gpio0 3 (GPIO_ACTIVE_HIGH | GPIO_OPEN_DRAIN)>;
+	 *	scl-gpios = <&gpio0 2 (GPIO_ACTIVE_HIGH | GPIO_OPEN_DRAIN)>;
+	 * and drop reg/interrupts/clock-frequency.
+	 */
+	/*
+	 * I2C_EXT0's clock gate lives in SYSTEM_PERIP_CLK_EN0 (0x600c0018)
+	 * bit 7, and its reset default is 0. Nothing had ever enabled it: the
+	 * firmware does not use I2C, and the bit-banged bus needed no
+	 * peripheral clock. Without it every register write to the controller
+	 * is lost, which presents as a peripheral stuck in its reset state
+	 * (ctr = 0x20b, master mode clear) while the driver reports success.
+	 *
+	 * Declared here rather than in esp32s3.dtsi so it travels with the
+	 * board file this project carries whole.
+	 */
+	i2c0_clk: i2c0_clk {
+		#clock-cells = <0>;
+		compatible = "gpio-gate-clock";
+		clocks = <&clk 2>;		/* apb_clk */
+		enable-gpios = <&clk_gpio0 7 0>;
+	};
+
+	i2c0: i2c@60013000 {
 		#address-cells = <1>;
 		#size-cells = <0>;
-		compatible = "i2c-gpio";
+		compatible = "espressif,esp32-i2c";
+		reg = <0x60013000 0x100>;
+		interrupts = <42 9 0>;	/* I2C_EXT0 source 42, external IRQ9 */
+		clock-frequency = <100000>;
+		clocks = <&i2c0_clk>;
 
-		/* T-Watch Ultra: SDA=GPIO3, SCL=GPIO2. The devkit profile this
-		 * port ships uses 6/7, which is why the kernel bus scanned empty
-		 * while six devices were answering on the other two pins.
-		 */
-		sda-gpios = <&gpio0 3 (GPIO_ACTIVE_HIGH | GPIO_OPEN_DRAIN)>;
-		scl-gpios = <&gpio0 2 (GPIO_ACTIVE_HIGH | GPIO_OPEN_DRAIN)>;
+		/* Pins are routed through the GPIO matrix by the driver, and
+		 * their pull-ups and input-enable come from i2c0_pins below.
+		 * SPI needs the same treatment: neither bus reaches these pads
+		 * through IO_MUX. */
+		espressif,sda-pin = <3>;
+		espressif,scl-pin = <2>;
 
 		pinctrl-0 = <&i2c0_pins>;
 		pinctrl-names = "default";

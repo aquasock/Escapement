@@ -149,6 +149,8 @@ Topic IDs are the `record_id` prefix. An entry reserves a name; it does not clai
 | Why is the emulator slower with the touch buttons running? | EMU | EMU-010 |
 | Why does a 512 KB allocation work once and then fail? | KERNEL | KRN-004 |
 | Why not put the hardware behind the RTOS on core 0? | KERNEL | KRN-005 |
+| Why is the hardware I2C that slow? | KERNEL | KRN-006 |
+| Why does the I2C controller ignore every register write? | KERNEL | KRN-006 |
 | Is Linux really only using one core? | KERNEL | KRN-005 |
 | Why are taps at the top of a bar ignored? | TCH | TCH-004 |
 | Can userspace draw on /dev/fb0? | LCD | LCD-001 |
@@ -241,6 +243,7 @@ FLS-003: "A full-image flash rewrites /etc and S03keepconfig carries back only s
 
 KRN-001: "NOMMU with no overcommit: every ELF load segment and every large allocation must be CONTIGUOUS, so 'nommu: Allocation of length N failed' is a contiguity failure, not an out-of-memory one, and a big static array blocks exec rather than failing at run time"
 KRN-002: "init_linux_mmap() extends the linear flash window over the whole 16 MiB only inside map_flash_and_go(), immediately before the jump to Linux; firmware dereferencing 0x42xx0000 earlier reads unmapped memory and reset-loops with no output"
+KRN-006: "The ESP32-S3 I2C peripheral boots with its clock gate CLOSED (SYSTEM_PERIP_CLK_EN0 bit 7 = 0) and its reset HELD (SYSTEM_PERIP_RST_EN0 bit 7 = 1), so every register write is discarded while reads and FIFO writes still succeed, which presents as a peripheral stuck at CTR=0x20b with master mode clear"
 KRN-005: "Core 0 runs the radios because the WiFi driver is a closed blob only ESP-IDF can run; Linux is a FreeRTOS task pinned to core 1 that never returns, and esp-hosted carries network, Bluetooth and typed custom interfaces but no I2C/SPI/GPIO RPC -- so there is no channel for an RTOS hardware server, and I/O stays on Linux"
 KRN-004: "The largest contiguous block is 512 KB (order 7), and exactly 524288 bytes is the worst size to request: malloc(524288) fails where malloc(524000) succeeds because the allocator header does not fit, and splitting the ROM into two halves fails for the same reason; one such allocation also consumes the block for the rest of the session"
 KRN-003: "The kernel is linked against a fixed address in the firmware's RAM (CONFIG_VECTORS_ADDR) which is the linker symbol space_for_vectors; moving it via a firmware change gives a kernel that boots and then dies silently at 'Run /sbin/init'"
@@ -788,6 +791,20 @@ EMU-010: "The touch daemon costs the emulator about 30 percent of its throughput
     - "build/esp-hosted/esp_hosted_ng/esp/esp_driver/network_adapter/main/linux_boot.c: the xTaskCreatePinnedToCore(..., 1) call and linux_task()"
     - "Xinyuan-LilyGO/LilyGoLib examples/factory/ui_nes.cpp, screen_web_server.cpp, LilyGoWatchUltra.cpp: how the official firmware uses both cores"
   verification: "Read from the firmware and port sources in this workspace, not inferred: ARCHITECTURE.md states the split, and linux_boot.c shows the pinning call and the never-returning task body. The absence of a peripheral RPC was established by reading the esp-hosted interface set, which carries network, Bluetooth and the project's own ESP_LOG_IF and nothing else. LilyGo's usage was read from its published examples: it runs FreeRTOS on both cores with no OS boundary, pins the NES emulator and its audio task to core 0 alongside the radios, and pins the web server to the core that ARDUINO_RUNNING_CORE is not; its board file calls Wire.begin(SDA, SCL) with setClock(1000000) for touch, which confirms the hardware I2C peripheral works on this board's pins."
+
+- record_id: KRN-006
+  kind: KERNEL
+  topic_id: KRN
+  title: "The hardware I2C block boots gated and held in reset, and ignores writes while answering reads"
+  status: VERIFIED
+  verified_date: 2026-11-10
+  statement: "The ESP32-S3's I2C_EXT0 peripheral is not usable from a cold start without two writes to the SYSTEM block at 0x600c0000. SYSTEM_PERIP_CLK_EN0 (offset 0x18) bit 7 gates its clock and reads 0 at boot; SYSTEM_PERIP_RST_EN0 (offset 0x20) bit 7 holds it in reset and reads 1, measured on this board as 0x9eff1fb8. While the reset bit is set the peripheral's register file stays at its power-on defaults and writes to it are discarded, but reads still return data and the TX FIFO still accepts bytes. The observable signature is CTR reading 0x20b (the reset default: master mode and clock enable both clear) immediately after a successful write, with sr showing txfifo_cnt holding the queued bytes and int_status reading 0."
+  consequence: "This cost eight build-and-flash cycles to find because the failure imitates three other faults in sequence: a bad command encoding, a wrong completion signal, and a dead bus. Anyone porting a peripheral here should check the SYSTEM block first, not last: gate and reset are per-peripheral bits in two registers at a fixed address, they are cheap to read, and a held reset makes every driver-side hypothesis unfalsifiable. The existing i2c-gpio bus needed neither because it drives GPIOs directly, and the firmware does not use I2C at all, so nothing on this board had ever opened the gate. The same two registers govern every other peripheral, and the port already relied on this without saying so: spi2_clk in esp32s3.dtsi is a gpio-gate-clock over clk_gpio0 bit 6, which is exactly SYSTEM_SPI2_CLK_EN."
+  sources:
+    - "esp-idf soc/esp32s3/include/soc/system_reg.h: SYSTEM_PERIP_CLK_EN0_REG 0x18, SYSTEM_I2C_EXT0_CLK_EN BIT(7), SYSTEM_PERIP_RST_EN0_REG 0x20, SYSTEM_I2C_EXT0_RST BIT(7)"
+    - "esp-idf hal/esp32s3/include/hal/clk_gate_ll.h: periph_ll_get_clk_en_mask and periph_ll_get_rst_en_mask map PERIPH_I2C0_MODULE to those bits"
+    - "arch/xtensa/boot/dts/esp32s3.dtsi: spi2_clk as gpio-gate-clock over clk_gpio0 bit 6, matching SYSTEM_SPI2_CLK_EN"
+  verification: "Measured on the watch 2026-11-10 through the driver's own probe logging. Before the fix: perip_clk_en0=0x6100e0c7 (bit 7 clear) and perip_rst_en0=0x9eff1fb8 (bit 7 set), and a direct write of 0x31b to CTR read back 0x20b. After gating, releasing and pulsing the reset: perip_rst_en0=0x9eff1f38 with bit 7 clear, and the same CTR write read back correctly, so master mode and clock enable genuinely took effect. Not yet verified: the transfer path itself, which still does not start (see EMU-011's open item in docs/cores.md and the driver's own notes)."
 
 - record_id: FLS-001
   kind: FLASH

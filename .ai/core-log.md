@@ -1,3 +1,37 @@
+## 28 COMMIT Unreleased 2026-11-10T11:38:52-07:00
+
+#### Coming From:
+
+Unreleased f32af28
+
+#### Purpose:
+
+Write the hardware I2C driver that entry 27 identified as the real fix for a third of core 1 being spent bit-banging the bus.
+
+#### Outcome:
+
+The driver is written, builds, links and probes, and it does not work yet; the board is currently running with no I2C at all. What it did establish is worth more than the failure. Four genuine defects were found and fixed, each of which would have blocked any future attempt: completion was being polled on a command's `done` bit, which the END command never sets, and the real signals are `int_status.trans_complete` and `int_status.nack`; the timing setup omitted `scl_wait_high_period`, which shares the `SCL_HIGH_PERIOD` register in bits 15:9, without which the bus cannot run at all; the peripheral's clock gate is closed at boot, `SYSTEM_PERIP_CLK_EN0` at `0x600c0018` bit 7 reading 0, and nothing on this board had ever opened it because the firmware does not use I2C and the bit-banged bus needed no peripheral clock; and the peripheral is held in reset at boot, `SYSTEM_PERIP_RST_EN0` at `0x600c0020` bit 7 reading 1 in a register worth `0x9eff1fb8`. That last one is the finding that matters and it is now KRN-006: while the reset is held, every write to the controller is silently discarded while reads still return data and the TX FIFO still accepts bytes, so `CTR` reads back `0x20b` -- the power-on default with master mode and clock enable clear -- immediately after a successful write. That signature imitates three different faults in sequence, a bad command encoding, a wrong completion signal and a dead bus, which is why diagnosing it took eight build-and-flash cycles. Releasing and pulsing the reset makes `CTR` hold `0x313` as written, which proves master mode and clock enable now genuinely take effect, and the clock reports 80 MHz. What remains is that `trans_start` does not start the sequencer: `int_status` stays zero and the TX FIFO keeps its six bytes. Once the reset was out of the way, register offsets were checked against the member order in `i2c_struct.h`, command opcodes against the HAL rather than the stale comment in that header, pin routing read back as `out_sel` naming signals 90 and 89, and the write ordering of `conf_upgate` and `trans_start` split and flushed and rejoined, and none of it moved the result. The honest reading is that the count of excluded causes now exceeds what a single wrong bit can explain, so the model of the block is wrong somewhere rather than one value being off, and the next step is to read ESP-IDF's own `components/driver/i2c/i2c.c` master transfer routine line by line instead of continuing to reconstruct it from headers. That is a change of method, not another guess, and it is the method that should have been used first. The board boots and runs throughout with the console and USB console working, but the PMU, RTC, expander and touch controller all fail to bind, so the watch is degraded; the rollback is `~/twatch-backup/working-2026-11-10-1053.bin`, taken before any of this, which restores `i2c-gpio` and a fully functional watch. `docs/cores.md` now carries an appendix recording what works, what was excluded, and this exact next step, so a future attempt starts from evidence. The core-syntax audit passed: `.ai/core.md` and `.ai/core-syntax.md` were re-read, the complete `.ai/` diff was inspected, `.ai/core.md` was not modified, the reference validates at 65 records with 65 index keys and no orphans in either direction, and this entry was validated against the template with six sections in canonical order, sequential numbering from 27, an ISO-8601 timestamp carrying the America/Phoenix offset, prose-only Outcome and Next Steps, and Status values within the allowed set.
+
+#### Next Steps:
+
+Restore `~/twatch-backup/working-2026-11-10-1053.bin` so the watch has working I2C again: the driver is not close enough to justify leaving the PMU, RTC, expander and touch controller unbound. The driver source stays in the tree at `patches/kernel/i2c/final/i2c-esp32.c` with every excluded hypothesis recorded in its comments, and the DTS switch is a single node that reverting is a two-line change for. Then read ESP-IDF's `i2c.c` master path and compare its start sequence against this driver's before flashing anything again; the trigger, not the configuration, is what is unproven, and eight cycles of header reconstruction have earned a different approach.
+
+#### Files Modified:
+
+- patches/kernel/i2c/final/i2c-esp32.c
+- patches/kernel/display/final/esp32s3-devkit-c1.dts
+- patches/kernel/config/devkit_c1_16m_linux.config
+- scripts/build-kernel.sh
+- docs/cores.md
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: FAIL
+
+---
+
 ## 27 COMMIT Unreleased 2026-11-10T11:04:36-07:00
 
 #### Coming From:

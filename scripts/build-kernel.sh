@@ -157,6 +157,40 @@ cp "$here"/patches/kernel/display/final/esp_log_pipe.c \
 cp "$here"/patches/kernel/display/final/esp32s3-devkit-c1.dts \
    "$K/arch/xtensa/boot/dts/esp32s3-devkit-c1.dts"
 
+# Hardware I2C master. Carried whole for the same reason as the drivers above,
+# and its Kconfig/Makefile entries are appended rather than patched because a
+# whole-file copy of either would have to track the upstream tree forever. The
+# append is guarded by a grep so re-running the build cannot duplicate it, and
+# it fails loudly rather than silently if the anchor is missing -- the lesson
+# of TOL-003, where a patch that never applied produced a kernel with no driver
+# and a device tree describing hardware nothing bound to.
+cp "$here"/patches/kernel/i2c/final/i2c-esp32.c "$K/drivers/i2c/busses/i2c-esp32.c"
+
+kconfig_i2c="$K/drivers/i2c/busses/Kconfig"
+makefile_i2c="$K/drivers/i2c/busses/Makefile"
+
+if ! grep -q 'config I2C_ESP32' "$kconfig_i2c"; then
+	cat >> "$kconfig_i2c" <<'EOF'
+
+config I2C_ESP32
+	tristate "ESP32-S3 hardware I2C master"
+	depends on I2C
+	help
+	  Say Y here to use the ESP32-S3's hardware I2C controller instead of
+	  driving the bus from GPIOs. The bit-banged path costs a third of a
+	  core in kernel time on this board; see docs/cores.md.
+EOF
+fi
+
+if ! grep -q 'i2c-esp32.o' "$makefile_i2c"; then
+	printf 'obj-$(CONFIG_I2C_ESP32)\t\t+= i2c-esp32.o\n' >> "$makefile_i2c"
+fi
+
+grep -q 'config I2C_ESP32' "$kconfig_i2c" \
+	|| die "I2C_ESP32 Kconfig entry did not land in $kconfig_i2c"
+grep -q 'i2c-esp32.o' "$makefile_i2c" \
+	|| die "i2c-esp32.o did not land in $makefile_i2c"
+
 # The config patch edits the *seed config*, not the kernel tree -- buildroot
 # copies it in. Applying it here to the tree is a no-op by design.
 (cd "$PROJ" && git apply --whitespace=nowarn "$here/patches/kernel/0002-"*.patch 2>/dev/null || true)
