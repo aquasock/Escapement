@@ -133,6 +133,8 @@ Topic IDs are the `record_id` prefix. An entry reserves a name; it does not clai
 | Why does entering the time screen take 1.5 s? | EMU | EMU-002 |
 | Is 40 MHz safe on this panel? | LCD | LCD-011 |
 | How much does raising the SPI clock buy? | LCD | LCD-011 |
+| Why is the emulator slow when the ROM computes? | EMU | EMU-003 |
+| How fast is PSRAM access on this watch? | EMU | EMU-003 |
 | Why are taps at the top of a bar ignored? | TCH | TCH-004 |
 | Can userspace draw on /dev/fb0? | LCD | LCD-001 |
 | Why does a thin fill draw nothing while a thick one works? | LCD | LCD-002 |
@@ -1024,3 +1026,17 @@ last_reviewed: 2026-11-09
     - "userspace/fbtime.c: paints eight bands and times repeated full-frame pwrites"
     - "patches/kernel/display/final/co5300.c: CO5300_SPI_HZ_DEFAULT, and the spi_hz module parameter that made the comparison a single-boot test"
   verification: "Measured on hardware 2026-11-09 by the user's own eyes on the glass for the band order and the absence of shear, and by wall-clock timing for the two frame costs. The SPI frequency was changed at runtime through /sys/module/co5300/parameters/spi_hz, which assigns spi->max_speed_hz so the divider is reprogrammed at the next exec_op."
+
+- record_id: EMU-003
+  kind: EMU
+  topic_id: EMU
+  title: "PSRAM costs 179 ns per dependent load, and that is what bounds the emulator"
+  status: VERIFIED
+  verified_date: 2026-11-10
+  statement: "A dependent-load chain over a 3 KB working set costs 178.83 ns per load on this watch, measured with a pointer-chase over a static array. At the reported 240 MHz that is about 43 CPU cycles for a single load. The SPLB32 emulator keeps its entire machine state -- 2968 bytes -- in a heap allocation at 0x3ddb0008, which is PSRAM, and its static .bss lands at 0x3dc708f0, which is also PSRAM. The interpreter therefore performs roughly a dozen PSRAM round trips per emulated instruction. Measured consequence: 387212 steps/s and 265k instructions/s, about 620 CPU cycles per emulated instruction, and 57.74 emulated cycles per instruction retired."
+  consequence: "This, not the panel, is what limits the emulator, and it explains every symptom seen on hardware. Steady state the guest sleeps and cycles are nearly free, so the emulator reports about 1.00x real time; when the ROM actually computes -- opening a menu, drawing a text screen -- the sleep disappears, steps go up, and throughput collapses to about 0.38x, which stretches a 580 ms screen transition to about 1.5 s. It also explains why the fixed-point conversion helped more than its arithmetic share: removing doubles removed dependent loads, not just soft-float calls. Two consequences for anyone optimising further. First, the levers already tried and excluded by measurement stay excluded -- SPI clock bought 13 percent, DMA would remove a per-chunk cost that is not on the critical path, and frame rate does not touch instruction throughput. Second, the only lever with the right magnitude is getting the hot state into internal SRAM: internal memory is on-die and the state is under 3 KB, so the per-access cost there would be a few cycles instead of 43. That is a memory-placement question for this port, not an emulator question -- the same class of constraint as the ROM's 512 KB contiguity limit, where a PSRAM-only heap keeps forcing workarounds."
+  sources:
+    - "userspace/memlat.c: the pointer-chase timing, deployed and run on the watch"
+    - "TamaHarness/portable/tamafb.c: the bench path that prints instr/s, cycles/instr, and the address of the cpu state"
+    - "TamaHarness/portable/splb32.c: SPLB32_PROF counters for steps, sleep steps and IRQs"
+  verification: "Measured on hardware 2026-11-10. 178.83 ns dependent load; cpu state at 0x3ddb0008 and .bss at 0x3dc708f0, both in the PSRAM window; 265k instr/s and 387k steps/s from the on-device bench. The cache question is NOT resolved: CONFIG_MEMMAP_CACHEATTR is 0xffff222f, whose PSRAM nibble is 2, but the Kconfig help states the meaning of each value is MMA-type dependent (WB-no-write-allocate for MPU, cache bypass for region-protection), and which applies here was not established. The 179 ns figure is consistent with an uncached access. A three-working-set comparison (4 KB vs 256 KB) was written but the watch could not be relied on long enough to run it, so it remains unsettled."

@@ -20,3 +20,4 @@ userspace/tamafb
 userspace/romverify
 userspace/fbtime
 scripts/__pycache__/
+userspace/memlat

@@ -196,6 +196,36 @@ Two things that do **not** work and should not be retried:
   SIGSEGV. Making float usable means coprocessor context switching on a NOMMU
   port with a patched `fork()`, which is a much larger risk than using integers.
 
+## Why the emulator crawls when the ROM computes
+
+Measured on the watch: **a dependent load from PSRAM costs 178.83 ns**, about
+43 CPU cycles at 240 MHz. The emulator's whole machine state is 2968 bytes and
+it lives in PSRAM (heap at `0x3ddb0008`, `.bss` at `0x3dc708f0`), so the
+interpreter makes roughly a dozen PSRAM round trips per emulated instruction.
+
+That produces 387k steps/s and ~620 CPU cycles per emulated instruction, and it
+explains every symptom:
+
+```
+idle pet        speed 1.00x   emu 245-290 ms/s   panel 50-110 ms/s
+menu / text     speed 0.38x   emu 900-1140 ms/s  panel  18-28 ms/s
+```
+
+When the guest sleeps, cycles are nearly free, so the emulator keeps real time.
+When the ROM actually computes -- opening a menu, drawing a text screen -- the
+sleep disappears and throughput collapses. The panel figure *falls* during the
+slow stretch, which is what rules the display out as the cause.
+
+This is also why the fixed-point conversion helped: it removed dependent loads,
+not just soft-float calls.
+
+Everything already excluded stays excluded -- SPI clock bought 13 percent, DMA
+targets a cost that is not on this critical path, and frame rate does not touch
+instruction throughput. The only lever with the right magnitude is getting the
+hot state into internal SRAM: under 3 KB, on-die, a few cycles per access
+instead of 43. That is a memory-placement question for this port, the same class
+of constraint as the ROM's 512 KB contiguity limit.
+
 ## Parked: the ~1.5 s wait entering the time screen
 
 Still open, by decision, because it runs fine otherwise.
