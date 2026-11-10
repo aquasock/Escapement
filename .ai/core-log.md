@@ -1,3 +1,35 @@
+## 29 COMMIT Unreleased 2026-11-10T11:56:24-07:00
+
+#### Coming From:
+
+Unreleased 8e19197
+
+#### Purpose:
+
+Take the suggestion to read how LilyGo and ESP-IDF actually drive this peripheral, rather than continuing to reconstruct the sequence from headers, after entry 28 left the driver unable to start a transfer.
+
+#### Outcome:
+
+The method was the fix, and the bus now works: reading ESP-IDF's own `components/driver/i2c/i2c.c` instead of its headers found five further defects that eight header-based flash cycles had not, and with them the peripheral carries real traffic. `i2cdetect` returns a credible scan in which only `1a`, `20`, `34` and `51` answer and every other address is absent, single-byte reads return correct values (`i2cget 0x51 0x04` gives `0x07`, `i2cget 0x34 0xa4` gives `0x4c`), `rtc-pcf85063` registers as `rtc0`, the AXP2101 probes and publishes `axp20x-battery` and `axp20x-usb`, and `axp20x-pek` appears as an input device. Nine defects were found in total, and they are worth listing because each one alone would have been enough to stop the driver: completion was polled on a command's `done` bit which END never sets; `INT_STATUS` is masked by `INT_ENA`, which is zero in polling mode, so it reads zero for ever and `INT_RAW` is the register to poll; the clock gate is closed at boot in `SYSTEM_PERIP_CLK_EN0` bit 7; the peripheral is held in reset in `SYSTEM_PERIP_RST_EN0` bit 7, which is KRN-006 and the expensive one; the timing needs `scl_wait_high_period` and the HAL does not subtract one from `scl_high`; `sclk_div_num` is bits [7:0] and not [13:8]; the GPIO matrix needed the INPUT route as well as the output one, without which the controller could never read SDA and never saw an ACK, and `pad_driver` had to be set for open drain; the ACK flags are per-opcode, with RESTART and STOP taking none, WRITE taking `ack_en` and READ taking `ack_val` only, where this driver had been setting `ack_exp` everywhere and so expecting NACKs; and `rxfifo_cnt` is bits [13:8] rather than the [10:5] a truncated comment in `i2c_struct.h` suggests, which is the second time that header has misled this work. What the cycle demonstrates beyond the bus itself is a method: the headers are incomplete and in at least two places wrong, `i2c_struct.h`'s opcode comment contradicts the HAL and its field comments are truncated, and the driver source that ships with the hardware is the authority. Eight flash cycles were spent before that was tried. What still fails is multi-byte reads: they return the first byte and then `0xff`, so `i2ctransfer -y -f 0 w1@0x51 0x04 r3` gives `0x07 0xff 0xff`. Single-byte reads are correct, which is why the PMU probes fully and the RTC registers but `hctosys` cannot read its seven-byte block and `pca953x` cannot read the expander. The command words were dumped from the running controller and are correct -- RESTART `00003000`, WRITE 1 byte `00000901`, READ 3 bytes `00001c03`, STOP `00001000`, END `00002000` -- so the encoding is not the fault and the fault is in the RX path, where the FIFO only ever holds one byte. The board is left bootable with a partly working bus: PMU and RTC present, expander and touch not, and `tbtns` not running. The backup at `~/twatch-backup/working-2026-11-10-1053.bin` still restores a fully working watch. The core-syntax audit passed: `.ai/core.md` and `.ai/core-syntax.md` were re-read, the complete `.ai/` diff was inspected, `.ai/core.md` was not modified, the reference validates and KRN-006 was revised in place with its verification extended, and this entry was validated against the template with six sections in canonical order, sequential numbering from 28, an ISO-8601 timestamp carrying the America/Phoenix offset, prose-only Outcome and Next Steps, and Status values within the allowed set.
+
+#### Next Steps:
+
+One more attempt at the multi-byte read, then restore regardless of the outcome. The command encoding is proven correct by dump, so the next check is the RX side: how many bytes the FIFO actually holds after a read (dump `SR` and the `rxfifo_cnt` field), whether the drain loop is reading `I2C_DATA` correctly for FIFO mode, and whether ESP-IDF's `i2c_ll_read_rxfifo()` call sites reveal a step this driver is missing. If that does not settle it in one flash, restore `~/twatch-backup/working-2026-11-10-1053.bin`: a watch with a working bit-banged bus is worth more than a watch with a half-working hardware one, and everything learned here is preserved in the driver source, KRN-006 and `docs/cores.md` for the next attempt. Beyond the driver, the deferred items are unchanged and none of them should be started until the bus question is closed either way.
+
+#### Files Modified:
+
+- patches/kernel/i2c/final/i2c-esp32.c
+- patches/kernel/display/final/esp32s3-devkit-c1.dts
+- docs/cores.md
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: FAIL
+
+---
+
 ## 28 COMMIT Unreleased 2026-11-10T11:38:52-07:00
 
 #### Coming From:

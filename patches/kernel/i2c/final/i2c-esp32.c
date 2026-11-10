@@ -66,7 +66,9 @@
 #define I2C_SCL_STOP_HOLD	0x48
 #define I2C_SCL_STOP_SETUP	0x4c
 #define I2C_FILTER_CFG		0x50
+#define I2C_INT_RAW		0x20
 #define I2C_INT_CLR		0x24
+#define I2C_INT_ENA		0x28
 #define I2C_INT_STATUS		0x2c
 #define I2C_CLK_CONF		0x54
 #define I2C_COMD(n)		(0x58 + (n) * 4)	/* 8 commands */
@@ -96,8 +98,10 @@
 #define SR_RESP_REC		BIT(0)		/* ACK received for last byte */
 #define SR_ARB_LOST		BIT(2)
 #define SR_BUS_BUSY		BIT(3)
-#define SR_RXFIFO_CNT_MASK	GENMASK(10, 5)
-#define SR_RXFIFO_CNT_SHIFT	5
+/* rxfifo_cnt is bits [13:8]. An earlier version used [10:5], taken from a
+ * truncated comment, and reported "56 of 7 bytes" for every read. */
+#define SR_RXFIFO_CNT_MASK	GENMASK(13, 8)
+#define SR_RXFIFO_CNT_SHIFT	8
 
 /* FIFO_CONF. */
 #define FIFO_CONF_RX_THRHD(val)	FIELD_PREP(GENMASK(4, 0), (val))
@@ -136,6 +140,10 @@
 #define IO_MUX_FUN_DRV_20MA	BIT(11)
 #define IO_MUX_FUN_IE		BIT(9)
 #define GPIO_FUNC_OEN_SEL	BIT(10)
+#define GPIO_IN_SEL_OFF(sig)	(0x154 + (sig) * 4)	/* FUNC0_IN_SEL_CFG */
+#define GPIO_IN_SEL_GPIO	BIT(7)	/* take the input from the pad, not the matrix */
+#define GPIO_PIN_OFF(pin)	(0x74 + (pin) * 4)	/* PIN0_REG */
+#define GPIO_PIN_PAD_DRIVER	BIT(2)	/* open drain */
 
 /* I2C0's GPIO matrix signals, from soc/esp32s3/gpio_sig_map.h. */
 #define SIG_I2CEXT0_SCL		89
@@ -154,6 +162,7 @@ struct esp32_i2c {
 	u32			bus_freq;
 	struct mutex		lock;		/* one transaction at a time */
 	bool			have_pins;
+	bool			debug;
 };
 
 static inline u32 esp32_i2c_read(struct esp32_i2c *i2c, u32 off)
@@ -206,23 +215,33 @@ static void esp32_i2c_set_timing(struct esp32_i2c *i2c, u32 freq)
 	if (high <= wait_high)
 		high = wait_high + 1;
 
+	/*
+	 * Written to match i2c_ll_set_bus_timing() line for line, including
+	 * where it does and does not subtract one. The HAL's comment explains
+	 * the asymmetry: scl_high and scl_wait_high are deliberately not
+	 * decremented because doing so makes the clock run slightly fast.
+	 */
 	esp32_i2c_write(i2c, I2C_SCL_LOW_PERIOD, half - 1);
-	/* scl_high_period [8:0] and scl_wait_high_period [15:9] share a reg. */
 	esp32_i2c_write(i2c, I2C_SCL_HIGH_PERIOD,
-			FIELD_PREP(GENMASK(8, 0), high - 1) |
+			FIELD_PREP(GENMASK(8, 0), high) |
 			FIELD_PREP(GENMASK(15, 9), wait_high));
-	esp32_i2c_write(i2c, I2C_SDA_HOLD, half / 4);
-	esp32_i2c_write(i2c, I2C_SDA_SAMPLE, half / 2);
-	esp32_i2c_write(i2c, I2C_SCL_START_HOLD, half);
-	esp32_i2c_write(i2c, I2C_SCL_RSTART_SETUP, half);
-	esp32_i2c_write(i2c, I2C_SCL_STOP_HOLD, half);
-	esp32_i2c_write(i2c, I2C_SCL_STOP_SETUP, half);
+	esp32_i2c_write(i2c, I2C_SDA_HOLD, (half / 4) - 1);
+	esp32_i2c_write(i2c, I2C_SDA_SAMPLE, (half / 2) - 1);
+	esp32_i2c_write(i2c, I2C_SCL_START_HOLD, half - 1);
+	esp32_i2c_write(i2c, I2C_SCL_RSTART_SETUP, half - 1);
+	esp32_i2c_write(i2c, I2C_SCL_STOP_HOLD, half - 1);
+	esp32_i2c_write(i2c, I2C_SCL_STOP_SETUP, half - 1);
 
-	/* sclk_div_num is bits [13:8]; the rest of clk_conf stays as it was. */
+	/* sclk_div_num is bits [7:0] -- corrected from [13:8], which is
+	 * sclk_div_a and does fraction division. */
 	clk_conf = esp32_i2c_read(i2c, I2C_CLK_CONF);
-	clk_conf &= ~GENMASK(13, 8);
-	clk_conf |= FIELD_PREP(GENMASK(13, 8), div - 1);
+	clk_conf &= ~GENMASK(7, 0);
+	clk_conf |= FIELD_PREP(GENMASK(7, 0), div - 1);
 	esp32_i2c_write(i2c, I2C_CLK_CONF, clk_conf);
+
+	/* The peripheral's own bus timeout, which the HAL always enables. */
+	esp32_i2c_write(i2c, I2C_TO, FIELD_PREP(GENMASK(4, 0), 0x10) |
+			BIT(10) /* time_out_en */);
 
 	/*
 	 * conf_upgate latches the timing registers into the peripheral's own
@@ -255,6 +274,26 @@ static void esp32_i2c_route_pin(void __iomem *iopad, void __iomem *gpio,
 	iowrite32(v, iopad + IO_MUX_OFF(pin));
 
 	iowrite32(GPIO_FUNC_OEN_SEL | sig, gpio + GPIO_OUT_SEL_OFF(pin));
+
+	/*
+	 * The matching INPUT route. This is what the first version of this
+	 * driver left out, and the symptom was subtle: the transfer started,
+	 * consumed the address byte (txfifo_cnt fell from 3 to 2) and then sat
+	 * there with int_status at zero, because the controller could not read
+	 * SDA back and so never saw an ACK.
+	 *
+	 * ESP-IDF's i2c_set_pin() calls gpio_matrix_in() for exactly this.
+	 * GPIO_SIGn_IN_SEL = 1 selects the pad directly.
+	 */
+	iowrite32(pin | GPIO_IN_SEL_GPIO, gpio + GPIO_IN_SEL_OFF(sig));
+
+	/*
+	 * I2C is open drain: the pad pulls low and a passive pull-up restores
+	 * high. Without pad_driver the pad drives high actively, two devices
+	 * fight, and the bus is not I2C at all.
+	 */
+	iowrite32(ioread32(gpio + GPIO_PIN_OFF(pin)) | GPIO_PIN_PAD_DRIVER,
+		  gpio + GPIO_PIN_OFF(pin));
 
 	if (pin < 32)
 		iowrite32(BIT(pin), gpio + GPIO_ENABLE_W1TS_OFF);
@@ -295,17 +334,32 @@ static void esp32_i2c_route_pins(struct esp32_i2c *i2c)
 		 scl, SIG_I2CEXT0_SCL,
 		 ioread32(iopad + IO_MUX_OFF(scl)),
 		 ioread32(gpio + GPIO_OUT_SEL_OFF(scl)));
+	dev_info(dev, "input sda<-sig%u:%08x scl<-sig%u:%08x pad_driver sda=%u scl=%u\n",
+		 SIG_I2CEXT0_SDA, ioread32(gpio + GPIO_IN_SEL_OFF(SIG_I2CEXT0_SDA)),
+		 SIG_I2CEXT0_SCL, ioread32(gpio + GPIO_IN_SEL_OFF(SIG_I2CEXT0_SCL)),
+		 !!(ioread32(gpio + GPIO_PIN_OFF(sda)) & GPIO_PIN_PAD_DRIVER),
+		 !!(ioread32(gpio + GPIO_PIN_OFF(scl)) & GPIO_PIN_PAD_DRIVER));
 
 	i2c->have_pins = true;
 }
 
 static void esp32_i2c_reset_fifos(struct esp32_i2c *i2c)
 {
-	esp32_i2c_write(i2c, I2C_FIFO_CONF,
-			FIFO_CONF_RX_THRHD(0) | FIFO_CONF_TX_THRHD(0) |
-			FIFO_CONF_RX_RST | FIFO_CONF_TX_RST);
-	esp32_i2c_write(i2c, I2C_FIFO_CONF,
-			FIFO_CONF_RX_THRHD(0) | FIFO_CONF_TX_THRHD(0));
+	u32 v = esp32_i2c_read(i2c, I2C_FIFO_CONF);
+
+	/* Thresholds at the HAL's defaults (11 and 4) rather than zero. Zero
+	 * was an unverified assumption in the first version; matching the HAL
+	 * removes one variable while the one-byte-read bug is chased. */
+	v &= ~(GENMASK(4, 0) | GENMASK(9, 5));
+	v |= FIELD_PREP(GENMASK(4, 0), 11) | FIELD_PREP(GENMASK(9, 5), 4);
+
+	/* Pulse each reset separately, as i2c_ll_txfifo_rst()/rxfifo_rst() do.
+	 * A single write setting both leaves the reset asserted. */
+	esp32_i2c_write(i2c, I2C_FIFO_CONF, v & ~(FIFO_CONF_RX_RST | FIFO_CONF_TX_RST));
+	esp32_i2c_write(i2c, I2C_FIFO_CONF, v | FIFO_CONF_TX_RST);
+	esp32_i2c_write(i2c, I2C_FIFO_CONF, v & ~FIFO_CONF_TX_RST);
+	esp32_i2c_write(i2c, I2C_FIFO_CONF, v | FIFO_CONF_RX_RST);
+	esp32_i2c_write(i2c, I2C_FIFO_CONF, v & ~FIFO_CONF_RX_RST);
 }
 
 static void esp32_i2c_fsm_reset(struct esp32_i2c *i2c)
@@ -381,8 +435,17 @@ static int esp32_i2c_run(struct esp32_i2c *i2c)
 	esp32_i2c_write(i2c, I2C_CTR, ctr | CTR_TRANS_START);
 	(void)esp32_i2c_read(i2c, I2C_CTR);
 
+	/*
+	 * Poll INT_RAW, not INT_STATUS.
+	 *
+	 * INT_STATUS is INT_RAW masked by INT_ENA, and this driver runs the
+	 * controller in polling mode with INT_ENA left at zero -- so INT_STATUS
+	 * reads 0 for ever, no matter what the peripheral is doing. That made
+	 * every transfer look like it never started, when in fact the FSM was
+	 * clocking bytes out and the FIFO was draining.
+	 */
 	for (;;) {
-		st = esp32_i2c_read(i2c, I2C_INT_STATUS);
+		st = esp32_i2c_read(i2c, I2C_INT_RAW);
 
 		if (st & INT_NACK) {
 			esp32_i2c_write(i2c, I2C_INT_CLR, 0xffffffff);
@@ -397,7 +460,7 @@ static int esp32_i2c_run(struct esp32_i2c *i2c)
 
 		if (time_after(jiffies, timeout)) {
 			dev_err_ratelimited(i2c->dev,
-				"I2C timeout: int_status=%08x sr=%08x ctr=%08x\n",
+				"I2C timeout: int_raw=%08x sr=%08x ctr=%08x\n",
 				st, esp32_i2c_read(i2c, I2C_SR),
 				esp32_i2c_read(i2c, I2C_CTR));
 			esp32_i2c_fsm_reset(i2c);
@@ -426,29 +489,39 @@ static int esp32_i2c_xfer_msg(struct esp32_i2c *i2c, struct i2c_msg *msg)
 
 	esp32_i2c_reset_fifos(i2c);
 
+	/*
+	 * Command construction follows ESP-IDF's i2c_master_* exactly, which
+	 * is not what the register comments suggest.
+	 *
+	 *   RESTART  -- op_code only, no ack bits at all
+	 *   WRITE    -- ack_en set to request an ACK from the slave; ack_exp
+	 *               never set (that field expects the slave's ACK to be a
+	 *               *NACK*)
+	 *   READ     -- ack_val only. ack_val = 1 ACKs each received byte,
+	 *               0 NACKs the last one so the slave stops sending.
+	 *   STOP     -- op_code only
+	 *
+	 * The earlier version set ack_exp on every command, which made the
+	 * controller expect NACKs where ACKs arrive.
+	 */
 	if (msg->flags & I2C_M_RD) {
-		/* [RSTART] [WRITE addr|1, 1 byte] [READ len] [STOP] [END] */
-		esp32_i2c_write(i2c, I2C_COMD(n++),
-				CMD_OP_CODE(OP_RSTART) | CMD_ACK_EN);
+		esp32_i2c_write(i2c, I2C_COMD(n++), CMD_OP_CODE(OP_RSTART));
 		esp32_i2c_write(i2c, I2C_COMD(n++),
 				CMD_OP_CODE(OP_WRITE) | CMD_BYTE_NUM(1) |
-				CMD_ACK_EN | CMD_ACK_EXP);
+				CMD_ACK_EN);
+		/* ACK every byte except the last, which is NACKed. */
 		esp32_i2c_write(i2c, I2C_COMD(n++),
 				CMD_OP_CODE(OP_READ) | CMD_BYTE_NUM(msg->len) |
-				CMD_ACK_EN | CMD_ACK_EXP | CMD_ACK_VAL);
-		esp32_i2c_write(i2c, I2C_COMD(n++),
-				CMD_OP_CODE(OP_STOP) | CMD_ACK_EN);
+				CMD_ACK_VAL);
+		esp32_i2c_write(i2c, I2C_COMD(n++), CMD_OP_CODE(OP_STOP));
 
 		esp32_i2c_write(i2c, I2C_DATA, addr | 1);
 	} else {
-		/* [RSTART] [WRITE addr, len] [STOP] [END] */
-		esp32_i2c_write(i2c, I2C_COMD(n++),
-				CMD_OP_CODE(OP_RSTART) | CMD_ACK_EN);
+		esp32_i2c_write(i2c, I2C_COMD(n++), CMD_OP_CODE(OP_RSTART));
 		esp32_i2c_write(i2c, I2C_COMD(n++),
 				CMD_OP_CODE(OP_WRITE) | CMD_BYTE_NUM(msg->len) |
-				CMD_ACK_EN | CMD_ACK_EXP);
-		esp32_i2c_write(i2c, I2C_COMD(n++),
-				CMD_OP_CODE(OP_STOP) | CMD_ACK_EN);
+				CMD_ACK_EN);
+		esp32_i2c_write(i2c, I2C_COMD(n++), CMD_OP_CODE(OP_STOP));
 
 		esp32_i2c_write(i2c, I2C_DATA, addr);
 		for (i = 0; i < msg->len; i++)
@@ -459,6 +532,12 @@ static int esp32_i2c_xfer_msg(struct esp32_i2c *i2c, struct i2c_msg *msg)
 	 * whatever is left in the command registers. */
 	esp32_i2c_write(i2c, I2C_COMD(n), CMD_OP_CODE(OP_END));
 
+	if (i2c->debug && msg->len > 1) {
+		int k;
+		for (k = 0; k <= n; k++)
+			dev_info(i2c->dev, "  comd[%d] = %08x\n", k,
+				 esp32_i2c_read(i2c, I2C_COMD(k)));
+	}
 	if (esp32_i2c_run(i2c))
 		return -ETIMEDOUT;
 
@@ -559,6 +638,7 @@ static int esp32_i2c_probe(struct platform_device *pdev)
 	}
 
 	of_property_read_u32(pdev->dev.of_node, "clock-frequency", &freq);
+	i2c->debug = of_property_read_bool(pdev->dev.of_node, "espressif,debug");
 
 	/* Master mode, clock enabled, pads held by the controller. Exactly
 	 * i2c_ll_master_init()'s CTR value. */
@@ -609,8 +689,6 @@ static int esp32_i2c_probe(struct platform_device *pdev)
 			 !!(ioread32(sys + 0x20) & BIT(7)));
 	}
 
-	/* No timeout of our own inside the peripheral; the driver bounds it. */
-	esp32_i2c_write(i2c, I2C_TO, 0xfffff);
 	esp32_i2c_write(i2c, I2C_FILTER_CFG, 0);
 	esp32_i2c_write(i2c, I2C_FIFO_CONF,
 			FIFO_CONF_RX_THRHD(0) | FIFO_CONF_TX_THRHD(0));

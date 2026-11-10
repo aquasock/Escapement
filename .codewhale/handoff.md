@@ -1,10 +1,10 @@
-# Handoff — Escapement, 2026-11-10T11:40
+# Handoff — Escapement, 2026-11-10T11:57
 
 Linux 7.2.4 on a T-Watch Ultra (ESP32-S3). Real Linux on the watch's own Xtensa
 cores, not emulated. This file is orientation; verify before acting on it.
 
 Canonical detail lives in `.ai/core-reference.md` (63 records, fourteen topics).
-Project history lives in `.ai/core-log.md` (28 entries; newest first — 28, 27, 26, 25, 24, 23,
+Project history lives in `.ai/core-log.md` (29 entries; newest first — 29, 28, 27, 26, 25, 24, 23,
 22, 21, 20, 19, 18, 17, then 1 through 16). Do not re-derive what those hold.
 
 ## Current objective (verbatim)
@@ -17,10 +17,10 @@ persistence, any wake-from-sleep path, and moving the emulator to core 0.
 
 ## Reconstruct (in this order)
 
-1. `git log --oneline -8` — `main` was at `f32af28`, clean and fully pushed,
+1. `git log --oneline -8` — `main` was at `8e19197`, clean and fully pushed,
    before the commit carrying this file.
 2. `.ai/core.md` (policy), then `.ai/core-reference.md` (hardware facts — open
-   the record, not the index line), then `.ai/core-log.md` entries 28, 27, 26.
+   the record, not the index line), then `.ai/core-log.md` entries 29, 28, 27.
 3. `git -C build/esp-hosted/esp_hosted_ng branch --show-current` — expect
    `ble-bond-wip`, five local-only commits.
 
@@ -33,10 +33,11 @@ after a reboot; WiFi 10.10.0.15 at ~409 KB/s; three touch bars paint, click and
 emit BTN_0/1/2; the Tamagotchi runs at a true 1.00x from the flash-resident ROM
 at 40 MHz with eight clean full-width bands.
 
-**THE WATCH HAS NO WORKING I2C RIGHT NOW.** The hardware I2C driver
-(`patches/kernel/i2c/final/i2c-esp32.c`) is flashed and the board boots, but
-PMU, RTC, expander and touch all fail to bind because `trans_start` does not
-start the sequencer. Restore to get a working watch back:
+**The hardware I2C bus WORKS, but only for single-byte reads.** `i2cdetect`
+returns a credible scan (only 1a/20/34/51 answer), the PMU probes fully and
+publishes both supplies, `rtc0` registers, and `axp20x-pek` is an input device.
+Multi-byte reads return only their first byte, so `hctosys` and `pca953x`
+fail and `tbtns` is not running. Restore for a fully working watch:
 
 ```
 ~/twatch-backup/working-2026-11-10-1053.bin    <- i2c-gpio, fully working
