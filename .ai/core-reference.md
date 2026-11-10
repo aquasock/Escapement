@@ -160,6 +160,7 @@ Topic IDs are the `record_id` prefix. An entry reserves a name; it does not clai
 | What is the official sequence to bring the CST9217 up? | TOUCH | TCH-007 |
 | Why does a finger count of 1 not mean a finger is down? | TOUCH | TCH-008 |
 | Which pin is the touch interrupt, and does it help? | TOUCH | TCH-009 |
+| Is the interrupt really doing the work, or is the poll? | TOUCH | TCH-010 |
 | Can userspace draw on /dev/fb0? | LCD | LCD-001 |
 | Why does a thin fill draw nothing while a thick one works? | LCD | LCD-002 |
 | Does a 45x45 window draw, or is it too narrow? | LCD | LCD-008 |
@@ -618,6 +619,20 @@ EMU-010: "The touch daemon costs the emulator about 30 percent of its throughput
     - "patches/kernel/touch/final/cst92xx.c: cst92xx_irq(), the idle/active periods, and cst92xx_service() shared by both paths"
     - "KRN-008 for why the interrupt could not be mapped until the descriptor table was enlarged"
   verification: "Verified on hardware 2026-11-10: IRQ 33 registered against cst92xx, 331 interrupts accumulated during three taps, and a captured event stream showed three presses and three releases with smooth coordinate tracks. Idle rate measured at 20 interrupts over 10 seconds. The bus, RTC, PMU, panel, WiFi and BLE keyboard all remained healthy throughout."
+
+- record_id: TCH-010
+  kind: TOUCH
+  topic_id: TCH
+  status: VERIFIED
+  verified_date: 2026-11-10
+  title: "The touch interrupt, not the poll, is what discovers a touch: with a 5 s idle poll every tap still registers"
+  statement: "With `hynitron,idle-poll-ms = <5000>` the driver reports `idle 5000 ms, active 20 ms, release 250 ms, interrupt driven`, and eight deliberate taps one second apart produced eight presses and eight releases in the captured input event stream, for 255 interrupts on IRQ 33."
+  consequence: "This is what makes the interrupt a proven mechanism rather than an assumed one. The test is designed so the poll cannot be credited: an idle poll of 5 s against a tap that is pressed and released within a fraction of a second means a dead interrupt would usually sample the controller after the finger had already gone, so it would report nothing -- missing most or all of the taps. Eight out of eight registered, which the poll could not have produced. The long idle period is therefore safe to ship, and it is what makes the interrupt's benefit real rather than nominal: idle bus traffic is about 2 reads per second instead of the ~50 an unconditional 20 ms poll generated. The idle poll is deliberately kept rather than removed, at 5 s, as a safety net: if the INT line ever stops asserting, touch degrades to slow instead of disappearing, and a slow tap is a recoverable failure while a dead screen is not."
+  sources:
+    - "patches/kernel/display/final/esp32s3-devkit-c1.dts: the hynitron,idle-poll-ms = <5000> property and the note on why 5 s rather than 250 ms"
+    - "patches/kernel/touch/final/cst92xx.c: device_property_read_u32(dev, \"hynitron,idle-poll-ms\", ...) and the idle/active period selection in cst92xx_irq() and cst92xx_poll()"
+    - "TCH-009 for the interrupt itself and KRN-008 for why it could not be mapped until the descriptor table was enlarged"
+  verification: "Verified on hardware 2026-11-10: kernel reported idle 5000 ms and interrupt driven; a capture of /dev/input/event2 across eight taps contained 48 events decoding to 8 presses and 8 releases with coordinates clustering in one region of the glass (x 158..191, y 208..252), while /proc/interrupts advanced to 255 on IRQ 33."
 
 - record_id: LCD-008
   kind: DISPLAY

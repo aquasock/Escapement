@@ -1,10 +1,10 @@
-# Handoff — Escapement, 2026-11-10T15:38
+# Handoff — Escapement, 2026-11-10T15:48
 
 Linux 7.2.4 on a T-Watch Ultra (ESP32-S3). Real Linux on the watch's own Xtensa
 cores, not emulated. This file is orientation; verify before acting on it.
 
-Canonical detail lives in `.ai/core-reference.md` (72 records, fourteen topics).
-Project history lives in `.ai/core-log.md` (38 entries; newest first — 38, 37, 36, 35, 34, 33, 32,
+Canonical detail lives in `.ai/core-reference.md` (73 records, fourteen topics).
+Project history lives in `.ai/core-log.md` (39 entries; newest first — 39, 38, 37, 36, 35, 34, 33, 32,
 31, 30, 29, 28, 27, 26, 25, 24, 23, 22, 21, 20, 19, 18, 17, then 1 through 16).
 Do not re-derive what those hold.
 
@@ -18,10 +18,10 @@ persistence, any wake-from-sleep path, and moving the emulator to core 0.
 
 ## Reconstruct (in this order)
 
-1. `git log --oneline -8` — `main` was at `de0dfda`, clean and fully pushed,
+1. `git log --oneline -8` — `main` was at `5b23d84`, clean and fully pushed,
    before the commit carrying this file.
 2. `.ai/core.md` (policy), then `.ai/core-reference.md` (hardware facts — open
-   the record, not the index line), then `.ai/core-log.md` entries 38, 37, 36.
+   the record, not the index line), then `.ai/core-log.md` entries 39, 38, 37.
 3. `git -C build/esp-hosted/esp_hosted_ng branch --show-current` — expect
    `ble-bond-wip`, five local-only commits.
 
@@ -34,7 +34,7 @@ RTC        21:38:55, hwclock -r works (used to fail EINVAL)
 PMU 2-byte 0x64 0x00    expander 0x20: 0xff 0xff    haptic 0x5a: 0xe0 0x00
 panel      co5300 bound, fb0 320x400 @16 bpp
 TOUCH      cst92xx-touch input2, CST9220 410x502, IRQ 33, interrupt driven
-           idle poll 250 ms, active 20 ms, release 250 ms
+           idle poll 5000 ms, active 20 ms, release 250 ms
 WiFi       10.10.0.15            BLE keyboard  running
 i2c errs   11 (touch-poll NACKs, all recovered)
 ```
@@ -71,15 +71,20 @@ three presses and three releases with smooth coordinate tracks.
 
 **Interrupt driven** on TP_INT (GPIO 12, falling edge, `int-gpios` +
 `gpiod_to_irq()`, INPUT_PULLUP). Polling is kept at two rates as a safety net:
-**20 ms while touched, 250 ms idle**. That is deliberate — the interrupt wakes
+**20 ms while touched, 5000 ms idle**. That is deliberate — the interrupt wakes
 it, it does not have to be the only path, so a wrong polarity degrades to
-latency instead of losing touch. Idle measured at ~2 interrupts/s. The driver
-takes `hynitron,idle-poll-ms` as a property so the idle poll can be raised to
-prove the interrupt alone is doing the discovery; **that experiment has not
-been run**.
+latency instead of losing touch.
+
+**The interrupt is proven, not assumed** (TCH-010). With the idle poll at 5 s,
+a dead interrupt would usually sample after the finger had gone and miss the
+tap, so the poll cannot be credited. Eight taps one second apart gave **8
+presses and 8 releases**, 255 interrupts on IRQ 33. Idle bus traffic is ~2
+reads/s against the ~50 an unconditional 20 ms poll produced. The 5 s poll is
+retained rather than removed: if INT ever stops asserting, touch goes slow
+rather than dead.
 
 The driver was written from LilyGo's own source, not from a guess — see TCH-005
-through TCH-009 in the reference. The five things that matter:
+through TCH-010 in the reference. The five things that matter:
 
 - **Reset is XL9555 P08, not an SoC GPIO.** Port 1 reads `0xFF` at boot (all
   inputs), so nothing had ever reset the part. The driver gets it as
@@ -149,10 +154,15 @@ time and clean probe semantics and nothing else. Fix it in the touch cycle.
 
 ## Backups — read the directory, do not trust this file
 
-**`working-2026-11-10-1533.bin` is the current, complete state.** Taken
-2026-11-10 15:36, 16 MiB, sha256 `d1b87c30…`. It is the first backup that
-contains interrupt-driven touch and the enlarged interrupt table, taken **after
-a reboot** so it is a cold-boot state.
+**`working-2026-11-10-1533.bin` restores a working watch but not the shipped
+idle period.** Taken 2026-11-10 15:36, 16 MiB, sha256 `d1b87c30…`. It is the
+first backup with interrupt-driven touch, but it predates the 5 s idle poll
+added later the same session, so restoring it gives a 250 ms idle fallback
+instead of 5000 ms. Both work; neither loses touch. **Take a fresh backup**
+(`./scripts/watch-backup.sh`, 16 MiB, ~4 min) so the image matches what ships.
+
+What 1533 contains: interrupt-driven touch and the enlarged interrupt table,
+taken **after a reboot** so it is a cold-boot state.
 
 Verified rather than trusted:
 
@@ -208,8 +218,17 @@ $PY -m esptool --chip esp32s3 --port /dev/ttyACM0 --baud 921600 \
 Linux claims the USB-Serial-JTAG port, and later commands hang at
 `Connecting...`.
 
-## Two traps that cost a session each
+## Three traps that cost a session each
 
+**WiFi dying is usually the BLE radio, not the kernel.** The watch has paired
+with a nearby BLE mouse at least once, and the BLE activity took WiFi down with
+it: the interface stayed UP with the right address, gateway ARP present, IPC
+interrupt climbing, RTC and PMU fine — and not a single packet passed, not even
+to the watch's own gateway. Every kernel-side indicator said healthy. Do not
+debug this as a network or driver fault: check `/run/wpa_supplicant.log` for a
+recent reassociation and ask whether anything BLE is nearby. **Use
+`./scripts/watch-exec.py` (USB console) for verification when WiFi is suspect**
+— it does not share the radio and it proved the kernel was never at fault.
 **Diagnostics must bound their own cost.** This bit twice. An unbounded
 `espressif,debug` dump cost a minute of boot because the console mirrors to
 fbcon over SPI. Then `printk_ratelimit()` was used for the next round — and it

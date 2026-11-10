@@ -101,6 +101,28 @@
 			int-gpios = <&gpio0 12 GPIO_ACTIVE_LOW>;
 			pinctrl-0 = <&touch_int_pins>;
 			pinctrl-names = "default";
+			/*
+			 * Idle poll, deliberately far longer than any plausible
+			 * report interval.
+			 *
+			 * The controller self-reports about every 66 ms while a
+			 * finger is down and asserts INT for each report, so while
+			 * idle this timer should never be what discovers a touch --
+			 * the interrupt is. 5000 ms is chosen to make that
+			 * unambiguous: with values like 250 ms a broken interrupt
+			 * still looks like working touch that is merely a bit
+			 * sluggish, which is exactly the class of bug that hid for
+			 * a session behind the full interrupt table. At 5 s a dead
+			 * interrupt is not subtle -- a tap would take seconds to
+			 * register -- while a working one still responds in about
+			 * one report period.
+			 *
+			 * It is not removed entirely: this is the safety net that
+			 * keeps touch from disappearing completely if the line ever
+			 * stops asserting. A slow tap is recoverable, a dead screen
+			 * is not. See TCH-010.
+			 */
+			hynitron,idle-poll-ms = <5000>;
 		};
 
 		/* XL9555: 16-bit GPIO expander, a PCA9555 clone at 0x20.

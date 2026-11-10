@@ -1,3 +1,34 @@
+## 39 COMMIT Unreleased 2026-11-10T15:47:12-07:00
+
+#### Coming From:
+
+Unreleased 5b23d84
+
+#### Purpose:
+
+Prove that the touch interrupt, and not the safety-net poll, is what discovers a touch, and ship the idle period that makes the interrupt's benefit real.
+
+#### Outcome:
+
+The interrupt is doing the work, and that is now a measurement rather than an assumption. The previous cycle left one claim unproven: the driver was interrupt driven with a 250 ms idle fallback, and at that value a broken interrupt would still look like working touch that was merely sluggish -- the same class of silent failure that hid behind the full interrupt descriptor table for a whole session. The test was designed so the poll could not be credited. `hynitron,idle-poll-ms = <5000>` was set in the device tree, and the driver already reads that property, so the change was one DTS line and one build. Against a 5 s idle poll, a tap that is pressed and released within a fraction of a second is usually sampled by the poll only after the finger has gone, at which point the controller reports nothing: a dead interrupt would miss most or all taps. Eight deliberate taps one second apart produced **eight presses and eight releases**, 48 events in the captured stream, with coordinates clustering in one region of the glass (x 158..191, y 208..252) and `/proc/interrupts` advancing to 255 on IRQ 33. The poll could not have produced that result. The value was therefore kept rather than reverted, because it is both proven and useful: idle bus traffic is about 2 reads per second instead of the ~50 an unconditional 20 ms poll generated. The idle poll is deliberately retained at 5 s as a safety net rather than removed -- if the INT line ever stops asserting, touch degrades to slow instead of disappearing, and a slow tap is recoverable where a dead screen is not. No rebuild was needed beyond the DTS change: the flashed kernel was verified to match the built image by build string, and the running driver reports `idle 5000 ms, active 20 ms, release 250 ms, interrupt driven`. One environmental distraction is worth recording so it is not mistaken for a regression later: partway through verification the watch stopped answering on the network while remaining perfectly healthy on every other measure -- interface UP, correct address, gateway ARP present, IPC interrupt count climbing, RTC and PMU fine. The cause was not the kernel: the operator reported that the watch had paired with a nearby BLE mouse, and WiFi was being disrupted by the BLE activity. All verification from that point was done over the USB console instead. The wiring had been reached over WiFi only; the console proved the kernel was never at fault. The core-syntax audit passed: `.ai/core.md` and `.ai/core-syntax.md` were re-read, the complete `.ai/` diff was inspected, `.ai/core.md` was not modified, all YAML blocks in the reference parse and all 73 records carry the ten required fields with unique ids, and this entry was validated against the template with six sections in canonical order, sequential numbering from 38, an ISO-8601 timestamp carrying the America/Phoenix offset, prose-only Outcome and Next Steps, and Status values within the allowed set.
+
+#### Next Steps:
+
+A full 16 MiB backup should be taken, since `working-2026-11-10-1533.bin` predates the 5 s idle period; the difference is behavioural rather than structural, so the existing image restores a working watch with a 250 ms idle poll, but the saved state should match what ships. After that the next item is the one this work uncovered rather than fixed: the RTC's and PMU's interrupts on GPIO 1 and GPIO 7 are mapped and register, yet show zero counts in `/proc/interrupts`. That was previously attributed to the hardware and now deserves re-testing on its own terms, because the interrupt descriptor table turned out to be the cause of the last unexplained interrupt failure and the same class of problem has not been excluded for these two. The smaller open item is the absent-address `-ETIMEDOUT` versus `-ENXIO` defect, which still makes `i2cdetect` report timeouts for empty addresses and affects no working path. The deferred items are unchanged and none should be started without asking: BLE media keys, the Rii K06 touchpad and Logitech keyboard, firmware-side BLE bond persistence, wake-from-sleep, and moving the Tamagotchi emulator to core 0.
+
+#### Files Modified:
+
+- patches/kernel/display/final/esp32s3-devkit-c1.dts
+- .ai/core-reference.md
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: PASS
+
+---
+
 ## 38 COMMIT Unreleased 2026-11-10T15:38:11-07:00
 
 #### Coming From:
