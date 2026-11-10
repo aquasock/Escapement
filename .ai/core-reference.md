@@ -135,6 +135,8 @@ Topic IDs are the `record_id` prefix. An entry reserves a name; it does not clai
 | How much does raising the SPI clock buy? | LCD | LCD-011 |
 | Why is the emulator slow when the ROM computes? | EMU | EMU-003 |
 | How fast is PSRAM access on this watch? | EMU | EMU-003 |
+| Why not use the other core? | EMU | EMU-004 |
+| Is the interpreter doing more work than it needs to? | EMU | EMU-005 |
 | Why are taps at the top of a bar ignored? | TCH | TCH-004 |
 | Can userspace draw on /dev/fb0? | LCD | LCD-001 |
 | Why does a thin fill draw nothing while a thick one works? | LCD | LCD-002 |
@@ -1040,3 +1042,30 @@ last_reviewed: 2026-11-09
     - "TamaHarness/portable/tamafb.c: the bench path that prints instr/s, cycles/instr, and the address of the cpu state"
     - "TamaHarness/portable/splb32.c: SPLB32_PROF counters for steps, sleep steps and IRQs"
   verification: "Measured on hardware 2026-11-10. 178.83 ns dependent load; cpu state at 0x3ddb0008 and .bss at 0x3dc708f0, both in the PSRAM window; 265k instr/s and 387k steps/s from the on-device bench. The cache question is now settled and the answer is that there is no cache: the core configuration the kernel and toolchain are built against declares XCHAL_DCACHE_SIZE=0 and XCHAL_ICACHE_SIZE=0, with XCHAL_HAVE_MMU=0 and no MMU/MPU/TLB support at all. A three-working-set pointer-chase (4 KB, 256 KB, and a second 256 KB buffer) confirms it from the other direction: 70.30, 68.72 and 78.93 ns -- no locality effect whatsoever, which is impossible if a data cache were operating. So CONFIG_MEMMAP_CACHEATTR is irrelevant here; there is nothing behind it to configure. Note also that CONFIG_MEMMAP_CACHEATTR's PSRAM nibble is 2, which the Kconfig help defines differently per MMA type, so reading it as 'bypass' would have been the wrong conclusion reached from the wrong evidence."
+
+- record_id: EMU-004
+  kind: EMU
+  topic_id: EMU
+  title: "Core 0 has the cache; Linux runs on the core that does not"
+  status: VERIFIED
+  verified_date: 2026-11-10
+  statement: "Both ESP32-S3 cores are identical Xtensa LX7 at 240 MHz, but they are not equivalent for compute. Cache on this chip is enabled and owned by the firmware, which is how ESP-IDF runs from flash-mapped memory at usable speed; the core configuration the Linux kernel and toolchain are built against declares XCHAL_DCACHE_SIZE=0 and XCHAL_ICACHE_SIZE=0 (EMU-003). Core 0 runs the ESP-IDF firmware and its radios and is idle apart from network and esp-hosted traffic. Linux runs on core 1 alone: CONFIG_HAVE_SMP is not set in the built config, and the LX7 config declares XCHAL_HAVE_EXCLUSIVE=0, so the atomic exclusive operations an SMP kernel needs to synchronise are absent -- SMP is not merely unconfigured, it is not supportable on this core."
+  consequence: "This is the architectural reason the SPLB32 emulator is slow, and it is a different answer from every optimisation attempted this session. The emulator runs on the one core of two that has no cache and no internal SRAM, at roughly 30 ns per random dependent PSRAM access. The same interpreter on core 0 would run with cache and reachable internal SRAM. The design that follows is to move the emulation to core 0 -- cached, fast -- have it write its 292x300 display into a shared buffer, and leave core 1 running a thin program that blits that buffer to fb0, so compute happens on the cached core and only drawing happens on the core that owns SPI. That is not a small change and it must be weighed against three recorded constraints: core 0 owns the WiFi link this project's console depends on, and starving it trips the FreeRTOS task watchdog (BLE-004, rst:0x7 TG0WDT_SYS_RST); a flash write from core 0 after Linux is up aborts because the IPC call meant to park core 1 never completes (JFS-001); and the firmware tree must never be pushed, its origin being upstream jcmvbkbc/esp-hosted rather than this project."
+  sources:
+    - "build/esp-hosted/esp_hosted_ng/esp/esp_driver/network_adapter/build/network_adapter.map: iram0_0_seg 0x40374000 size 0x58700, dram0_0_seg 0x3fc88000 size 0x54700, _heap_start 0x3fca68f0"
+    - "build/kernel/linux-7.2.4/.config: # CONFIG_HAVE_SMP is not set"
+    - "build/toolchain/xtensa-dynconfig/esp32s3.so: XCHAL_DCACHE_SIZE=0, XCHAL_ICACHE_SIZE=0, XCHAL_HAVE_EXCLUSIVE=0"
+  verification: "Config and core facts read from the built artefacts rather than assumed. The claim that core 0's cache is enabled is inferred from ESP-IDF's normal operation, not measured on this unit -- the firmware does not report its cache configuration, so if the emulator is moved to core 0 that inference should be confirmed by measurement before the design is committed to."
+
+- record_id: EMU-005
+  kind: EMU
+  topic_id: EMU
+  title: "The interpreter retires far more native instructions per emulated instruction than it needs to"
+  status: OPEN
+  verified_date: 2026-11-10
+  statement: "Per emulated instruction the interpreter spends about 3676 ns, against a measured yardstick of 12.77 ns for a simple native operation (a dependent-free add chain, implying roughly 78 million simple operations per second). That is on the order of 250 native instructions per emulated instruction once the memory accesses within it are costed at their measured 26-38 ns rather than at the arithmetic rate. A tuned 6502 interpreter retires one guest instruction in 30 to 80 native instructions, so this core is running 3 to 8 times heavier than it needs to."
+  consequence: "Reducing native work per emulated instruction is the only optimisation with the right magnitude that does not require firmware changes, and it is the recommended next step over moving the emulator to core 0 (EMU-004), which is larger and riskier. The concrete shape: keep the guest's registers, flags and program counter in host variables across a decoded block instead of reloading each field from PSRAM per access, and use compact table-driven or computed-goto dispatch so that handlers are not spread across a 6796-instruction switch on a core with no I-cache. Expected 2-3x, which would take the menu from 0.38x to roughly 0.9-1.15x. NOT YET MEASURED: the native-instruction count per emulated step. Two attempts to run the decomposition benchmark on hardware were defeated by a deploys that failed for lack of memory, so the 250 figure is derived from timing, not counted. Counting it is the first task for whoever picks this up."
+  sources:
+    - "TamaHarness/portable/splb32.c: exec_op_sem, read8/write8, splb32_step"
+    - "docs/tamagotchi.md: 'Why the emulator crawls when the ROM computes'"
+  verification: "The 3676 ns per step and the 12.77 ns yardstick are measured on hardware. The native-instruction count is derived, not counted -- explicitly unresolved. Of 393 instructions sampled from exec_op_sem, 39 are memory operations (10 percent), which bounds how much of the cost can be memory access within the handler itself."

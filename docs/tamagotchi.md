@@ -245,6 +245,40 @@ So PSRAM latency is a hard floor. The lever that remains is reducing the
 against the dozen an interpreter needs with decode state held in locals across a
 block. That is 2-3x, in userspace, with no coherency risk.
 
+## The architectural answer: the other core has the cache
+
+Both ESP32-S3 cores are identical Xtensa LX7 at 240 MHz, but they are not
+equivalent for compute. Cache is enabled and owned by the firmware side, which
+is how ESP-IDF runs from flash-mapped memory at usable speed; the core
+configuration the Linux kernel is built against declares `XCHAL_DCACHE_SIZE=0`
+(EMU-003). Linux runs on core 1 alone -- `CONFIG_HAVE_SMP` is not set and the
+LX7 config declares `XCHAL_HAVE_EXCLUSIVE=0`, so SMP is not supportable.
+
+So the emulator is running on the one core of two that has no cache. Core 0,
+running nothing but WiFi and the esp-hosted link, is idle and cached.
+
+The design that follows is to emulate on core 0 and draw on core 1: core 0
+writes its 292x300 display into a shared buffer, and a thin Linux program blits
+that to fb0. Compute lands on the cached core; only drawing lands on the core
+that owns SPI.
+
+**Not started, deliberately.** It needs firmware work in the tree that must
+never be pushed (its origin is upstream), core 0 owns the WiFi link this
+project's console depends on, and starving core 0 trips the FreeRTOS watchdog
+(`BLE-004`, `rst:0x7 TG0WDT_SYS_RST`). Recorded as EMU-004.
+
+## The smaller lever, and the one to try first
+
+The interpreter retires on the order of 250 native instructions per emulated
+instruction, against the 30-80 a tuned 6502 core needs. Keeping guest registers,
+flags and PC in host variables across a decoded block -- instead of reloading
+each field from PSRAM per access, in handlers spread across a 6796-instruction
+switch -- is worth 2-3x, in userspace, with no firmware risk.
+
+**That 250 is derived from timing, not counted.** Counting it is the first task
+for whoever continues; if it comes out near 80 instead, this port tops out
+around 0.5x and the core-0 design is the only real answer. Recorded as EMU-005.
+
 ## Parked: the ~1.5 s wait entering the time screen
 
 Still open, by decision, because it runs fine otherwise.

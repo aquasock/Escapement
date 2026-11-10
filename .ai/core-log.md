@@ -1,3 +1,100 @@
+## 18 COMMIT Unreleased 2026-11-10T02:00:00-07:00
+
+#### Coming From:
+
+Unreleased 5b05745
+
+#### Purpose:
+
+Find what actually limits the Tamagotchi emulator on this board, after two
+sessions of optimising the wrong thing.
+
+#### Outcome:
+
+The limit is the port, not the chip, and the evidence now says so three
+independent ways. First, per-second telemetry taken across a real menu press on
+hardware: the emulator's own cost goes from 245-290 ms per second while the pet
+idles to 900-1140 ms while a menu is open, while the panel figure FALLS from
+50-110 ms to 18-28 ms. The display was never involved; a 580 ms ROM transition
+becomes about 1.5 s because the guest gets a third of the real time it needs.
+Second, the arithmetic: 3.68 us per emulated instruction measured against a
+12.77 ns native yardstick, and 26-38 ns for any single memory access. Third, the
+mechanism: the core configuration the kernel and toolchain are built against
+declares XCHAL_DCACHE_SIZE=0, XCHAL_ICACHE_SIZE=0 and XCHAL_HAVE_MMU=0, so there
+is no cache at all -- confirmed from the other direction by a three-working-set
+pointer chase on the watch (4 KB 70.30 ns, 256 KB 68.72 ns, second buffer
+78.93 ns) which shows no locality effect whatsoever, and impossible if a cache
+were operating. The device tree gives Linux exactly one memory region,
+memory@0 at 0x3d800000 for 8 MB of PSRAM, so there is no internal SRAM to move
+the hot state into either. Both memory-level escape routes are closed.
+
+The architectural consequence is the interesting result and it is new: both cores
+are identical Xtensa LX7 at 240 MHz, but core 0 -- the firmware side -- is the
+one with cache enabled and internal SRAM reachable, while Linux runs on core 1
+alone (CONFIG_HAVE_SMP is not set and XCHAL_HAVE_EXCLUSIVE=0, so SMP is not
+supportable). The emulator is therefore running on the one core of two that has
+no cache. Moving emulation to core 0 and leaving core 1 to blit is the plausible
+full-speed design, and it is deliberately NOT started: it needs firmware work in
+the tree that must never be pushed, core 0 owns the WiFi link this project's
+console depends on, and starving it trips the FreeRTOS watchdog (BLE-004).
+The recommended next step is smaller and safer: the interpreter retires roughly
+250 native instructions per emulated instruction against the 30-80 a tuned core
+needs, so keeping guest registers, flags and PC in host variables across a
+decoded block is a 2-3x lever entirely in userspace. That figure is derived from
+timing and has NOT been counted -- two attempts were defeated by deploys failing
+for lack of memory, and counting it is the first task for whoever continues.
+
+Delivered and verified along the way: USB deploys fixed (scripts/usb-send.py
+streams through one console session, 249 KB in 12 s against the previous 370
+separate logins taking about 18 minutes, 4/4 large and 4/4 small); the
+interpreter converted to fixed-point after measuring doubles at 711 ns against
+121 ns for integers, proven equivalent over 200M cycles and across a button
+press; 40 MHz qualified on the panel with eight full-width bands and made the
+driver's compiled-in default, buying 13 percent rather than the 2x hoped for,
+which is itself the evidence that transfers are not clock bound; and the
+emulator given EEPROM save persistence so a pet survives a restart.
+
+Two mistakes worth recording because they cost real time. An interrupted 16 MiB
+restore wiped /home down to five files, which looked like a boot loop; the
+signature is a half-written jffs2 partition, and the fix is to let the restore
+run to completion rather than killing it, with nothing else holding the port.
+And a boot loop I initially blamed on the 40 MHz kernel was almost certainly the
+interrupted flash itself -- the same clock had booted and been played for a long
+session beforehand. esptool also needs --after no_reset and a modest baud when
+the board is reset-looping, or it cannot sync.
+
+#### Next Steps:
+
+Count native instructions retired per emulated step before writing any
+interpreter restructure; EMU-005 records that this is derived and unmeasured.
+The decomposition benchmark exists at userspace/../TamaHarness/portable but needs
+a build that fits -- the watch has about 850 KB available and a 700 KB static
+binary will not run, so build it dynamically linked (575 KB) and clear the
+scratch binaries out of /home first. If the count is near 250, do the
+block-register interpreter for the 2-3x; if it is nearer 80, this port genuinely
+tops out around 0.5x and the honest answer is the core-0 design or nothing.
+After that, the parked ~1.5 s time-screen issue is the same problem seen from the
+other end and needs no separate work. The watch is on the 40 MHz kernel with
+spi_hz=40000000 as the compiled default, /home intact, and no emulator running.
+Newest backup is ~/twatch-backup/working-2026-11-10-0023.bin, sha256 9c60af8a --
+it predates the 40 MHz kernel, so restoring it returns the panel to 20 MHz and
+the clock has to be reflashed afterwards.
+
+#### Files Modified:
+
+`.ai/core-reference.md`, `docs/tamagotchi.md`, `userspace/memlat.c`,
+`scripts/usb-send.py`, `scripts/watch-deploy.sh`, `scripts/watch-exec.py`,
+`patches/kernel/display/final/co5300.c`, `userspace/tbtns.c`,
+`userspace/run-tama.sh`, `.gitignore`
+
+#### Status:
+
+- Build: PASS (kernel 40 MHz default; userspace binaries)
+- Deployment: PASS (kernel flashed and verified; /home restored and intact)
+- User Test: PASS (menus measured on hardware; pet hatched and playable)
+
+---
+
 ## 17 COMMIT Unreleased 2026-11-09T23:15:52-07:00
 
 #### Coming From:
