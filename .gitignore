@@ -18,3 +18,5 @@ userspace/panel-test
 # Cross-compiled from TamaHarness/portable; deploy /home/tamafb on the watch.
 userspace/tamafb
 userspace/romverify
+userspace/fbtime
+scripts/__pycache__/

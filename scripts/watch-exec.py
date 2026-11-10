@@ -23,7 +23,40 @@ import sys
 import time
 import tty
 
-PORT = os.environ.get("WATCH_PORT", "/dev/ttyACM0")
+def _find_port():
+    """Locate the watch's USB console.
+
+    Do NOT hardcode /dev/ttyACM0. Replugging the board, or anything that resets
+    its USB peripheral, re-enumerates it as ttyACM1, ttyACM2 and so on -- and a
+    script pointed at the old number talks to a device that no longer exists.
+    The failure is not a clean error: opens succeed against the stale node often
+    enough to look like a wedged link, commands come back empty, and the board
+    appears frozen when it is fine. That cost real hours here.
+
+    The by-id symlink is stable across re-enumeration because it is derived
+    from the chip's MAC address, so follow that instead.
+    """
+    override = os.environ.get("WATCH_PORT")
+    if override:
+        return override
+
+    by_id = "/dev/serial/by-id"
+    try:
+        for name in sorted(os.listdir(by_id)):
+            if name.startswith("usb-Espressif"):
+                return os.path.realpath(os.path.join(by_id, name))
+    except OSError:
+        pass
+
+    # Fall back to the first ttyACM that exists.
+    for n in range(8):
+        cand = "/dev/ttyACM%d" % n
+        if os.path.exists(cand):
+            return cand
+    return "/dev/ttyACM0"
+
+
+PORT = _find_port()
 
 # The watch's root password is not kept in this repository. Provide it with
 # WATCH_PASS, or in a file (default ~/.config/escapement/watch-pass, mode 600):

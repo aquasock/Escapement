@@ -121,6 +121,72 @@ struct co5300_bench {
  */
 #define CO5300_RECT_ROWS_PER_BAND	2
 
+/*
+ * SPI clock, as a runtime knob rather than a #define.
+ *
+ * Three things on this project collide over this number. The panel is
+ * documented as running at 20 MHz in the reference firmware and that is
+ * "proven", so it is the default. But 20 MHz caps a full-frame transfer at
+ * about 45 ms, which is the difference between the emulator keeping real time
+ * and not. And the evidence that 45 MHz was unsafe comes from the reference
+ * firmware -- which also carried the SPI_USR_COMMAND/SPI_USR_ADDR-resent-per-
+ * chunk bug that restarts the panel's write pointer every 64 bytes. That bug
+ * is fixed here. A write-pointer desync and a clock-margin failure look the
+ * same on the glass, so the 45 MHz verdict may have been about the bug.
+ *
+ * Making it writable at runtime means one flash answers the question: write a
+ * value to /sys/module/co5300/parameters/spi_hz, force a repaint, and look.
+ * Testing three clocks by rebuilding three kernels would cost three 16 MiB
+ * backups and three boot cycles to learn the same thing.
+ *
+ * The setter has to reach the LIVE spi_device, not just the module variable:
+ * a plain module_param() would store the new number and change nothing, since
+ * the value actually used is spi->max_speed_hz. esp32_spi_exec_op() compares
+ * that against the programmed speed on every op and reprograms the divider, so
+ * assigning it here takes effect on the next transfer without re-probing.
+ */
+#define CO5300_SPI_HZ_DEFAULT	20000000u
+#define CO5300_SPI_HZ_MIN	 1000000u
+#define CO5300_SPI_HZ_MAX	80000000u
+
+static unsigned int spi_hz = CO5300_SPI_HZ_DEFAULT;
+
+/* Set in probe; the parameter setter needs it to reach the live device. */
+static struct spi_device *co5300_spi_dev;
+
+static int co5300_spi_hz_set(const char *val, const struct kernel_param *kp)
+{
+	u32 hz;
+	int rc = kstrtou32(val, 0, &hz);
+
+	if (rc)
+		return rc;
+	if (hz < CO5300_SPI_HZ_MIN || hz > CO5300_SPI_HZ_MAX)
+		return -EINVAL;
+
+	((unsigned int *)kp->arg)[0] = hz;
+
+	/*
+	 * Assigning max_speed_hz touches no hardware: it is the contract with the
+	 * SPI core, and esp32_spi_exec_op() compares it against the programmed
+	 * speed on every op and reprograms the divider when they differ. So the
+	 * new clock takes effect at the next op -- which is a safe boundary --
+	 * rather than in the middle of a pixel burst.
+	 */
+	if (co5300_spi_dev)
+		co5300_spi_dev->max_speed_hz = hz;
+
+	return 0;
+}
+
+static const struct kernel_param_ops co5300_spi_hz_ops = {
+	.set = co5300_spi_hz_set,
+	.get = param_get_uint,
+};
+
+module_param_cb(spi_hz, &co5300_spi_hz_ops, &spi_hz, 0644);
+MODULE_PARM_DESC(spi_hz, "CO5300 SPI clock in Hz (default 20000000; try 30000000 and 40000000)");
+
 #define PANEL_W 410
 #define PANEL_H 502
 #define PANEL_OFFSET_X 22
@@ -1161,7 +1227,10 @@ static int co5300_probe(struct spi_mem *mem)
 	 */
 	spi->mode &= ~(SPI_CPOL | SPI_CPHA | SPI_CS_HIGH | SPI_LSB_FIRST);
 	spi->bits_per_word = 8;
-	spi->max_speed_hz = 20000000;	/* proven on this panel */
+	spi->max_speed_hz = spi_hz;	/* default 20 MHz, see the module_param above */
+
+	/* Publish the device so the parameter setter can retune it later. */
+	co5300_spi_dev = spi;
 	ret = spi_setup(spi);
 	if (ret)
 		return dev_err_probe(dev, ret, "spi_setup failed\n");

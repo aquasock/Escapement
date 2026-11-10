@@ -161,14 +161,21 @@ static int release_ms = 200;
 /*
  * Gap between polls, in milliseconds.
  *
- * The controller reports on a 66 ms cadence while the glass is touched, so
- * polling near that cadence is the natural choice. Measured on hardware at ten
- * quick taps: nine readable reports and eight presses, the loss being a tap that
- * fell between polls. That is accepted rather than chased -- a deliberate press
- * always lands, and polling harder to catch a deliberate flick is not worth the
- * bus traffic on a device whose reads are already unreliable.
+ * The controller reports on a 66 ms cadence while the glass is touched, so a
+ * poll faster than that cannot see a report sooner than it exists. What it CAN
+ * do is shrink the wait between the report appearing and us reading it.
+ *
+ * This was 60 ms, which mean a tap could land in the buffer and then sit there
+ * for another 60 ms -- measured on the watch, one touch read costs about 4 ms
+ * (avg 3957 us over 30 polls, worst 10710), so the 60 ms gap was 15x the cost
+ * of the read it was spacing out and was pure added latency on every press.
+ *
+ * At 15 ms the duty cycle is 4/(15+4) = 21%, which is cheap, and the worst-case
+ * wait for an existing report falls from 60 ms to 15 ms. Going below ~10 ms
+ * buys little, because the controller itself only produces a new report every
+ * 66 ms.
  */
-#define POLL_MS 60
+#define POLL_MS 15
 
 static int verbose, dry_run, oneshot;
 
