@@ -582,7 +582,7 @@ EXT-003: "A fullscreen app on fb0 flickers against fbcon because every printk re
   status: VERIFIED
   verified_date: 2026-11-09
   statement: "Every `printk` is mirrored to all registered consoles, and on this board fbcon on the CO5300 is one of them. A program drawing to `/dev/fb0` and the console repainting over it therefore take turns on the same panel, which on the glass is a flicker between the app and console text. The trigger here was continuous: the touch daemon polls the CST9217 at I2C 0x1A every 60 ms, the controller NAKs intermittently, and `i2c-gpio` prints `sendbytes: NAK bailout` for each one at KERN_ERR."
-  consequence: "`console_loglevel` decides whether this happens at all, so the fix is a sysctl rather than a driver change: `/etc/sysctl.conf` now sets `kernel.printk = 1 4 1 7`, and emergencies only reach the panel. Any fullscreen app on this board needs that, or needs to raise and lower the level itself around its run. It hides the NAK message rather than stopping the NAKs, which are a property of the touch controller (TCH-003)."
+  consequence: "`console_loglevel` decides whether this happens at all, so the fix is a sysctl rather than a driver change: `/etc/sysctl.conf` now sets `kernel.printk = 1 4 1 7`, and emergencies only reach the panel. Any fullscreen app on this board needs that, or needs to raise and lower the level itself around its run. It hides the NAK message rather than stopping the NAKs, which are a property of the touch controller (TCH-003). There is a second, independent source that loglevel does nothing about: fbcon blinks the console cursor on a timer and repaints that one cell each time, which lands on a fullscreen app as a small blinking hole. The knob is `/sys/class/graphics/fbcon/cursor_blink`; a fullscreen app should save it, write 0, and restore on exit rather than disabling the cursor for the whole session, because a blinking cursor is correct at a shell prompt."
   sources:
     - "on the watch: `/proc/sys/kernel/printk` reading 7 4 1 7 while the emulator ran, with NAK lines arriving continuously"
     - "docs/tamagotchi.md: the flicker and the sysctl"
@@ -694,7 +694,7 @@ EXT-003: "A fullscreen app on fb0 flickers against fbcon because every printk re
   sources:
     - "kernel log on hardware: 'nommu: Allocation of length 1052672 from process 222 (corebench) failed' and 'Allocation of length 569344 ... (tamafb) failed'"
     - "TamaHarness/for-escapement/RESULTS-3.md: the workarounds and the fragmentation cliff"
-  verification: "Reproduced repeatedly on hardware: a statically embedded 512 KB ROM failed to exec after a few minutes of uptime and succeeded immediately after a reboot; the same payload read into a runtime allocation started, and then reported its own failure when the allocation could not be met."
+  verification: "Reproduced repeatedly on hardware: a statically embedded 512 KB ROM failed to exec after a few minutes of uptime and succeeded immediately after a reboot; the same payload read into a runtime allocation started, and then reported its own failure when the allocation could not be met. Revised 2026-11-09 (core-log entry 16): the cliff is not limited to large payloads. A 222 KB static binary started reliably when the largest free block was 1 MB, and once it fell to 256 KB the same binary started in the foreground every time but died with SIGSEGV roughly one launch in three when backgrounded with `&` -- so exec itself becomes marginal near the block size, and foreground and background are not equivalent."
 
 - record_id: KRN-002
   kind: KERNEL

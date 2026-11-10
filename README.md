@@ -101,7 +101,10 @@ correctness is established separately. What this project contributes is a place
 to run it: the ROM lives **raw in flash** at `0x480000` and is read through the
 kernel's linear flash window at `0x42480000`, so it costs no RAM at all and
 starts at any uptime. That matters because a 512 KB `malloc` succeeds on a fresh
-boot and fails once the heap fragments — see `docs/tamagotchi.md`.
+boot and fails once the heap fragments — see `docs/tamagotchi.md`. While it
+runs it turns off the console's blinking cursor and restores it on exit, because
+that blink is a timer that repaints one cell over the game — loglevel does not
+touch it.
 
 **Works: a text console on the AMOLED.** Black background, green text, blinking
 cursor, 40 columns by 25 rows:

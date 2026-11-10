@@ -487,3 +487,34 @@ The buttons now press, emit BTN_0/1/2 and click, and nothing consumes the events
 - User Test: PASS
 
 ---
+
+## 16 COMMIT Unreleased 2026-11-09T19:31:21-07:00
+
+#### Coming From:
+
+Unreleased 3964fc8
+
+#### Purpose:
+
+Stop the console's blinking cursor showing through the Tamagotchi as a hole.
+
+#### Outcome:
+
+The cursor is now suppressed while the emulator runs and restored when it exits, and the operator confirmed the picture is clean. It was a second, independent source of console bleed-through rather than a variant of the first: `console_loglevel` silences `printk`, but fbcon blinks the cursor on its own timer and repaints that one cell each time, so it sailed straight through the sysctl fix from the previous cycle. The knob is `/sys/class/graphics/fbcon/cursor_blink`, which exists on this kernel and read 1. `tamafb` now saves the current value, writes 0 before its first frame, and writes the saved value back before it prints its results -- restoring rather than leaving it off, because a blinking cursor is correct at a shell prompt and turning it off for the session would be a regression disguised as a fix. Verified: `blink=0` while the process runs and `1` after it exits. Chasing it also turned up a real limit that constrains the next step, and it is recorded as a revision to KRN-001 rather than as a footnote. Backgrounding the emulator failed intermittently with SIGSEGV, and the cause was not the new cursor code: at a fragmented moment the largest free contiguous block had fallen to 256 KB, and the 222 KB static binary then started in the foreground every time while dying roughly one launch in three when backgrounded with `&`. So exec is subject to the same contiguity rule as any allocation, the margin is thin near the block size, and foreground and background are not equivalent. That matters directly for making the emulator a service: starting it early from rcS avoids the situation, starting it late does not. Getting the launch to succeed for the operator's check took a retry loop, and the earlier foreground runs at 1.00x are what showed the fault was in the launch rather than in the code. The core-syntax audit passed: the `.ai/` diff was inspected, `.ai/core.md` was not modified, entry 16 was validated against the template with six sections in canonical order, sequential numbering from 15, an ISO-8601 timestamp carrying the America/Phoenix offset, prose-only Outcome and Next Steps, eligible Files Modified, and Status values within the allowed set.
+
+#### Next Steps:
+
+The emulator is presentable now: it runs, it draws, the console stays out of the way, and the bars click. Two things remain before it is a game, and the first is small. Nothing consumes BTN_0/1/2, so the pet cannot be played; `splb32_pin(cpu, 0, mask, level)` on PA bits 0x01/0x02/0x04 with level 1 for press and -1 for release is the hook, and tamagui.c already drives exactly that from a keyboard, so the mapping is known and the work is reading /dev/input/event3 each frame and holding the state across frames. The second is making it a service, and that now has a constraint attached: the binary must be started early, from rcS, because exec is subject to the contiguity rule and the margin is thin -- the measurement above is the reason not to simply copy S50tbtns. Separately, pressed and released imagery on the bars would need nothing new, since CO5300_IOC_WRITE_RECT already writes panel rectangles. Larger items still open: the pwrite-versus-render split for the emulator is unmeasured, LCD-009's tearing root cause is unresolved with SPI clock the remaining suspect, and the top-bar status daemon has not been started. The Logitech keyboard, the K06's touchpad and BLE media keys are parked by user decision.
+
+#### Files Modified:
+
+- README.md
+- docs/tamagotchi.md
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: PASS
+
+---

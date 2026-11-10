@@ -119,13 +119,20 @@ so `MAP_SHARED` returns `ENODEV` (LCD-001). Use `pwrite()` per band — that is
 `fb_write`, which the driver does implement, and one call per band matches the
 driver's one-window-per-transfer shape.
 
-**The console fights the game.** Every `printk` mirrors to all consoles and
+**The console fights the game, twice over.** Every `printk` mirrors to all consoles and
 fbcon is one of them, so a kernel message repaints console text over the frame
 and the next frame repaints back — a visible flicker. On this board the trigger
 was constant: the touch daemon polls the CST9217, it NAKs, `i2c-gpio` prints a
 line per NAK. `/etc/sysctl.conf` now sets `kernel.printk = 1 4 1 7` so routine
 messages do not reach the panel. Raise it for a boot with
 `echo 7 4 1 7 > /proc/sys/kernel/printk` when debugging.
+
+Loglevel does **not** cover the second source: fbcon blinks the console cursor on
+a timer and repaints that cell each time, which shows on a fullscreen app as a
+small blinking hole. `tamafb` writes 0 to
+`/sys/class/graphics/fbcon/cursor_blink` at start and restores the previous value
+on exit — restoring rather than leaving it off, because a blinking cursor is
+correct at a shell prompt.
 
 ## Measured
 
@@ -144,8 +151,13 @@ LCD-005 and LCD-010. At 4 fps the egg hatches in roughly real time.
 - **Buttons are not wired.** The three touch bars emit `BTN_0/1/2` and nothing
   consumes them; `splb32_pin(cpu, 0, mask, level)` with PA bits `0x01/0x02/0x04`
   is the hook, and `tamagui.c` already does exactly this from a keyboard.
-- **Not a service.** It is launched by hand; a `S51tamafb` would make it
-  resident, which the flash ROM now makes practical at any uptime.
+- **Not a service.** It is launched by hand. The flash ROM removed the 512 KB
+  allocation, but a `S51tamafb` needs care for a second reason: the binary is
+  222 KB static and *exec* is subject to the same contiguity rule (KRN-001).
+  Measured at a fragmented moment with the largest free block at 256 KB, the
+  same binary started in the foreground every time and died with SIGSEGV about
+  one launch in three when backgrounded with `&`. Starting it early, from rcS,
+  avoids this; starting it late does not.
 - **The `pwrite` cost is unmeasured separately from rendering.** LCD-005's
   ~190 ms per frame conflicts with LCD-010's 45.7 ms projection by 4.2x, and
   instrumenting `render_band` against the `pwrite` would settle which dominates.
