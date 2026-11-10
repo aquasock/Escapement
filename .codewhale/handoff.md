@@ -1,10 +1,10 @@
-# Handoff — Escapement, 2026-11-10T10:27
+# Handoff — Escapement, 2026-11-10T10:44
 
 Linux 7.2.4 on a T-Watch Ultra (ESP32-S3). Real Linux on the watch's own Xtensa
 cores, not emulated. This file is orientation; verify before acting on it.
 
 Canonical detail lives in `.ai/core-reference.md` (63 records, fourteen topics).
-Project history lives in `.ai/core-log.md` (25 entries; newest first — 25, 24, 23,
+Project history lives in `.ai/core-log.md` (26 entries; newest first — 26, 25, 24, 23,
 22, 21, 20, 19, 18, 17, then 1 through 16). Do not re-derive what those hold.
 
 ## Current objective (verbatim)
@@ -17,10 +17,10 @@ persistence, any wake-from-sleep path, and moving the emulator to core 0.
 
 ## Reconstruct (in this order)
 
-1. `git log --oneline -8` — `main` was at `109f9b5`, clean and fully pushed,
+1. `git log --oneline -8` — `main` was at `a47de90`, clean and fully pushed,
    before the commit carrying this file.
 2. `.ai/core.md` (policy), then `.ai/core-reference.md` (hardware facts — open
-   the record, not the index line), then `.ai/core-log.md` entries 25, 24, 23.
+   the record, not the index line), then `.ai/core-log.md` entries 26, 25, 24.
 3. `git -C build/esp-hosted/esp_hosted_ng branch --show-current` — expect
    `ble-bond-wip`, five local-only commits.
 
@@ -139,8 +139,12 @@ malloc(524000) succeeds — the boundary is the allocator header — and splitti
 the ROM into two halves fails for the same reason. KRN-004. The front end's code
 is deployed and correctly falls back with `rom: flash window`.
 
-**`tbtns` standing down is done and verified** — 34.7 percent recovered, both
-transitions in `/home/tbtns.log`.
+**`tbtns` costs 34.7 percent and it is NOT the poll rate.** Slowing 15 ms to
+66 ms moved throughput 1.1 percent, so the cost is per-wakeup, not per-read.
+Unexplained; profile before acting on it. The daemon now *slows* rather than
+stops during gameplay, because `tamafb`'s only input is the device `tbtns`
+injects — stopping it made the buttons dead. Both transitions are in
+`/home/tbtns.log`.
 
 ## Tooling
 

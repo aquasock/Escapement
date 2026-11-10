@@ -178,13 +178,13 @@ static int release_ms = 200;
 #define POLL_MS 15
 
 /*
- * Poll interval used while standing down for a fullscreen app. Long enough to
- * cost nothing, short enough that resuming after the app exits is not
- * noticeable -- 200 ms is about three frames of the touch controller's own
- * 66 ms report cadence, so a finger already on the glass is picked up within
- * one deliberate press.
+ * Poll interval used while a fullscreen app is running. Chosen to match the
+ * controller's own 66 ms report cadence: one read per report, no more.
+ *
+ * This replaced a full stand-down, which made the buttons dead.
+ *
  */
-#define STANDDOWN_MS 200
+#define STANDDOWN_MS 66
 
 static int verbose, dry_run, oneshot;
 
@@ -669,25 +669,27 @@ int main(int argc, char **argv)
 		int is_fresh;
 
 		/*
-		 * Stand down while a fullscreen app owns the panel.
+		 * Slow down while a fullscreen app owns the panel.
 		 *
-		 * The emulator needs the core and the touch controller does not,
-		 * so yield. Note the forced release first: if the app started
-		 * while a finger was down, `held` would otherwise stay set and
-		 * the key would be stuck for the whole session, because nothing
-		 * below runs to time it out.
+		 * NOT "stop": the first version of this yielded entirely, which
+		 * made the emulator fast and the buttons dead, since this daemon
+		 * is the only thing that reads the CST9217 and injects BTN_0/1/2
+		 * -- and tamafb's only input is that injected device. The bars
+		 * exist to play the pet, so standing down defeated the point.
+		 *
+		 * Polling slower is the honest trade. The controller produces a
+		 * new report every 66 ms whether anyone asks or not, so polling
+		 * at 15 ms is already several reads per report; at 66 ms it is
+		 * one read per report and the buttons cost what the hardware
+		 * actually needs. Measured cost of a read is ~3957 us, so the
+		 * duty cycle falls from about 26 percent to about 6.
 		 */
-		if (fullscreen_app_running()) {
-			if (standdown == 0) {
-				release();
-				say("tbtns: standing down for tamafb");
-				standdown = 1;
-			}
-			usleep(STANDDOWN_MS * 1000);
-			continue;
-		}
-		if (standdown) {
-			say("tbtns: resuming, tamafb has exited");
+		int slow = fullscreen_app_running();
+		if (slow && !standdown) {
+			say("tbtns: slowing to %d ms for tamafb", STANDDOWN_MS);
+			standdown = 1;
+		} else if (!slow && standdown) {
+			say("tbtns: back to %d ms, tamafb has exited", POLL_MS);
 			standdown = 0;
 		}
 
@@ -714,7 +716,7 @@ int main(int argc, char **argv)
 				 */
 				if (verbose)
 					say("tbtns: read failed (skipped)");
-				usleep(POLL_MS * 1000);
+				usleep((slow ? STANDDOWN_MS : POLL_MS) * 1000);
 				continue;
 			}
 		}
@@ -817,7 +819,7 @@ int main(int argc, char **argv)
 			release();
 		}
 
-		usleep(POLL_MS * 1000);
+		usleep((slow ? STANDDOWN_MS : POLL_MS) * 1000);
 	}
 
 	release();

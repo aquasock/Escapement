@@ -1,3 +1,34 @@
+## 26 COMMIT Unreleased 2026-11-10T10:43:07-07:00
+
+#### Coming From:
+
+Unreleased a47de90
+
+#### Purpose:
+
+Undo a regression introduced in entry 25, where the touch daemon stopped polling during gameplay and took the only input path with it.
+
+#### Outcome:
+
+The user asked whether the buttons still worked after entry 25 paused the daemon, and the answer was no. `tamafb` reads `BTN_0`, `BTN_1` and `BTN_2` from the uinput device that `tbtns` creates and from nothing else, so stopping the daemon stopped the pet from being playable: the previous cycle had optimised away the thing the buttons exist for. The daemon now slows to 66 ms while a fullscreen app owns the panel instead of stopping, which matches the controller's own 66 ms report cadence, and both transitions are verified in the log on hardware, `tbtns: slowing to 66 ms for tamafb` and `tbtns: back to 15 ms, tamafb has exited`, with `tamafb` confirming `buttons: /dev/input from touch-buttons` and polling it during the run. The measurement attached to the fix contradicts the explanation given for it in entry 25, and that is the more useful half of this cycle. Slowing the poll from 15 ms to 66 ms -- quartering the read rate -- moved throughput by 1.1 percent, 132679 against 131226 instructions/s. So the 34.7 percent the daemon costs is not the poll cadence, even though the arithmetic appeared to predict it: 3957 us per read every 15 ms is a 26 percent duty cycle, which matches the measured loss closely enough to have been convincing. It was still wrong. Whatever is expensive happens once per wakeup rather than once per read, and the candidates are the scheduler cost of the `i2c-gpio` kernel thread for each transaction, the console traffic behind every NAK, or the syscall round trip; none of that is established and profiling is the next step if the number ever matters. The practical conclusion is stated plainly in `docs/tamagotchi.md` rather than buried: you can have working buttons or 34.7 percent of the emulator, not both, and the buttons win because a watch whose pet cannot be played is not the goal. The speed belongs to starting the emulator at boot, where the ROM may fit in PSRAM and recover 33.8 percent without touching the daemon at all. Two measurement caveats are worth recording rather than smoothed: the A/B above is two runs per arm rather than the three used elsewhere, because the board kept interfering, so treat 1.1 percent as close to the noise floor and the direction as the only firm claim; and three attempts at a cleaner A/B failed for tooling reasons, not reasons of substance -- a stand-in process built by copying `/bin/sleep` segfaulted because busybox dispatches on `argv[0]` and `tamafb` is not an applet name, `/home` reached 97 percent full when that copy landed there at 855 KB, and a long telnet command line was truncated before it could run. A purpose-built 6 KB idle binary fixed it, and a subdirectory was needed because `comm` is the basename. The core-syntax audit passed: `.ai/core.md` and `.ai/core-syntax.md` were re-read, the complete `.ai/` diff was inspected, `.ai/core.md` was not modified, and this entry was validated against the template with six sections in canonical order, sequential numbering from 25, an ISO-8601 timestamp carrying the America/Phoenix offset, prose-only Outcome and Next Steps, and Status values within the allowed set.
+
+#### Next Steps:
+
+The emulator thread's one blocking item is unchanged and now carries both remaining wins: a `S51tamafb` started from `rcS`, which makes the emulator start at boot, may let the 512 KB ROM allocation happen while an order-7 block still exists, and must write `/var/run/tamafb.pid` or not even the 66 ms slow-down will engage. The daemon's 34.7 percent is worth profiling only if it becomes the thing standing in the way; until then the honest position is that it is unexplained and the buttons are worth more than it. Beyond the emulator, the display items are unchanged: LCD-009's tearing root cause, and the 4.2x disagreement between LCD-005 and LCD-010. The boot loop from entry 23 remains unexplained with its dump pruned.
+
+#### Files Modified:
+
+- userspace/tbtns.c
+- docs/tamagotchi.md
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: NOT RUN
+
+---
+
 ## 25 COMMIT Unreleased 2026-11-10T10:26:48-07:00
 
 #### Coming From:

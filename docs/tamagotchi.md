@@ -448,7 +448,7 @@ Next thing to measure, if it is picked up again: what the guest is actually
 doing in those 580 ms. The stall log splits the time but has not yet been read
 against a press on the fixed-point build.
 
-## The touch daemon costs it a third of its speed, and now stands down
+## The touch daemon costs it a third of its speed, and that is not the poll rate
 
 Measured 2026-11-10, same boot, same binary:
 
@@ -457,41 +457,49 @@ S50tbtns polling   134,496 instructions/s
 S50tbtns stopped   206,091 instructions/s
 ```
 
-**34.7 percent**, or 53 percent more throughput without it. The arithmetic says
-why rather than it being a mystery: one touch read costs about 3957 us on this
-bit-banged I2C bus (TCH-003) and the daemon polls every 15 ms, so roughly a
-quarter of the core's time goes into waiting out bus traffic that is nearly
-always going to report "nothing new".
+**34.7 percent.** The obvious explanation was the poll cadence: one touch read
+costs about 3957 us on this bit-banged I2C bus (TCH-003) and the daemon polls
+every 15 ms, which predicts a 26 percent duty cycle and matches the measured
+loss almost exactly.
 
-Both of those constants are right for what they were chosen for — 15 ms buys tap
-latency and 3957 us is the hardware — so the fix is not to poll slower. **The
-daemon now stands down while a fullscreen app owns the panel.** It reads
-`/var/run/tamafb.pid`, which `run-tama.sh` already writes, validates that pid
-against `/proc/<pid>/comm`, and sleeps in a 200 ms loop while a process named
-`tamafb` is alive.
-
-The validation is not paranoia. Pids are reused and the file survives a crash, so
-trusting it would let a stale entry turn the buttons off permanently and
-silently — a worse bug than the one being fixed. It also caught a real case
-during testing: a launch wrapped in a shell has `comm` = `bash`, not `tamafb`,
-and is correctly ignored.
-
-Standing down forces a release first, so a finger down at the moment the app
-starts cannot leave a key stuck, since nothing below runs to time it out.
-
-Verified on hardware, both transitions in the daemon log:
+**It is the wrong explanation, and the measurement says so.** Slowing the poll
+to 66 ms -- the controller's own report cadence, one read per report instead of
+four -- moved throughput by 1.1 percent:
 
 ```
-tbtns: standing down for tamafb
-tbtns: resuming, tamafb has exited
+15 ms polling   132,679 instructions/s
+66 ms polling   131,226 instructions/s
 ```
 
-Two things to keep in mind. Anything *measuring* the emulator must account for
-this: the same binary read 204k before a reboot and 141k after, and the
-difference was the daemon, not the reboot, which produced a wrong conclusion
-before it was caught. And a run of `tamafb` started by hand without a pidfile
-does not trigger the stand-down — only `run-tama.sh`, or anything else that
-writes the file, does.
+So the cost is not the number of reads. It is something that happens once per
+wakeup rather than once per read, and the candidates are the `i2c-gpio` kernel
+thread being scheduled for each transaction, the console traffic behind every
+NAK, or the syscall round trip itself. **This is not established** and should be
+profiled before anything is changed on the strength of it.
+
+### What the daemon does now
+
+An earlier version of this fix stopped polling entirely while a fullscreen app
+was running, which recovered the full 34.7 percent and **made the buttons dead**.
+That was wrong and worth recording: `tamafb`'s only input is the `BTN_0/1/2`
+device that this daemon injects, so stopping the daemon stops the pet from being
+playable. Speed at the cost of the thing the buttons exist for is not a win.
+
+The daemon now slows to 66 ms while a fullscreen app owns the panel, rather than
+stopping. It reads `/var/run/tamafb.pid` -- which `run-tama.sh` already writes --
+and validates that pid against `/proc/<pid>/comm` before believing it, because a
+stale file after a crash would otherwise change behaviour permanently and
+silently. Both transitions are verified on hardware:
+
+```
+tbtns: slowing to 66 ms for tamafb
+tbtns: back to 15 ms, tamafb has exited
+```
+
+The honest summary: **you can have buttons or 34.7 percent, not both**, and with
+the current understanding the buttons win. The speed belongs to starting the
+emulator at boot where the ROM may fit in PSRAM, which recovers 33.8 percent
+without touching this daemon at all.
 
 ## Still to do
 
@@ -513,6 +521,7 @@ writes the file, does.
   pays its own header out of the same budget. Getting the 33.8 percent needs
   the allocation to happen while an order-8 block still exists, which means a
   `S51tamafb` started from `rcS`. See KRN-004.
-- **`tbtns` standing down is done.** Worth 34.7 percent, deployed and verified;
-  see the section above. A `S51tamafb` should write `/var/run/tamafb.pid` the
-  same way `run-tama.sh` does or the stand-down will not trigger.
+- **`tbtns` slowing down is done**, and it buys only 1.1 percent -- the 34.7
+  percent it costs is not the poll rate. Profiling it is unscheduled. A
+  `S51tamafb` should write `/var/run/tamafb.pid` the same way `run-tama.sh`
+  does, or the daemon will not slow down.
