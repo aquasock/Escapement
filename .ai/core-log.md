@@ -1,3 +1,33 @@
+## 34 COMMIT Unreleased 2026-11-10T13:58:39-07:00
+
+#### Coming From:
+
+Unreleased 1d56b39
+
+#### Purpose:
+
+Capture a full 16 MiB backup of the working hardware-I2C state, because no saved image contained the multi-byte fix and the previous newest backup predated it.
+
+#### Outcome:
+
+`~/twatch-backup/working-2026-11-10-1353.bin` is now the current recoverable state, 16 MiB read at 583 kbit/s in 230 seconds, sha256 `ee2133e0389c4ca6910df2f272c44755f22a7709004a80771b2c2e711e801309`. It was verified three independent ways rather than by accepting the script's own OK line, because a backup that silently contains the wrong kernel is worse than no backup at all and this project has already lost a session to exactly that. The stored `.sha256` was checked against a fresh `sha256sum` of the file; the 2841584-byte kernel extracted from the image at offset `0x140000` is byte-identical to the built `xipImage` (`a79b73d0…`), which proves the correct kernel is in the correct slot; and the running watch reports `Linux version 7.2.4-forkbank-ga623647af724-dirty`, the same build string the image contains, so the saved kernel is the one that has been tested rather than a stale neighbour. The image also carries the fix markers — the `FIRST SCL timeout` diagnostic string is present — and both `espressif,esp32-i2c` and `i2c-gpio` compatible strings, which is expected: `i2c-gpio` is still compiled in, but the live device tree selects the hardware driver and only `60013000.i2c` exists as a platform device, so the bit-banged path is present but unused. The backup's trailing hard reset rebooted the watch, which was confirmed back to a working state afterwards: hardware I2C bound, a seven-byte RTC read returning `0x21 0x58 0x20 0x10 0x02 0x11 0x26` = 20:58:21, and PMU capacity 100. The two images that matter for recovery are now clearly distinguished: 1353 is the working hardware-I2C watch without touch, and 1053 remains the only image that restores a fully functional watch including touch, on the older bit-banged bus. The core-syntax audit passed: `.ai/core.md` and `.ai/core-syntax.md` were re-read, the complete `.ai/` diff was inspected, `.ai/core.md` was not modified, and this entry was validated against the template with six sections in canonical order, sequential numbering from 33, an ISO-8601 timestamp carrying the America/Phoenix offset, prose-only Outcome and Next Steps, and Status values within the allowed set.
+
+#### Next Steps:
+
+The next kernel change starts from a verified image, so a failed attempt now costs a 4-minute restore instead of the whole session. That cycle is the kernel input driver that replaces `tbtns`: the bus is proven, the split-READ shape and command budget that make a 16-bit-addressed 15-byte read possible are established, and the two remaining unknowns are the CST9217's initialisation sequence and releasing its reset line through the XL9555. The absent-address `-ETIMEDOUT` versus `-ENXIO` defect belongs in the same cycle, so `i2cdetect` stops reporting timeouts for empty addresses. The deferred items are unchanged and none should be started without asking: BLE media keys, the Rii K06 touchpad and Logitech keyboard, firmware-side BLE bond persistence, wake-from-sleep, and moving the Tamagotchi emulator to core 0.
+
+#### Files Modified:
+
+- None.
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: PASS
+
+---
+
 ## 33 COMMIT Unreleased 2026-11-10T13:52:28-07:00
 
 #### Coming From:

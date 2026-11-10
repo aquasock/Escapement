@@ -1,10 +1,10 @@
-# Handoff — Escapement, 2026-11-10T13:53
+# Handoff — Escapement, 2026-11-10T13:59
 
 Linux 7.2.4 on a T-Watch Ultra (ESP32-S3). Real Linux on the watch's own Xtensa
 cores, not emulated. This file is orientation; verify before acting on it.
 
 Canonical detail lives in `.ai/core-reference.md` (63 records, fourteen topics).
-Project history lives in `.ai/core-log.md` (33 entries; newest first — 33, 32,
+Project history lives in `.ai/core-log.md` (34 entries; newest first — 34, 33, 32,
 31, 30, 29, 28, 27, 26, 25, 24, 23, 22, 21, 20, 19, 18, 17, then 1 through 16).
 Do not re-derive what those hold.
 
@@ -18,10 +18,10 @@ persistence, any wake-from-sleep path, and moving the emulator to core 0.
 
 ## Reconstruct (in this order)
 
-1. `git log --oneline -8` — `main` was at `23c918a`, clean and fully pushed,
+1. `git log --oneline -8` — `main` was at `1d56b39`, clean and fully pushed,
    before the commit carrying this file.
 2. `.ai/core.md` (policy), then `.ai/core-reference.md` (hardware facts — open
-   the record, not the index line), then `.ai/core-log.md` entries 33, 32, 31.
+   the record, not the index line), then `.ai/core-log.md` entries 34, 33, 32.
 3. `git -C build/esp-hosted/esp_hosted_ng branch --show-current` — expect
    `ble-bond-wip`, five local-only commits.
 
@@ -87,19 +87,29 @@ time and clean probe semantics and nothing else. Fix it in the touch cycle.
 
 ## Backups — read the directory, do not trust this file
 
-**No backup matches the current state.** The newest two both predate the
-multi-byte fix, and the one before that is the old bit-banged build:
+**`working-2026-11-10-1353.bin` is the current state and is verified.** Taken
+2026-11-10 13:57, 16 MiB, sha256 `ee2133e0…`. Verified three ways rather than
+by the script's own OK: the stored hash matches an independent `sha256sum`, the
+kernel extracted from the image at `0x140000` is byte-identical to the built
+`xipImage` (`a79b73d0…`), and the running watch reports the same build string
+`7.2.4-forkbank-ga623647af724-dirty`.
 
 ```
-~/twatch-backup/working-2026-11-10-1251.bin   hardware I2C, no touch, chatty boot
-~/twatch-backup/working-2026-11-10-1053.bin   i2c-gpio — full function incl. touch
-~/twatch-backup/working-2026-11-10-0940.bin   i2c-gpio, 40 MHz
-~/twatch-backup/twatch-factory-16MB.bin       stock
+~/twatch-backup/working-2026-11-10-1353.bin   ee2133e0  CURRENT — hardware I2C,
+                                                        multi-byte fixed, no touch
+~/twatch-backup/working-2026-11-10-1251.bin   04cfee94  hardware I2C, no touch,
+                                                        chatty boot, pre-fix
+~/twatch-backup/working-2026-11-10-1053.bin   b0f31a2d  i2c-gpio — full function
+                                                        incl. touch
+~/twatch-backup/working-2026-11-10-0940.bin   fd7e5bf9  i2c-gpio, 40 MHz
+~/twatch-backup/twatch-factory-16MB.bin       471c9a21  stock
 ```
 
-Take a full backup (`./scripts/watch-backup.sh`, 16 MiB, ~3.5 min) **before the
-next kernel change**. If touch is needed before then, restore 1053: it is the
-fully functional watch. Restore command:
+The 1353 image does not contain touch, because `tbtns` is retired. If touch is
+needed before the new driver lands, restore 1053: it is the fully functional
+watch, on the bit-banged bus. Note both images contain the **kernel** at
+`0x140000` and a working `i2c-gpio` driver compiled in, but only 1353 has the
+fixed hardware driver selected by the device tree. Restore command:
 
 ```sh
 PY=build/idf-tools/python_env/idf5.1_py3.14_env/bin/python
