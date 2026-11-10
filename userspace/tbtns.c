@@ -75,6 +75,8 @@
 #include <sys/time.h>
 #include <unistd.h>
 
+#include "haptic.h"
+
 #define DEV_I2C		"/dev/i2c-0"
 #define DEV_UINPUT	"/dev/uinput"
 
@@ -484,6 +486,17 @@ static void press(int b)
 	emit(EV_KEY, codes[b], 1);
 	emit(EV_SYN, SYN_REPORT, 0);
 	say("tbtns: press %d", b);
+
+	/*
+	 * Click, so the bar feels like a button and not like glass.
+	 *
+	 * Only on press, never on release: a release click doubles the buzz of
+	 * every tap and is what makes haptic feedback feel like noise. The call
+	 * is a no-op when the DRV2605 is absent, so a board without one behaves
+	 * exactly as before.
+	 */
+	haptic_tap();
+
 	held = b;
 }
 
@@ -561,6 +574,13 @@ int main(int argc, char **argv)
 		close(i2c_fd);
 		return 1;
 	}
+
+	/* Not fatal: a board without the haptic, or a rail that never came up,
+	 * leaves the buttons working with no click rather than not working. */
+	if (haptic_init() == 0)
+		say("tbtns: haptic ready (DRV2605, ERM)");
+	else
+		say("tbtns: no haptic -- buttons will be silent");
 
 	say("tbtns: bands ctrl %d / %d, strip from row %d, timeout %d ms",
 	    edge1, edge2, y_strip, release_ms);
@@ -700,6 +720,7 @@ int main(int argc, char **argv)
 	}
 
 	release();
+	haptic_close();
 	if (ufd >= 0) {
 		ioctl(ufd, UI_DEV_DESTROY);
 		close(ufd);

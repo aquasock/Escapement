@@ -453,3 +453,37 @@ The emulator runs but nothing controls it: the three touch bars emit BTN_0, BTN_
 - User Test: PASS
 
 ---
+
+## 15 COMMIT Unreleased 2026-11-09T19:17:57-07:00
+
+#### Coming From:
+
+Unreleased 354e0ea
+
+#### Purpose:
+
+Give the three touch buttons a click, so a tap feels like a button rather than glass.
+
+#### Outcome:
+
+The DRV2605 haptic amplifier at I2C 0x5A now plays a Strong Click on every button press, and the operator confirmed it is felt. It was approached by reading the chip first rather than by following TinyPetz, which turned out to be the right order: TinyPetz enables the haptic rail at boot and never writes to the DRV2605 at all, so the vibration noted there was the chip's own power-on behaviour and gave no register sequence to copy. Three reads off this unit settled everything before a line was written -- STATUS 0x00 read 0xE0, whose DEVICE_ID bits 7:5 are 0b111 for a DRV2605 with DIAG_RESULT clear; FEEDBACK 0x1A read 0x36, whose bit 7 is 0 and therefore means an ERM motor rather than an LRA, which decides the effect library since 6 is LRA and 1 to 4 are ERM; and the XL9555 port 0 output read 0xff, confirming the expander bit that gates the motor's power is already high. Two things about this part fail silently and both are recorded as BRD-005: a chip whose expander bit is low answers every I2C transaction and never moves, and a library mismatched to the motor type buzzes weakly or not at all instead of erroring. The driver is userspace/haptic.c with haptic_init(), haptic_tap() and haptic_close(), kept separate from tbtns because the same three calls serve anything on this board wanting a click; it verifies the device ID before writing anything, so it refuses rather than sending effect IDs to a stranger at that address. The click is fired on press only and never on release, because a click on both ends of every tap reads as two events and feels like noise rather than feedback; the operator accepted it as shipped. On the board the daemon reports `haptic ready (DRV2605, ERM)`, and the failure path is non-fatal by design -- a board without the part, or a rail that never came up, logs `no haptic -- buttons will be silent` and the buttons keep working. The core-syntax audit passed: the `.ai/` diff was inspected, `.ai/core.md` was not modified, entry 15 was validated against the template with six sections in canonical order, sequential numbering from 14, an ISO-8601 timestamp carrying the America/Phoenix offset, prose-only Outcome and Next Steps, eligible Files Modified, and Status values within the allowed set.
+
+#### Next Steps:
+
+The buttons now press, emit BTN_0/1/2 and click, and nothing consumes the events, so wiring them to something is the next use of them. The obvious consumer is the Tamagotchi, whose core takes input through splb32_pin(cpu, 0, mask, level) on PA bits 0x01, 0x02 and 0x04 with level 1 for press and -1 for release -- tamagui.c already drives exactly that from a keyboard, so the mapping is known and the work is reading /dev/input/event3 each frame and holding the state across frames. A second consumer worth having is pressed and released imagery on the bars themselves, which needs nothing new: CO5300_IOC_WRITE_RECT already writes panel rectangles and the driver paints the bars, so a pressed state is a rectangle repaint. Two larger items remain open from earlier cycles: the pwrite-versus-render split for the emulator is still unmeasured, and LCD-009's tearing root cause is unresolved with SPI clock the remaining suspect. The top-bar status daemon has not been started. The Logitech keyboard, the K06's touchpad and BLE media keys are parked by user decision.
+
+#### Files Modified:
+
+- userspace/haptic.c
+- userspace/haptic.h
+- userspace/tbtns.c
+- scripts/build-userspace.sh
+- README.md
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: PASS
+
+---

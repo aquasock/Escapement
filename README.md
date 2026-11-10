@@ -153,6 +153,14 @@ device-tree touch node, and changing a band boundary is a flag rather than a
 rebuild and a flash. The bars are drawn by the driver (`co5300_paint_frame()`),
 because the strip is outside fb0 and only the driver can paint there.
 
+**Each tap clicks.** The DRV2605 haptic amplifier at I2C 0x5A plays a Strong
+Click on every press — press only, never release, because a click on both makes
+a tap read as two events. Its motor rail is gated by the XL9555 expander, and
+the chip powers up with no library or wave sequence loaded, so neither of those
+is a given: `userspace/haptic.c` checks the device ID, selects the ERM effect
+library (this unit's `FEEDBACK` register says ERM, not LRA), and writes the
+sequence before triggering.
+
 It runs as `S50tbtns` in `/etc/init.d`, started by rcS like the keyboard daemon.
 That script is the reason the buttons survive a reboot: the daemon works
 perfectly but had only ever been launched by hand, so every reboot since it was

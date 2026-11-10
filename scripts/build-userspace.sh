@@ -42,7 +42,7 @@ case "${1:-}" in
     say() { printf '\n=== %s\n' "$*"; }
     say "host build"
     cc -O1 -Wall -Wextra -o /tmp/blekbd_host userspace/blekbd.c
-    cc -O1 -Wall -Wextra -o /tmp/tbtns_host userspace/tbtns.c
+    cc -O1 -Wall -Wextra -o /tmp/tbtns_host userspace/tbtns.c userspace/haptic.c
     say "generate frames"
     python3 scripts/blekbd-selftest.py /tmp/blekbd-frames.bin
     say "decode"
@@ -52,7 +52,7 @@ case "${1:-}" in
     ;;
 *)
     "$CC" -Os -Wall -Wextra -o userspace/blekbd userspace/blekbd.c
-    "$CC" -Os -Wall -Wextra -o userspace/tbtns userspace/tbtns.c
+    "$CC" -Os -Wall -Wextra -o userspace/tbtns userspace/tbtns.c userspace/haptic.c
     "$CC" -Os -Wall -Wextra -o userspace/panel-test userspace/panel-test.c
     ls -l userspace/blekbd userspace/tbtns userspace/panel-test
     printf '\ndeploy them to the watch; see the header of this script.\n'

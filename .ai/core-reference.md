@@ -123,6 +123,7 @@ Topic IDs are the `record_id` prefix. An entry reserves a name; it does not clai
 | Which PMU interrupt pin is it, and why did it storm? | BRD | BRD-002 |
 | What does the power rail map look like? | BRD | BRD-003 |
 | Which SPI bus is the panel on, and what else exists? | BRD | BRD-004 |
+| Where is the haptic driver, and why does it buzz nothing? | BRD | BRD-005 |
 | Where is the touch controller, and what is at 0x5A? | TCH | TCH-001 |
 | Why does the touch controller answer but never report? | TCH | TCH-002 |
 | Why does an untouched screen read as a phantom press? | TCH | TCH-003 |
@@ -189,6 +190,7 @@ BRD-001: "All peripherals are on one bit-banged I2C bus (i2c-gpio, SDA pin 3, SC
 BRD-002: "The AXP2101 interrupt is GPIO7, open drain, active low, and MUST have input-enable plus an internal pull-up (PIN(7) FUN0_20MA_IE_WPU); a level IRQ on the unpulled pin storms, hangs the boot and starves the bit-banged I2C bus"
 BRD-003: "Rail map: ALDO1 SD card, ALDO2 display, ALDO3 LoRa, ALDO4 sensor, BLDO1 GNSS, BLDO2 speaker, DLDO1 NFC, LDO1 GNSS backup; the display rail is additionally gated by the XL9555 at 0x20"
 BRD-004: "The panel is on SPI2 (SCK 40, D0-D3 38/39/42/45, CS 41 driven by hand, RST 37, TE 6); a second general-purpose SPI bus exists on SCK 35 / MOSI 34 / MISO 33 with SD CS 21 and LoRa CS 36, but it has never been proven to transfer a byte"
+BRD-005: "The DRV2605 haptic driver is at I2C 0x5A, identified by STATUS 0x00 = 0xE0 (DEVICE_ID 0b111); FEEDBACK 0x1A = 0x36 means an ERM motor, so the effect library is 1-4 and not the LRA library 6; its rail is XL9555 port0 bit 6"
 
 LCD-001: "fb0 implements only fb_setcolreg, fb_fillrect, fb_copyarea and fb_imageblit; with no fb_write and no fb_mmap, nothing in userspace can draw on /dev/fb0"
 LCD-002: "The CO5300 will not reliably honour a window one pixel wide or one pixel tall; four 1 px fills returned success and drew nothing, while a 432x31 fill in the same place appeared"
@@ -585,6 +587,20 @@ EXT-003: "A fullscreen app on fb0 flickers against fbcon because every printk re
     - "on the watch: `/proc/sys/kernel/printk` reading 7 4 1 7 while the emulator ran, with NAK lines arriving continuously"
     - "docs/tamagotchi.md: the flicker and the sysctl"
   verification: "Observed on hardware 2026-11-09 with the Tamagotchi emulator running: the operator reported the console taking over the frame each time it printed. Dropping the level to 1 stopped it immediately and the game held the panel. The message level was identified by trying 3 first, which did not help because NAK bailout is KERN_ERR."
+
+- record_id: BRD-005
+  kind: BOARD
+  topic_id: BRD
+  title: "The DRV2605 haptic amplifier is at I2C 0x5A behind an XL9555-gated rail, and this unit drives an ERM motor"
+  status: VERIFIED
+  verified_date: 2026-11-09
+  statement: "A TI DRV2605 haptic driver sits at I2C 0x5A on the shared bit-banged bus. Reading its STATUS register (0x00) gives 0xE0: DEVICE_ID bits 7:5 = 0b111 identifies a DRV2605, and DIAG_RESULT bit 3 is 0, meaning the diagnostics passed. Reading FEEDBACK (0x1A) gives 0x36, whose bit 7 is 0, so the fitted motor is ERM rather than LRA -- which decides the effect library, since library 6 is for LRA and the ERM sets are 1 to 4. The chip's supply is gated by the XL9555 expander at 0x20, port 0 bit 6, which is high at boot. The chip powers up in internal-trigger mode with no library selected and an empty wave sequence, so writing GO (0x0C) does nothing until a library (0x03) and a sequence (WAVESEQ1 0x04, WAVESEQ2 0x05, terminated by 0) have been written."
+  consequence: "Two independent things have to be right before a click happens, and both fail silently: the expander bit gates the motor's power, so a chip with the bit low answers every I2C transaction and never moves; and the library must match the motor type, so an ERM given the LRA library buzzes weakly or not at all rather than erroring. Use effect IDs from the selected library -- 1 is Strong Click 100 percent, which is what a button should feel like -- and write the sequence before GO, because GO replays whatever sequence is already loaded. The click belongs on press only; a release click doubles every tap and reads as noise."
+  sources:
+    - "on the watch: `i2cget -y -f 0 0x5a 0x00` = 0xe0, `0x1a` = 0x36, `0x01` = 0x00, `i2cget -f 0 0x20 0x02` = 0xff"
+    - "patches/kernel/display/NOTES provenance and TinyPetz firmware/bringup/main/board.c: EXPANDS_DRV_EN = 6, the expander bit that enables the haptic rail"
+    - "userspace/haptic.c: the driver, with the register map and the library choice recorded"
+  verification: "Verified on hardware 2026-11-09: the registers were read as above before any code was written, haptic_init() then reported `haptic ready (DRV2605, ERM)` in the daemon log, and the operator confirmed the click is felt when a bar is tapped. TinyPetz was checked first and does not drive the chip at all -- it only raises the expander bit at boot -- so the effect was established here from the datasheet IDs rather than copied."
 
 - record_id: PMU-001
   kind: PMU
