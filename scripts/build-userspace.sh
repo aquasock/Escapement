@@ -50,7 +50,16 @@ case "${1:-}" in
 *)
     "$CC" -Os -Wall -Wextra -o userspace/blekbd userspace/blekbd.c
     "$CC" -Os -Wall -Wextra -o userspace/panel-test userspace/panel-test.c
-    ls -l userspace/blekbd userspace/panel-test
+    #
+    # tprobe is built STATIC on purpose, and it is the only binary here that
+    # is. This board has about 7.8 MB of RAM and no swap, and with the console,
+    # WiFi, BLE and the panel running a fresh process cannot always map libc:
+    # the dynamic build fails at exec with "can't load library 'libc.so.0'" and
+    # a confusing exit status, or segfaults under the loader. Static costs
+    # ~135 KB and always runs.
+    #
+    "$CC" -Os -Wall -Wextra -static -o userspace/tprobe userspace/tprobe.c
+    ls -l userspace/blekbd userspace/panel-test userspace/tprobe
     printf '\ndeploy them to the watch; see the header of this script.\n'
     ;;
 esac

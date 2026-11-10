@@ -71,6 +71,24 @@
 			wakeup-source;
 		};
 
+		/*
+		 * Hynitron CST9217 capacitive touch at 0x1A.
+		 *
+		 * The reset line is not an SoC GPIO: it is P08 of the XL9555
+		 * expander, which comes up as an input, so the driver has to
+		 * program it as an output before it can reset the part. The
+		 * phandle below is what makes the driver wait for the expander to
+		 * bind instead of writing to a line nobody is driving.
+		 *
+		 * Active low: asserting reset drives the line low, exactly as
+		 * LilyGo's initTouch() does (low 20 ms, high 60 ms).
+		 */
+		touch@1a {
+			compatible = "hynitron,cst92xx";
+			reg = <0x1a>;
+			reset-gpios = <&xl9555 8 GPIO_ACTIVE_LOW>;
+		};
+
 		/* XL9555: 16-bit GPIO expander, a PCA9555 clone at 0x20.
 		 * Linear pin mapping: P00..P07 = gpio 0..7, P10..P17 = 8..15.
 		 * It gates the display rail (P07), haptic enable (P06) and

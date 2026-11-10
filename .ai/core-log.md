@@ -1,3 +1,41 @@
+## 35 COMMIT Unreleased 2026-11-10T14:40:11-07:00
+
+#### Coming From:
+
+Unreleased 4b83f00
+
+#### Purpose:
+
+Replace the retired userspace touch daemon with a kernel input driver, written from LilyGo's own source rather than from the earlier register map, and fix the I2C recovery defect that had been wedging the whole bus.
+
+#### Outcome:
+
+Touch works as a kernel input driver, and the bus fault that had been blocking it is fixed. The driver is `patches/kernel/touch/final/cst92xx.c`, a polling `i2c_driver` that registers an `INPUT_PROP_DIRECT` input device with `ABS_X`, `ABS_Y` and `BTN_TOUCH`. It was written by reading LilyGo's source in full rather than by extending the previous guesswork: `lewisxhe/SensorLib` `src/touch/TouchDrvCST92xx.cpp` (MIT) and `Xinyuan-LilyGO/LilyGoLib` `src/LilyGoWatchUltra.cpp` `initTouch()`. Both were fetched from GitHub and are cited in TCH-005 through TCH-008. The most important discovery is that the reset line is not an SoC GPIO at all -- it is P08 of the XL9555 expander, whose port 1 configuration reads 0xFF at boot, so the line was an input and nothing had ever reset the part; the driver takes it through `devm_gpiod_get_optional` with a `reset-gpios` phandle so probe waits for the expander. The official bring-up is four attribute reads after entering command mode -- checkcode at 0xD1FC requiring `(code & 0xFFFF0000) == 0xCACA0000`, resolution at 0xD1F8, chip type at 0xD204 requiring 0x9217 or 0x9220, and firmware at 0xD208 rejecting 0xA5A5A5A5 -- and probe fails on any mismatch instead of continuing hopefully. Measured on hardware: checkcode 0xcaca4e20, resolution 410x502, chip type 0x9220 with ProjectID 0x5a67, firmware 0x01000003. That resolution equals the panel exactly, so raw controller coordinates are panel coordinates with no swap, mirroring or scale, and no calibration constants are needed; the 320x400 fb0 window is the 45 px inset rectangle, so consumers subtract 45 and clamp. Three protocol details came out of the same reading and each had already caused a wrong result: only event 0x06 is a press, so a non-zero finger count with event 0x00 invents a phantom (observed at raw (41,451) with nothing touching); byte 6 must be 0xAB for a block to be valid; and the part emits no release event at all, so release is inferred from a 250 ms gap, about four of its ~66 ms report periods. The `0xD1 = 0x1E` "unlock" handshake that earlier work treated as required is not part of official bring-up -- it lives in `setMode()`, whose only caller is `sleep()` -- and TCH-002 was revised in place to say so. The second and larger finding is a bus defect that predated this work: `esp32_i2c_run()` returned `-ENXIO` on NACK and `-EAGAIN` on arbitration loss after clearing the interrupt, without calling recovery, which was wired only into the timeout branches. Since a polled capacitive controller produces exactly those outcomes, one such failure left `SR.bus_busy` set with the FSM idle, the pre-transfer check never fired, and every later transfer to every device failed until a reboot -- this is what wedged the bus every time touch was read, and what the old daemon hit. Recovery is now on those paths, gated on the bus actually being busy so an absent device still NACKs cheaply, and `esp32_i2c_transfer()` propagates the real error instead of collapsing everything to `-ETIMEDOUT`. Verified on hardware: a 10 s run of 1687 report reads produced 188 errors, 11 genuine NACKs each logged as `NACK: int_raw=00008610 sr=5600c010 busy=1` followed by `bus recovered`, and RTC, PMU and expander all still answered afterwards. The driver then bound as `cst92xx 0-001a: CST9220 at 0x1a, 410x502, fw 0x01000003`, registered `cst92xx-touch` as input2, and captured real events: `ABS_X=258 ABS_Y=309 BTN_TOUCH=1` then a smooth drag through `(259,305) (262,299) (267,289) (280,270)` and a `BTN_TOUCH=0` release. The user confirmed the coordinates were correct for the area touched. `userspace/tprobe.c` is kept as the diagnostic that established all of this, and it is the only binary in this tree built static: with about 7.8 MB of RAM and no swap, a fresh dynamic process fails at exec with "can't load library 'libc.so.0'" or segfaults under the loader. The core-syntax audit passed: `.ai/core.md` and `.ai/core-syntax.md` were re-read, the complete `.ai/` diff was inspected, `.ai/core.md` was not modified, all six YAML blocks in the reference parse, all 70 records carry the ten required fields with unique ids, and this entry was validated against the template with six sections in canonical order, sequential numbering from 34, an ISO-8601 timestamp carrying the America/Phoenix offset, prose-only Outcome and Next Steps, and Status values within the allowed set.
+
+#### Next Steps:
+
+Interrupt-driven operation is the obvious improvement and is now the main thing left in touch: `TP_INT` is GPIO 12 and LilyGo attaches a falling-edge handler to it, which would replace the 20 ms poll and cut both bus traffic and the NACK rate. It was deliberately not attempted in this cycle because the polling path is what proves the protocol and an unverified interrupt would have mixed two unknowns. A full 16 MiB backup should be taken: `working-2026-11-10-1353.bin` predates both the I2C recovery fix and the touch driver, so no saved image contains a watch with working touch on the hardware bus. Beyond touch, the deferred items are unchanged and none should be started without asking: BLE media keys, the Rii K06 touchpad and Logitech keyboard, firmware-side BLE bond persistence, wake-from-sleep, and moving the Tamagotchi emulator to core 0.
+
+#### Files Modified:
+
+- patches/kernel/touch/final/cst92xx.c
+- patches/kernel/i2c/final/i2c-esp32.c
+- patches/kernel/display/final/esp32s3-devkit-c1.dts
+- patches/kernel/config/devkit_c1_16m_linux.config
+- scripts/build-kernel.sh
+- scripts/build-userspace.sh
+- userspace/tprobe.c
+- .gitignore
+- .ai/core-reference.md
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: PASS
+
+---
+
 ## 34 COMMIT Unreleased 2026-11-10T13:58:39-07:00
 
 #### Coming From:

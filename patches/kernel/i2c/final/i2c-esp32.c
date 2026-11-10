@@ -616,13 +616,38 @@ static int esp32_i2c_run(struct esp32_i2c *i2c)
 	for (;;) {
 		st = esp32_i2c_read(i2c, I2C_INT_RAW);
 
-		if (st & INT_NACK) {
+		/*
+		 * NACK and arbitration-loss both leave the peripheral in a state
+		 * that has to be cleaned up, and neither path used to do it.
+		 *
+		 * This is what made the bus wedged after touching the capacitive
+		 * panel, and it is the same fault tbtns hit: the touch controller
+		 * pulls on SDA/SCL while a read is in flight, the controller loses
+		 * arbitration (SR bit 3) or sees a NACK, this function returned
+		 * immediately with the interrupt cleared and no reset -- and every
+		 * later transfer, to every device, failed identically. Recovery was
+		 * only wired into the timeout paths, so the one class of failure
+		 * that actually occurred was the one class that never recovered.
+		 *
+		 * ESP-IDF's i2c_master_cmd_begin() resets when the status is TIMEOUT
+		 * *or the bus is still busy*, which catches all of these. The rule
+		 * used here is the same and is deliberately general: after any
+		 * failure, if the controller still thinks the bus is busy, reset it.
+		 * A NACK from a device that is simply absent must not trigger a
+		 * reset, and does not, because the bus is not busy in that case.
+		 */
+		if (st & (INT_NACK | INT_ARB_LOST)) {
+			u32 sr = esp32_i2c_read(i2c, I2C_SR);
+
+			DBG(i2c, "%s: int_raw=%08x sr=%08x busy=%u\n",
+			    (st & INT_NACK) ? "NACK" : "ARB_LOST", st, sr,
+			    !!(sr & SR_BUS_BUSY));
+
 			esp32_i2c_write(i2c, I2C_INT_CLR, 0xffffffff);
-			return -ENXIO;
-		}
-		if (st & INT_ARB_LOST) {
-			esp32_i2c_write(i2c, I2C_INT_CLR, 0xffffffff);
-			return -EAGAIN;
+			if (sr & SR_BUS_BUSY)
+				esp32_i2c_recover(i2c);
+
+			return (st & INT_NACK) ? -ENXIO : -EAGAIN;
 		}
 		if (st & (INT_TIME_OUT | INT_SCL_ST_TO | INT_SCL_MAIN_ST_TO)) {
 			/*
@@ -721,7 +746,7 @@ static int esp32_i2c_transfer(struct esp32_i2c *i2c, u16 addr,
 			      const u8 *wbuf, size_t wlen,
 			      u8 *rbuf, size_t rlen)
 {
-	int n = 0, i;
+	int n = 0, i, err;
 
 	if (!wlen && !rlen)
 		return -EINVAL;
@@ -846,8 +871,9 @@ static int esp32_i2c_transfer(struct esp32_i2c *i2c, u16 addr,
 				esp32_i2c_read(i2c, I2C_COMD(k)));
 	}
 
-	if (esp32_i2c_run(i2c))
-		return -ETIMEDOUT;
+	err = esp32_i2c_run(i2c);
+	if (err)
+		return err;
 
 	if (rlen) {
 		u32 sr = esp32_i2c_read(i2c, I2C_SR);

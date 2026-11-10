@@ -166,6 +166,36 @@ cp "$here"/patches/kernel/display/final/esp32s3-devkit-c1.dts \
 # and a device tree describing hardware nothing bound to.
 cp "$here"/patches/kernel/i2c/final/i2c-esp32.c "$K/drivers/i2c/busses/i2c-esp32.c"
 
+# CST9217 touch. A whole-file copy for the same reason as the drivers above,
+# and its Kconfig/Makefile entries appended rather than patched, guarded by a
+# grep so a rebuild cannot duplicate them.
+cp "$here"/patches/kernel/touch/final/cst92xx.c "$K/drivers/input/touchscreen/cst92xx.c"
+
+kconfig_tp="$K/drivers/input/touchscreen/Kconfig"
+makefile_tp="$K/drivers/input/touchscreen/Makefile"
+
+if ! grep -q 'config TOUCHSCREEN_CST92XX' "$kconfig_tp"; then
+	cat >> "$kconfig_tp" <<'EOF'
+
+config TOUCHSCREEN_CST92XX
+	tristate "Hynitron CST9217/CST9220 capacitive touch"
+	depends on I2C
+	help
+	  Say Y here for the CST9217 found on the LilyGo T-Watch Ultra at
+	  I2C address 0x1a. The reset line is on an XL9555 expander, so
+	  CONFIG_GPIO_PCA953X is needed too.
+EOF
+fi
+
+if ! grep -q 'cst92xx.o' "$makefile_tp"; then
+	printf 'obj-$(CONFIG_TOUCHSCREEN_CST92XX)\t+= cst92xx.o\n' >> "$makefile_tp"
+fi
+
+grep -q 'config TOUCHSCREEN_CST92XX' "$kconfig_tp" \
+	|| die "TOUCHSCREEN_CST92XX Kconfig entry did not land in $kconfig_tp"
+grep -q 'cst92xx.o' "$makefile_tp" \
+	|| die "cst92xx.o did not land in $makefile_tp"
+
 kconfig_i2c="$K/drivers/i2c/busses/Kconfig"
 makefile_i2c="$K/drivers/i2c/busses/Makefile"
 

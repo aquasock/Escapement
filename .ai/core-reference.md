@@ -151,8 +151,13 @@ Topic IDs are the `record_id` prefix. An entry reserves a name; it does not clai
 | Why not put the hardware behind the RTOS on core 0? | KERNEL | KRN-005 |
 | Why is the hardware I2C that slow? | KERNEL | KRN-006 |
 | Why does the I2C controller ignore every register write? | KERNEL | KRN-006 |
+| Why does one bad I2C transfer kill the whole bus until reboot? | KERNEL | KRN-007 |
 | Is Linux really only using one core? | KERNEL | KRN-005 |
 | Why are taps at the top of a bar ignored? | TCH | TCH-004 |
+| Why does the touch controller answer but never report a touch? | TOUCH | TCH-005 |
+| Which way round are the touch axes, and do they need calibrating? | TOUCH | TCH-006 |
+| What is the official sequence to bring the CST9217 up? | TOUCH | TCH-007 |
+| Why does a finger count of 1 not mean a finger is down? | TOUCH | TCH-008 |
 | Can userspace draw on /dev/fb0? | LCD | LCD-001 |
 | Why does a thin fill draw nothing while a thick one works? | LCD | LCD-002 |
 | Does a 45x45 window draw, or is it too narrow? | LCD | LCD-008 |
@@ -495,12 +500,13 @@ EMU-010: "The touch daemon costs the emulator about 30 percent of its throughput
   title: "A freshly reset CST9217 is in command mode and must be unlocked and put in normal mode before it reports anything"
   status: VERIFIED
   verified_date: 2026-11-09
-  statement: "After reset the controller sits in command mode, where register reads succeed and return zeros but it is not scanning the glass. It has to be brought up in this order: write 0xD1 = 0x01 (command mode), write 0xD1 = 0x1E twice (unlock), read 0x0002 for four bytes and require byte 1 to be 0x1E as an acknowledgement, then write 0xD1 = 0x09 (normal mode). Reading 0x0002 after the sequence returns 0x00 0x09, which is the mode byte confirming normal mode."
-  consequence: "Skipping any of this produces a controller that answers every transaction perfectly and never reports a touch, which looks exactly like a working sensor nobody has touched. The acknowledgement read must be checked rather than assumed, because a controller that did not unlock ignores the mode write silently."
+  statement: "After reset the controller sits in command mode, where register reads succeed but it is not scanning the glass. Reading 0x0002 after writing 0xD1 = 0x09 returns 0x00 0x09, the mode byte confirming normal mode. NOTE, revised 2026-11-10: an earlier version of this record stated that a 0xD1 = 0x1E double-write 'unlock' was a required step, with 0x1E in byte 1 of 0x0002 as its acknowledgement. That is not part of the official bring-up. LilyGo's SensorLib never issues it during initialisation -- the 0x1E writes live in setMode(), whose only caller is sleep() -- and the probe that writes the 0x1E sequence then reads 0x0002 and gets 0x00 0x09 on a working part, not 0x1E. See TCH-007 for the sequence that is actually authoritative."
+  consequence: "Skipping the mode selection produces a controller that answers every transaction perfectly and never reports a touch, which looks exactly like a working sensor nobody has touched -- a report read in command mode returns 15 bytes of 0xFF. The mode write should be confirmed by reading 0x0002 back rather than assumed, because a controller in the wrong state ignores it silently. The 0xD1 = 0x1E writes are harmless but must not be treated as the acknowledgement of anything: looking for 0x1E in 0x0002 turns a correct part into an apparent failure."
   sources:
-    - "TinyPetz firmware/bringup/main/touch.c: touch_init() and its setMode sequence, following LilyGo TouchDrvCST92xx in SensorLib"
+    - "lewisxhe/SensorLib src/touch/TouchDrvCST92xx.cpp getAttribute() and setMode(), read in full on 2026-11-10"
     - "on the watch: the sequence issued with i2ctransfer, then `i2ctransfer -y 0 w2@0x1a 0x00 0x02 r4` returning 0x00 0x09 0x00 0x00"
-  verification: "Verified on hardware by running the sequence over /dev/i2c-0 with i2ctransfer and observing the acknowledgement and the 0x09 mode read, then reading a live down report from the button strip."
+    - "TCH-007 for the authoritative bring-up sequence"
+  verification: "Verified on hardware by running the sequence over /dev/i2c-0 with i2ctransfer and observing the 0x09 mode read, then reading a live down report. Corrected 2026-11-10 against LilyGo's source; the 0x1E step was never required and the 0x09 readback is the check that matters."
 
 - record_id: TCH-003
   kind: TOUCH
@@ -528,6 +534,59 @@ EMU-010: "The touch daemon costs the emulator about 30 percent of its throughput
     - "userspace/tbtns.c: the y_strip default and the note explaining the five-row gap"
     - "TinyPetz firmware/bringup/main/touch.c: TOUCH_CAL_YS and the stated fit residual"
   verification: "Measured on hardware: in a ten-tap run with the threshold at 445, two taps produced no press and their decoded values were ctrl_y 442 and 443 while both x values were solidly inside a band. Re-running with the threshold at 440, the same blind spot did not recur."
+
+- record_id: TCH-005
+  kind: TOUCH
+  topic_id: TCH
+  status: VERIFIED
+  verified_date: 2026-11-10
+  title: "The CST9217 reset line is P08 of the XL9555 expander, and port 1 of that expander comes up as all inputs, so nothing drives reset at boot"
+  statement: "The touch controller's reset is not an SoC GPIO. It is P08 of the XL9555 at I2C 0x20 -- expander port 1, bit 0. Port 1's configuration register reads 0xFF at boot (all inputs) and the output register reads 0xFF, so the line is an input held high by the pin's default and no driver ever pulses it."
+  consequence: "A controller whose reset has never been driven answers on the bus and returns 15 bytes of 0xFF from the report register, which reads as a dead part or a bad transfer rather than as 'never initialised'. The expander's configuration register must be made an output for bit 0 (0xFF -> 0xFE) before reset can be pulsed, and the pulse is low 20 ms followed by high 60 ms. The kernel driver does this through devm_gpiod_get_optional(\"reset\") with a reset-gpios phandle to the expander, so probe waits for the expander instead of writing to an undriven line."
+  sources:
+    - "Xinyuan-LilyGO/LilyGoLib src/LilyGoWatchUltra.cpp initTouch(): io.digitalWrite(EXPANDS_TOUCH_RST, LOW); delay(20); ... HIGH; delay(60); and setPins(-1, TP_INT), the -1 being the reset pin because it is not an SoC GPIO"
+    - "on the watch: `i2ctransfer -y -f 0 w1@0x20 0x07 r2` returning 0xfe 0xff after programming bit 0, and 0xff 0xff before it"
+  verification: "Verified on hardware 2026-11-10: with port 1 configured as all inputs the report register returned 15 x 0xFF; after setting bit 0 of the configuration register to output and pulsing reset low 20 ms then high 60 ms, the checkcode, resolution and chip type all read correctly and the part reported touches."
+
+- record_id: TCH-006
+  kind: TOUCH
+  topic_id: TCH
+  status: VERIFIED
+  verified_date: 2026-11-10
+  title: "The CST9217 reports 410x502 and those are panel coordinates directly: no axis swap, no mirroring, no scale"
+  statement: "Reading the resolution register 0xD1F8 returns four bytes, X then Y, little-endian: 0x9a 0x01 0xf6 0x01 is X=410 and Y=502. That is exactly PANEL_W x PANEL_H, so controller coordinates are panel coordinates. A touch at raw (82,419) reports panel (82,419)."
+  consequence: "No calibration constants are needed and none should be introduced. The fb0 window is a 320x400 rectangle inset 45 px per side on a 502 px-wide panel, so consumers subtract FB_X/FB_Y (45, 45) to get framebuffer coordinates and clamp to 0..319 / 0..399. Clamping is required rather than optional: a press on the border ring outside fb0 legitimately decodes to a negative or out-of-range value -- measured fb=(8,408) for a press below the window -- and must not be reported to fb0 consumers as if it were inside. The driver publishes the full 0..410 / 0..502 range so that consumers can tell the difference between the border and the window."
+  sources:
+    - "on the watch: `i2ctransfer -y -f 0 w2@0x1a 0xD1 0xF8 r4` -> 9a 01 f6 01"
+    - "lewisxhe/SensorLib src/touch/TouchDrvCST92xx.cpp getAttribute(): resolutionX = buffer[1]<<8|buffer[0], resolutionY = buffer[3]<<8|buffer[2]"
+    - "LCD records for PANEL_W = 410 and PANEL_H = 502 and the 45 px safe inset"
+  verification: "Verified on hardware 2026-11-10 against the panel geometry: the reported resolution equals the panel dimensions, and a captured drag advanced through raw (258,309) (262,299) (267,289) (280,270), a smooth path with no swap or mirror applied."
+
+- record_id: TCH-007
+  kind: TOUCH
+  topic_id: TCH
+  status: VERIFIED
+  verified_date: 2026-11-10
+  title: "The official bring-up is four attribute reads in command mode, and it does not use a 0xD1=0x1E unlock handshake"
+  statement: "LilyGo's own driver, SensorLib TouchDrvCST92xx::getAttribute(), brings the part up as: reset; delay 30 ms; write 0xD1=0x01 (command mode); delay 10 ms; read 0xD1FC for the 4-byte checkcode and require (checkcode & 0xFFFF0000) == 0xCACA0000; read 0xD1F8 for resolution; read 0xD204 for the chip type and require 0x9217 or 0x9220; read 0xD208 for an 8-byte firmware version and reject 0xA5A5A5A5. There is no 0xD1=0x1E unlock step anywhere in that path."
+  consequence: "The 0xD1=0x1E double-write recorded earlier as required bring-up is part of setMode(), whose only caller in the official driver is sleep(). It was never part of initialisation. Running it is harmless but it is not what makes the part report, and treating it as the acknowledgement led to probing for 0x1E in register 0x0002 when the authoritative checks are the checkcode, chip type and firmware reads. Separately, a report read taken while the part is still in command mode returns 15 bytes of 0xFF, so normal mode (0xD1=0x09) with a 0x0002 readback of 0x09 is still worth doing before trusting a report -- but as a state check, not as an unlock."
+  sources:
+    - "lewisxhe/SensorLib src/touch/TouchDrvCST92xx.cpp getAttribute() and setMode(); the latter's only caller in that file is sleep()"
+    - "on the watch: 0xD1=0x01 then 0xD1FC -> 20 4e ca ca, 0xD1F8 -> 9a 01 f6 01, 0xD204 -> 67 5a 20 92 (chip 0x9220, ProjectID 0x5a67), 0xD208 -> fw 0x01000003, and mode readback 0x0002 -> 00 09"
+  verification: "Verified on hardware 2026-11-10: the four attribute reads returned a valid checkcode, 410x502, chip type 0x9220 and firmware 0x01000003, and the part then reported touches. The kernel driver performs these checks and fails probe on any mismatch rather than continuing hopefully."
+
+- record_id: TCH-008
+  kind: TOUCH
+  topic_id: TCH
+  status: VERIFIED
+  verified_date: 2026-11-10
+  title: "Only event 0x06 is a press, byte 6 must be 0xAB for the block to be valid, and the part emits no release event at all"
+  statement: "A report block is 15 bytes at 0xD000: five header bytes then two 5-byte finger records, the second record starting at offset 7. Byte 6 is a validity marker that must be 0xAB. Byte 5's low seven bits are the finger count; more than 2 is invalid. A finger record is event in bits 3:0 and id in bits 7:4 of its first byte, then x = (b1<<4)|(b3>>4) and y = (b2<<4)|(b3&0x0F). Only event 0x06 counts as a press. There is no release event: event 0x07 exists in the protocol but the part does not send it when a finger lifts, it simply stops reporting."
+  consequence: "A non-zero finger count with event 0x00 is not a touch. Accepting it invents a phantom press at a stale position -- observed as raw (41,451) with nothing on the glass. Release must be synthesised from a gap in reports, which is why the driver has a 250 ms timeout, set to about four of the controller's ~66 ms report periods so that one dropped report does not break a drag. Every report read must also be acknowledged with a separate write of 0xD0 0x00 0xAB; skipping the ack leaves the buffer un-advanced and the same block is returned for ever, so a release is never seen."
+  sources:
+    - "lewisxhe/SensorLib src/touch/TouchDrvCST92xx.cpp getTouchPoints(): the buffer[6] != 0xAB reject, the 0x7F mask on buffer[5], the per-finger decode, and `if (event == 0x06)`"
+    - "on the watch: a block 00 02 1c 93 00 01 ab 00 00 00 3c 05 ab 00 00 with event 0x00 and nothing touching, and live presses returning 0x06"
+  verification: "Verified on hardware 2026-11-10: with the event check absent the probe counted a phantom point while nothing was touching; with it present the count was zero. Presses then produced event 0x06 blocks that decoded to a smooth path, and the kernel input driver emitted BTN_TOUCH 1 and 0 correctly with ABS_X/ABS_Y advancing between them."
 
 - record_id: LCD-008
   kind: DISPLAY
@@ -818,6 +877,20 @@ EMU-010: "The touch daemon costs the emulator about 30 percent of its throughput
     - "build/esp-hosted/esp_hosted_ng/esp/esp_driver/network_adapter/partition_table.esp32s3.16m8r"
     - "esptool read of 0x140000 compared byte for byte against arch/xtensa/boot/xipImage"
   verification: "Confirmed on hardware: a 4 KiB read from 0x140000 matched the first 4 KiB of xipImage exactly, and writing xipImage alone to 0x140000 repeatedly produced a booting kernel with new driver changes."
+
+- record_id: KRN-007
+  kind: KERNEL
+  topic_id: KRN
+  status: VERIFIED
+  verified_date: 2026-11-10
+  title: "An I2C NACK or arbitration loss must reset the ESP32-S3 controller, or one bad transfer wedges the whole bus until reboot"
+  statement: "The driver's polling loop returned -ENXIO on INT_NACK and -EAGAIN on INT_ARB_LOST after clearing the interrupt, without calling the recovery path. Recovery was wired only into the timeout branches. On this board those two outcomes are exactly what a capacitive controller produces while it is being polled, and either one can leave SR.bus_busy set. Once bus_busy is set with the FSM idle, the pre-transfer check never fires recovery either, so every later transfer to every device fails identically and the bus stays unusable until a reboot or power cycle."
+  consequence: "This is the fault that wedged the bus whenever the touch controller was read, and it is the same fault the earlier userspace touch daemon hit: repeated reads produced a storm of failures against all four devices with no recovery attempted. Recovery belongs on every failure path, not just the timeout ones, and the safe general rule is ESP-IDF's: after any failure, if the controller still reports the bus busy, reset it. A NACK from a genuinely absent device does not trigger a reset because the bus is not busy in that case, which is why an i2cdetect scan stays cheap. Related: esp32_i2c_transfer() also collapsed every failure to -ETIMEDOUT, so a NACK and a timeout were indistinguishable from userspace and the log said nothing useful; it now propagates the real error."
+  sources:
+    - "patches/kernel/i2c/final/i2c-esp32.c esp32_i2c_run(), esp32_i2c_recover(), and the ERRNO_NOTE"
+    - "build/esp-hosted/esp_hosted_ng/esp/esp_driver/esp-idf/components/driver/i2c/i2c.c i2c_master_cmd_begin(): resets the FSM when the status is TIMEOUT *or the bus is still busy*"
+    - "KRN-006 for the clock gate and reset state this depends on"
+  verification: "Verified on hardware 2026-11-10. Before the fix, a handful of reads from the touch controller left the bus dead for every device. After it, a 10 s run of 1687 report reads produced 188 errors and the bus was still healthy afterwards, with the log showing `NACK: int_raw=00008610 sr=5600c010 busy=1` followed by `bus recovered (int_raw=00000000 sr=0000c000)` for each of 11 genuine NACKs, and the RTC, PMU and expander all still answering."
 
 - record_id: FLS-002
   kind: FLASH
