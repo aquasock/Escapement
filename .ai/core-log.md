@@ -1,3 +1,33 @@
+## 38 COMMIT Unreleased 2026-11-10T15:38:11-07:00
+
+#### Coming From:
+
+Unreleased de0dfda
+
+#### Purpose:
+
+Capture a full 16 MiB backup of the first state with interrupt-driven touch and the enlarged interrupt descriptor table, from a cold boot.
+
+#### Outcome:
+
+`~/twatch-backup/working-2026-11-10-1533.bin` is the current recoverable state, 16 MiB read at 628.6 kbit/s in 213.5 seconds, sha256 `d1b87c3089ddfed46f5bca2193546c242fb9d692489be3c4172a0da176b3da9d`. It closes the gap left at the end of the previous cycle, where `working-2026-11-10-1444.bin` had working touch but polling only and predated both the interrupt work and the `NR_IRQS` increase. The watch was rebooted first and every subsystem re-verified before the read, so this is a cold-boot image: `cst92xx` bound and reported `irq: client=0 gpiod_to_irq=33` followed by `interrupt driven`, `/proc/interrupts` carried `33: esp32xx-gpio 12 cst92xx`, the PMU read 100, `rtc0` read 22:33:07 against a seven-byte register read of `0x07 0x33 0x22`, fb0 was 320x400, WiFi was at 10.10.0.15 and the BLE keyboard was running. The image was verified four ways rather than by the script's own OK line. The stored `.sha256` matches an independent `sha256sum`; the 2860368-byte kernel extracted from `0x140000` is byte-identical to the built `xipImage` (`dd3f424d…`); the image contains `hynitron,cst92xx`, the interrupt-path format string `idle %u ms, active %d ms, release %d ms, %s` and the earlier I2C recovery format string `%s: int_raw=%08x sr=%08x busy=%u`, so the touch driver, the interrupt work and the bus fix are all present; and the running watch reports `7.2.4-forkbank-g5c05e1d68be7-dirty`, the same build string the image carries. The image is also 2,860,368 bytes against the previous cycle's 2,841,808, the difference being the enlarged interrupt descriptor array -- a size change that is itself evidence the `NR_IRQS` fix is in the build rather than merely in the source. The backup's trailing hard reset rebooted the watch, which was confirmed healthy afterwards: `cst92xx` bound again on IRQ 33 and `rtc0` reading 22:37:44. The core-syntax audit passed: `.ai/core.md` and `.ai/core-syntax.md` were re-read, the complete `.ai/` diff was inspected, `.ai/core.md` was not modified, and this entry was validated against the template with six sections in canonical order, sequential numbering from 37, an ISO-8601 timestamp carrying the America/Phoenix offset, prose-only Outcome and Next Steps, and Status values within the allowed set.
+
+#### Next Steps:
+
+The kernel is now cheap to experiment on: a failed attempt costs a four-minute restore from 1533 rather than a session. Three candidates, in the order they are worth doing. The first is the idle-poll experiment the driver was built for: `hynitron,idle-poll-ms` already exists as a property, and raising it to something like 5000 ms would make the interrupt demonstrably the sole source of idle discovery, which is the last unproven claim in touch. The second is the RTC and PMU interrupts, which are mapped and show zero counts in `/proc/interrupts` and were previously blamed on the hardware; now that the descriptor table has room and the mapping mechanism is understood, that explanation deserves to be re-tested rather than inherited. The third is the absent-address `-ETIMEDOUT` versus `-ENXIO` defect, which still makes `i2cdetect` report timeouts for empty addresses; it affects no working path and is the smallest of the three. The deferred items are unchanged and none should be started without asking: BLE media keys, the Rii K06 touchpad and Logitech keyboard, firmware-side BLE bond persistence, wake-from-sleep, and moving the Tamagotchi emulator to core 0.
+
+#### Files Modified:
+
+- None.
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: PASS
+
+---
+
 ## 37 COMMIT Unreleased 2026-11-10T15:29:30-07:00
 
 #### Coming From:

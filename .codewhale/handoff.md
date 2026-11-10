@@ -1,10 +1,10 @@
-# Handoff — Escapement, 2026-11-10T15:30
+# Handoff — Escapement, 2026-11-10T15:38
 
 Linux 7.2.4 on a T-Watch Ultra (ESP32-S3). Real Linux on the watch's own Xtensa
 cores, not emulated. This file is orientation; verify before acting on it.
 
 Canonical detail lives in `.ai/core-reference.md` (72 records, fourteen topics).
-Project history lives in `.ai/core-log.md` (37 entries; newest first — 37, 36, 35, 34, 33, 32,
+Project history lives in `.ai/core-log.md` (38 entries; newest first — 38, 37, 36, 35, 34, 33, 32,
 31, 30, 29, 28, 27, 26, 25, 24, 23, 22, 21, 20, 19, 18, 17, then 1 through 16).
 Do not re-derive what those hold.
 
@@ -18,10 +18,10 @@ persistence, any wake-from-sleep path, and moving the emulator to core 0.
 
 ## Reconstruct (in this order)
 
-1. `git log --oneline -8` — `main` was at `8eebe06`, clean and fully pushed,
+1. `git log --oneline -8` — `main` was at `de0dfda`, clean and fully pushed,
    before the commit carrying this file.
 2. `.ai/core.md` (policy), then `.ai/core-reference.md` (hardware facts — open
-   the record, not the index line), then `.ai/core-log.md` entries 37, 36, 35.
+   the record, not the index line), then `.ai/core-log.md` entries 38, 37, 36.
 3. `git -C build/esp-hosted/esp_hosted_ng branch --show-current` — expect
    `ble-bond-wip`, five local-only commits.
 
@@ -149,11 +149,22 @@ time and clean probe semantics and nothing else. Fix it in the touch cycle.
 
 ## Backups — read the directory, do not trust this file
 
-**No backup has interrupt-driven touch.** `working-2026-11-10-1444.bin`
-(sha256 `1a2637f5…`) contains working touch but predates both the interrupt work
-and the enlarged interrupt table, so restore it and touch goes back to polling
-only. Take a fresh full backup (`./scripts/watch-backup.sh`, 16 MiB, ~4 min)
-before the next kernel change.
+**`working-2026-11-10-1533.bin` is the current, complete state.** Taken
+2026-11-10 15:36, 16 MiB, sha256 `d1b87c30…`. It is the first backup that
+contains interrupt-driven touch and the enlarged interrupt table, taken **after
+a reboot** so it is a cold-boot state.
+
+Verified rather than trusted:
+
+- the stored `.sha256` matches an independent `sha256sum` of the file;
+- the 2,860,368-byte kernel extracted at `0x140000` is byte-identical to the
+  built `xipImage` (`dd3f424d…`);
+- the image carries `hynitron,cst92xx`, the interrupt-path format string
+  `idle %u ms, active %d ms, release %d ms, %s`, and the I2C recovery format
+  string `%s: int_raw=%08x sr=%08x busy=%u` — so the touch driver, the
+  interrupt work and the earlier bus fix are all in it;
+- the running watch reports `7.2.4-forkbank-g5c05e1d68be7-dirty`, the same
+  build string the image carries.
 
 The verification that was done on 1444, worth repeating on the next one:
 
@@ -167,8 +178,10 @@ the built `xipImage` (`d47e2cc3…`), so the right kernel is in the right slot;
   warm one.
 
 ```
-~/twatch-backup/working-2026-11-10-1444.bin   1a2637f5  CURRENT — hardware I2C,
-                                                        multi-byte fixed, TOUCH WORKS
+~/twatch-backup/working-2026-11-10-1533.bin   d1b87c30  CURRENT — hardware I2C,
+                                                        touch, INTERRUPT DRIVEN
+~/twatch-backup/working-2026-11-10-1444.bin   1a2637f5  hardware I2C, touch by
+                                                        polling only
 ~/twatch-backup/working-2026-11-10-1353.bin   ee2133e0  hardware I2C, multi-byte
                                                         fixed, NO touch
 ~/twatch-backup/working-2026-11-10-1251.bin   04cfee94  hardware I2C, no touch,
@@ -179,9 +192,11 @@ the built `xipImage` (`d47e2cc3…`), so the right kernel is in the right slot;
 ~/twatch-backup/twatch-factory-16MB.bin       471c9a21  stock
 ```
 
-1444 is the one to restore. 1053 remains the fallback if the hardware-I2C path
-is ever suspected: it is the bit-banged build with the old userspace touch
-daemon, fully functional for its time. Restore command:
+**1533 is the one to restore.** 1444 is the immediately previous state (touch
+but polling only) and is worth keeping for one more cycle as the A/B for the
+interrupt work. 1053 remains the fallback if the hardware-I2C path is ever
+suspected: it is the bit-banged build with the old userspace touch daemon, fully
+functional for its time. Restore command:
 
 ```sh
 PY=build/idf-tools/python_env/idf5.1_py3.14_env/bin/python
