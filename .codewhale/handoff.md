@@ -1,11 +1,11 @@
-# Handoff — Escapement, 2026-11-10T13:50
+# Handoff — Escapement, 2026-11-10T13:53
 
 Linux 7.2.4 on a T-Watch Ultra (ESP32-S3). Real Linux on the watch's own Xtensa
 cores, not emulated. This file is orientation; verify before acting on it.
 
 Canonical detail lives in `.ai/core-reference.md` (63 records, fourteen topics).
-Project history lives in `.ai/core-log.md` (32 entries; newest first — 32, 31,
-30, 29, 28, 27, 26, 25, 24, 23, 22, 21, 20, 19, 18, 17, then 1 through 16).
+Project history lives in `.ai/core-log.md` (33 entries; newest first — 33, 32,
+31, 30, 29, 28, 27, 26, 25, 24, 23, 22, 21, 20, 19, 18, 17, then 1 through 16).
 Do not re-derive what those hold.
 
 ## Current objective (verbatim)
@@ -18,27 +18,31 @@ persistence, any wake-from-sleep path, and moving the emulator to core 0.
 
 ## Reconstruct (in this order)
 
-1. `git log --oneline -8` — `main` was at `7e5efdc`, clean and fully pushed,
+1. `git log --oneline -8` — `main` was at `23c918a`, clean and fully pushed,
    before the commit carrying this file.
 2. `.ai/core.md` (policy), then `.ai/core-reference.md` (hardware facts — open
-   the record, not the index line), then `.ai/core-log.md` entries 32, 31, 30.
+   the record, not the index line), then `.ai/core-log.md` entries 33, 32, 31.
 3. `git -C build/esp-hosted/esp_hosted_ng branch --show-current` — expect
    `ble-bond-wip`, five local-only commits.
 
-## State verified on hardware 2026-11-10 13:47
+## State verified on hardware 2026-11-10 13:52 — **after a cold reboot**
 
-Everything below was measured on the running watch, not inferred:
+This is the post-reboot check, not a warm one, so it proves persistence:
 
 ```
-PMU        capacity 100 / voltage_now 4176000 uV / Full / usb online 1
-RTC        rtc0 ticking, hwclock -r works (used to fail EINVAL)
-0x51 read  w1 0x04 r7 -> 0x52 0x45 0x20 0x10 0x02 0x11 0x26 = 20:45:52 UTC
-expander   0x20: 0xff 0xff        haptic 0x5a: 0xe0
-panel      co5300 bound, fb0 320x400 @16 bpp, painting works
+PMU        capacity 100 / voltage_now 4175000 uV / Full / usb online 1
+RTC        20:51:52, hwclock -r works (used to fail EINVAL)
+0x51 read  w1 0x04 r7 -> 0x52 0x51 0x20 0x10 0x02 0x11 0x26 = 20:51:52 UTC
+PMU 2-byte 0x64 0x00    expander 0x20: 0xff 0xff    haptic 0x5a: 0xe0 0x00
+panel      co5300 bound, fb0 320x400 @16 bpp
 WiFi       10.10.0.15            BLE keyboard  running
-i2c errors dmesg: 0 xfer FAIL, 0 SCL timeout, 0 short read
-load       0.28 (was 1.09 with tbtns running)
+soak       60 ops over all four devices: 0 fails, 0 kernel errors
+load       1.16 -> 0.42 in two minutes (ordinary boot spin, it decays)
 ```
+
+Seven distinct non-`0xff` bytes decoding to the exact RTC time is the shape
+that was broken for the whole session (`0x57 ff ff ff ff ff ff` on every
+device), so this is the fix confirmed, not a lucky boot.
 
 **The hardware I2C bus works and is the default.** Multi-byte reads are fixed —
 see `docs/cores.md` for the whole proof. In short: `ack_val` is the master's

@@ -1,3 +1,33 @@
+## 33 COMMIT Unreleased 2026-11-10T13:52:28-07:00
+
+#### Coming From:
+
+Unreleased 23c918a
+
+#### Purpose:
+
+Verify that the multi-byte I2C fix and the retirement of `tbtns` both survive a cold boot, since the previous cycle's evidence was all taken within one uptime.
+
+#### Outcome:
+
+Both hold across a reboot, and the bus came up clean without intervention. This mattered because every earlier finding in this work was confounded by the same weakness: a warm bus that had already been probed into a working state cannot distinguish a fix that persists from one that merely got lucky on the first boot. The watch was rebooted from the shell and checked from zero uptime. PMU published capacity 100 / 4175000 uV / Full with `usb_online` 1, `rtc0` read 20:50:12 and `hwclock -r` succeeded, and a seven-byte read of the RTC at register `0x04` returned `0x18 0x50 0x20 0x10 0x02 0x11 0x26` -- seven distinct non-`0xff` bytes decoding to the exact BCD time 20:50:18, which is the precise shape that was broken before and returned `0x57 ff ff ff ff ff ff` on every device for the whole session. A 60-operation soak followed, fifteen rounds over all four devices, and produced zero failures with zero kernel errors; a second check after another minute still read `0x52 0x51 0x20 0x10 0x02 0x11 0x26` = 20:51:52 against a clock reading 20:51:52. `tbtns` stayed gone: moving it to `/etc/disabled/` survives a reboot because `rcS` globs `S??*` and the file is no longer under `init.d`, so there is no repeat of the wedge and no manual step needed after a boot. Load average behaved as expected, 1.16 shortly after boot decaying to 0.42 within two minutes, which is ordinary boot spin and not a fault -- the earlier session had misread a load of 1.4 as a problem before establishing that it decays. WiFi came up at 10.10.0.15, the BLE keyboard is running, and fb0 is 320x400. Touch reads `0xff 0xff` at register `0x00` instead of its `0xca` checkcode, which is correct and expected: no driver is loading, and nothing releases the CST9217's reset line through the XL9555. Nothing was changed in this cycle, so no rebuild or reflash was required and the deployed kernel is the one verified. The core-syntax audit passed: `.ai/core.md` and `.ai/core-syntax.md` were re-read, the complete `.ai/` diff was inspected, `.ai/core.md` was not modified, and this entry was validated against the template with six sections in canonical order, sequential numbering from 32, an ISO-8601 timestamp carrying the America/Phoenix offset, prose-only Outcome and Next Steps, and Status values within the allowed set.
+
+#### Next Steps:
+
+Take a full 16 MiB backup of this state, because none of the four saved images matches it: `working-2026-11-10-1251.bin` predates the multi-byte fix and still carries the chatty driver, and `working-2026-11-10-1053.bin` is the older `i2c-gpio` build that restores touch but on the bit-banged bus. A clean image of the working hardware-I2C state is the one thing this session produced that is not otherwise recoverable. After that the next cycle is the kernel input driver to replace `tbtns`: the bus is proven, the split-READ shape and command budget that make a 16-bit-addressed 15-byte read possible are established, and the two remaining unknowns are the CST9217's initialisation sequence and releasing its reset line through the XL9555. The absent-address `-ETIMEDOUT` versus `-ENXIO` defect is worth folding into that same cycle so `i2cdetect` stops reporting timeouts for empty addresses. The deferred items are unchanged and none should be started without asking: BLE media keys, the Rii K06 touchpad and Logitech keyboard, firmware-side BLE bond persistence, wake-from-sleep, and moving the Tamagotchi emulator to core 0.
+
+#### Files Modified:
+
+- None.
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: PASS
+
+---
+
 ## 32 COMMIT Unreleased 2026-11-10T13:47:00-07:00
 
 #### Coming From:
