@@ -173,6 +173,8 @@ Topic IDs are the `record_id` prefix. An entry reserves a name; it does not clai
 | Which toolchain is it, and what does it produce? | TOL | TOL-002 |
 | Why does a kernel patch silently go missing? | TOL | TOL-003 |
 | What can an emulator measured on this board achieve? | EXT | EXT-001 |
+| Where can a large read-only blob live without RAM? | EXT | EXT-002 |
+| Why does a fullscreen app flicker against the console? | EXT | EXT-003 |
 
 ---
 
@@ -237,7 +239,9 @@ TOL-001: "Without XTENSA_GNU_CONFIG pointing at esp32s3.so the compiler emits BI
 TOL-002: "crosstool-NG xtensa-esp32s3-linux-uclibcfdpic, GCC 14.1.0, uClibc-ng; binaries are dynamically linked to libc.so.0 with interpreter /lib/ld-uClibc.so.0, and -static needs -mfdpic"
 TOL-003: "A patch loop globbing patches/kernel/*.patch does not recurse, and 'git apply || true' hides the failure; both are how entire patch series disappeared from a build without an error"
 
-EXT-001: "The SPLB32 Tamagotchi core runs at 4.05x realtime headless on this board and about 1.04x while painting 4 fps to the panel; the display path is the bottleneck"
+EXT-001: "The SPLB32 Tamagotchi core runs at 4.05x realtime headless on this board, and 1.00x while painting 320x400 at 4 fps from the flash-resident ROM; the display path is the bottleneck"
+EXT-002: "The linear flash window 0x42000000 is readable from userspace, so a 512 KB ROM at 0x42480000 costs zero RAM -- the fix for contiguity on NOMMU; file mmap costs 2x the file and MAP_SHARED fails ENODEV"
+EXT-003: "A fullscreen app on fb0 flickers against fbcon because every printk repaints the console over it; console_loglevel decides it, and /etc/sysctl.conf sets kernel.printk = 1 4 1 7"
 ```
 
 ---
@@ -554,6 +558,33 @@ EXT-001: "The SPLB32 Tamagotchi core runs at 4.05x realtime headless on this boa
     - "build/esp-hosted/esp_hosted_ng/esp/esp_driver/network_adapter/main/log_pipe.c: fw_log_defer() and fw_log_flush()"
     - "docs/bluetooth-bond.md: what works, and the three defects in the order they were found"
   verification: "Verified on hardware 2026-11-09. Before the change the only visible symptom was a bond file that was written and never restored; after deferring the logs, the first boot printed `bond: no room to read etc (458752 bytes)` and named the cause. With bounded internal-RAM reads the load reports `bond: loaded 4 entries from ble-bond.bin (0 rejected)`, and the Rii K06 then reconnected on the stored key without pairing mode and typed."
+
+- record_id: EXT-002
+  kind: EXTERNAL
+  topic_id: EXT
+  title: "The linear flash window at 0x42000000 is readable from userspace, so a ROM there costs no RAM"
+  status: VERIFIED
+  verified_date: 2026-11-09
+  statement: "`init_linux_mmap()` extends the SoC's MMU table so the whole 16 MiB of flash is addressable at `0x42000000` before the jump to Linux (KRN-002). That window remains valid once Linux is running, and userspace can read it directly: reading 64 KB through it returned real data and no fault. A 512 KB ROM written raw to flash at `0x480000` is therefore readable at `0x42480000`, and a program that points at it allocates nothing."
+  consequence: "This is the answer to the contiguous-allocation problem for ROM images and any other large read-only blob (KRN-001). `malloc` of 512 KB succeeds on a fresh boot and fails once the heap fragments; a flash-window pointer works at any uptime. It matters because the failure mode is an exec-time allocator error that the program cannot report. The slot must be protected: `scripts/build-kernel.sh` now refuses an `xipImage` that would reach `0x480000`, because otherwise a larger kernel would be silently overwritten by the next ROM write rather than failing."
+  sources:
+    - "linux_ll_esp32s3.c: init_linux_mmap() and map_flash_and_go()"
+    - "on the watch: a userspace read of 0x42000000 returned data, and 0x42480000 read back a 512 KB ROM with crc32 301F0E87 matching the file"
+    - "scripts/build-kernel.sh: the ROM slot guard"
+  verification: "Verified on hardware 2026-11-09. The window was read from userspace and checksummed against the file it held, byte for byte. File mmap was tested as an alternative and rejected: MAP_PRIVATE on the same file costs 1020 KB of RAM, twice the file, while MAP_SHARED fails with ENODEV. The watch ran the emulator at 1.00x realtime with the largest free block at 128 KB, where a 512 KB malloc cannot succeed."
+
+- record_id: EXT-003
+  kind: EXTERNAL
+  topic_id: EXT
+  title: "A fullscreen app on fb0 flickers against the console, because every printk repaints fbcon"
+  status: VERIFIED
+  verified_date: 2026-11-09
+  statement: "Every `printk` is mirrored to all registered consoles, and on this board fbcon on the CO5300 is one of them. A program drawing to `/dev/fb0` and the console repainting over it therefore take turns on the same panel, which on the glass is a flicker between the app and console text. The trigger here was continuous: the touch daemon polls the CST9217 at I2C 0x1A every 60 ms, the controller NAKs intermittently, and `i2c-gpio` prints `sendbytes: NAK bailout` for each one at KERN_ERR."
+  consequence: "`console_loglevel` decides whether this happens at all, so the fix is a sysctl rather than a driver change: `/etc/sysctl.conf` now sets `kernel.printk = 1 4 1 7`, and emergencies only reach the panel. Any fullscreen app on this board needs that, or needs to raise and lower the level itself around its run. It hides the NAK message rather than stopping the NAKs, which are a property of the touch controller (TCH-003)."
+  sources:
+    - "on the watch: `/proc/sys/kernel/printk` reading 7 4 1 7 while the emulator ran, with NAK lines arriving continuously"
+    - "docs/tamagotchi.md: the flicker and the sysctl"
+  verification: "Observed on hardware 2026-11-09 with the Tamagotchi emulator running: the operator reported the console taking over the frame each time it printed. Dropping the level to 1 stopped it immediately and the game held the panel. The message level was identified by trying 3 first, which did not help because NAK bailout is KERN_ERR."
 
 - record_id: PMU-001
   kind: PMU
@@ -887,7 +918,7 @@ EXT-001: "The SPLB32 Tamagotchi core runs at 4.05x realtime headless on this boa
   sources:
     - "TamaHarness for-escapement/RESULTS-3.md and tamabench-on-watch.txt"
     - "TamaHarness portable VALIDATION.md and BUGS.md for the correctness claims"
-  verification: "All figures measured on hardware in a single process on one boot, with frame cost derived by subtracting the separately measured headless rate. The rendered output was read off the panel and confirmed to be the expected egg sprite."
+  verification: "All figures measured on hardware in a single process on one boot, with frame cost derived by subtracting the separately measured headless rate. The rendered output was read off the panel and confirmed to be the expected egg sprite. Revised 2026-11-09 (core-log entry 14): re-measured with the ROM read from flash rather than allocated, at 320x400 and 4 fps, giving 1.00x realtime -- 16 frames in 4 s at 3833499 emulated cycles/s. Earlier figures used the desktop front end's 324x348 geometry and a malloc'd ROM."
 ```
 
 ---

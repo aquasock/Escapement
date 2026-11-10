@@ -420,3 +420,36 @@ Nothing consumes the three buttons yet: they emit BTN_0, BTN_1 and BTN_2 and no 
 - User Test: PASS
 
 ---
+
+## 14 COMMIT Unreleased 2026-11-09T19:08:00-07:00
+
+#### Coming From:
+
+Unreleased 97aafcc
+
+#### Purpose:
+
+Put the Tamagotchi V3 ROM in flash so the emulator starts at any uptime instead of only on a fresh boot.
+
+#### Outcome:
+
+The ROM now lives raw in flash at 0x480000 and is read from userspace through the kernel's linear flash window at 0x42480000, costing no RAM at all. The problem it solves is KRN-001: the emulator's ROM is 512 KB and NOMMU needs it contiguous, so a malloc succeeded on a fresh boot and failed once the heap fragmented, with an exec-time allocator error the program could not report -- the pet could be started exactly once per boot. Three candidate routes were tested rather than assumed. File mmap works but costs 1020 KB, twice the file, because NOMMU copies the mapping; MAP_SHARED fails with ENODEV. The linear flash window is readable from userspace and was verified by checksumming a 64 KB range through it. The third route was the answer, and it is recorded as EXT-002 because it is a property of this port rather than of the emulator. The ROM was extracted from rom_embed.c, checked against the sha256 that file declares, written with esptool, and then verified independently by reading it back through the window and comparing CRCs -- flash crc32 301F0E87 against file crc32 301F0E87 -- rather than trusting esptool's own hash. A guard was added to scripts/build-kernel.sh so the kernel can never grow into the slot: an xipImage that would reach 0x480000 is refused, because otherwise a larger kernel would be silently overwritten by the next ROM write and the pet would be subtly wrong rather than obviously broken. The guard was checked against four sizes including exactly-at-limit and one-byte-over. The front end needed three changes, all in TamaHarness's portable/tamafb.c and documented in docs/tamagotchi.md: ROM_FLASH_ADDR selects the flash ROM and skips the allocation; FB_W and FB_H became overridable because the defaults are SEG_W+32 by SEG_H+48, which is 324x348 and larger than fb0, so the program refused to draw; and the mmap write path was replaced with banded pwrite() because the CO5300 driver implements no mmap operation. Static, and deliberately without -DEMBED_ROM, which would compile the ROM into .bss and reintroduce the same contiguity problem -- bss is 35 KB this way and would be 547 KB otherwise. A second defect was found and fixed while getting the picture on the glass, and it was not the emulator: every printk mirrors to all consoles and fbcon is one of them, so each kernel message repainted console text over the frame and the next frame repainted back, which the operator saw as flicker between the console and the game. The trigger was constant because the touch daemon polls the CST9217 every 60 ms, the controller NAKs, and i2c-gpio prints a line per NAK at KERN_ERR. /etc/sysctl.conf now sets kernel.printk = 1 4 1 7 and this is recorded as EXT-003; dropping to 3 first did not help, which is how the message level was identified. Verified on hardware: the egg renders and wiggles, the operator confirmed it on the glass, and the emulator ran at 1.00x realtime with the largest free block down to 128 KB -- 16 frames in 4 s at 3833499 emulated cycles/s -- where the malloc build cannot start at all. The core-syntax audit passed: the `.ai/` diff was inspected, `.ai/core.md` was not modified, entry 14 was validated against the template with six sections in canonical order, sequential numbering from 13, an ISO-8601 timestamp carrying the America/Phoenix offset, prose-only Outcome and Next Steps, eligible Files Modified, and Status values within the allowed set.
+
+#### Next Steps:
+
+The emulator runs but nothing controls it: the three touch bars emit BTN_0, BTN_1 and BTN_2 and nothing consumes them, and splb32_pin(cpu, 0, mask, level) with PA bits 0x01/0x02/0x04 is the hook -- tamagui.c already drives exactly that from a keyboard, so the mapping is known and the work is reading event3 and holding the state across frames. After that it should become a service, S51tamafb, which the flash ROM now makes practical at any uptime; that is also the point at which the console loglevel should be raised and lowered by the app itself rather than left at emergencies-only for the whole session. The pwrite cost is still not separated from the render cost: LCD-005's ~190 ms per frame conflicts with LCD-010's 45.7 ms projection by 4.2x, and instrumenting render_band against the pwrite would settle which dominates before any frame-rate work is attempted. Beyond the emulator: the tearing root cause in LCD-009 is still open with SPI clock the remaining suspect, the top-bar status daemon has not been started, and the K06's touchpad and media keys remain reachable but unbuilt. The Logitech keyboard is parked by user decision now that the Rii K06 is the official input device.
+
+#### Files Modified:
+
+- scripts/build-kernel.sh
+- docs/tamagotchi.md
+- README.md
+- .gitignore
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: PASS
+
+---

@@ -15,3 +15,6 @@ userspace/panel-test
 # Runtime session state. .codewhale/handoff.md is tracked deliberately, so the
 # next agent can find the baton from a clean clone; the rest is per-session.
 .codewhale/state/
+# Cross-compiled from TamaHarness/portable; deploy /home/tamafb on the watch.
+userspace/tamafb
+userspace/romverify

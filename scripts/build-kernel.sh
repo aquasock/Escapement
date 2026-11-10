@@ -226,6 +226,18 @@ grep -q '^CONFIG_RTC_DRV_PCF85063=y' .config || die "RTC driver missing"
 python3 "$here/scripts/co5300-selftest.py" || die "panel rect validation failed"
 
 size=$(stat -c %s arch/xtensa/boot/xipImage)
+# The kernel shares the linux partition with the Tamagotchi ROM.
+#
+# The ROM is written raw to flash at 0x480000 and read from userspace through
+# the linear flash window at 0x42480000, which costs it no RAM at all -- see
+# docs/tamagotchi.md. That means the slot is only free if the kernel stays
+# below it, and a kernel that grows past 0x480000 would be silently overlapped
+# by the next ROM write instead of failing. 0x140000 is where the partition and
+# the kernel start, so this is the size the image must not exceed.
+ROM_OFFSET=$((0x480000))
+kernel_limit=$((ROM_OFFSET - 0x140000))
+[ "$size" -le "$kernel_limit" ] \
+    || die "xipImage $size would reach the ROM slot at 0x480000 (limit $kernel_limit bytes); move the slot or shrink the kernel"
 [ "$size" -le $((0x400000)) ] || die "xipImage $size exceeds the 4 MiB linux partition"
 # Capture once rather than piping into grep -q. Under `set -o pipefail`,
 # `strings ... | grep -q` fails intermittently: grep exits at the first match,
@@ -237,6 +249,7 @@ case $kv_strings in
     *) die "kernel is not the forkbank build -- the fork backend did not apply" ;;
 esac
 
-printf '\nxipImage: %s bytes (limit 4194304, %s free)\n' "$size" $((0x400000-size))
+printf '\nxipImage: %s bytes (ROM slot at 0x%X, %s bytes free before it)\n' \
+    "$size" "$ROM_OFFSET" "$((kernel_limit-size))"
 printf '%s\n' "$kv_strings" | grep -m1 -o "Linux version [^ ]*" || true
 printf '\nflash:\n  esptool.py ... write_flash 0x140000 %s/arch/xtensa/boot/xipImage\n' "$K"

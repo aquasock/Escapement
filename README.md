@@ -94,6 +94,15 @@ Verified by corrupting the chip on purpose: set to 20:30 while true UTC was
 19:00, corrected the *system* clock only, rebooted — and the next boot reported
 `setting system clock to 2026-11-08T19:01:00 UTC`. The chip had followed.
 
+**Works: the Tamagotchi V3.** The real 512 KB Tamagotchi Connection V3 ROM runs
+on the AMOLED at about 1.0x realtime — the egg wiggles and hatches. The core is
+not this project's work: it is TamaHarness, a bit-exact SPLB32 emulator whose
+correctness is established separately. What this project contributes is a place
+to run it: the ROM lives **raw in flash** at `0x480000` and is read through the
+kernel's linear flash window at `0x42480000`, so it costs no RAM at all and
+starts at any uptime. That matters because a 512 KB `malloc` succeeds on a fresh
+boot and fails once the heap fragments — see `docs/tamagotchi.md`.
+
 **Works: a text console on the AMOLED.** Black background, green text, blinking
 cursor, 40 columns by 25 rows:
 
