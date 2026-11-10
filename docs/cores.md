@@ -212,23 +212,65 @@ works here; eight earlier flash cycles reconstructing from headers got nowhere.
 9. **`rxfifo_cnt` is bits [13:8]**, not [10:5] — a truncated comment in
    `i2c_struct.h` says otherwise and has now misled this driver twice.
 
-**Where it still fails.** Multi-byte reads return the first byte and then
-`0xff` for the rest: `i2ctransfer w1@0x51 0x04 r3` gives `0x07 0xff 0xff`.
-Single-byte reads are correct, which is why the PMU probes and the RTC registers
-but `hctosys` cannot read its seven-byte time block. The command words are
-verified correct by dumping them:
+**What works now, verified on hardware and sustained.** The bus carries real
+traffic and does not wedge:
 
 ```
-comd[0] = 00003000   RESTART
-comd[1] = 00000901   WRITE 1 byte, ack_en
-comd[2] = 00001c03   READ 3 bytes, ack_val
-comd[3] = 00001000   STOP
-comd[4] = 00002000   END
+capacity     100
+voltage_now  4178000 uV
+status       Full
+usb online   1
+rtc0         19:42:50 -> 19:42:58   (readable and ticking)
 ```
 
-so the encoding is not the fault; the RX FIFO is only ever holding one byte.
+`i2cdetect` returns a credible scan (1a, 20, 34, 51 answer). Ten consecutive
+reads with no failure. PMU, RTC and expander all bind and their sysfs values are
+live. There is a verified 16 MiB backup of this state,
+`working-2026-11-10-1251.bin`.
 
-**The board state this leaves.** Flashed with that driver, booting, but with no
-working I2C: the PMU, RTC, expander and touch controller all fail to bind. The
-rollback is `~/twatch-backup/working-2026-11-10-1053.bin`, which restores
-`i2c-gpio` and a fully functional watch.
+**The two bugs that made this unfixable by flashing** were both found in
+`i2c_struct.h`'s field list after a dozen failed builds, and both are one line:
+
+1. **`bus_busy` is bit 4, not bit 3.** Bit 3 is `arb_lost`. With the define one
+   low, `SR_BUS_BUSY` was reading the wrong flag entirely: a genuinely stuck bus
+   never triggered recovery, and the arbitration-lost path never fired. That is
+   the whole "one transfer per boot" bug.
+2. **Recovery must restore the timing registers.** ESP32-S3 leaves
+   `SOC_I2C_SUPPORT_HW_FSM_RST` undefined (*"FSM_RST only resets the FSM, not
+   using it"*), so ESP-IDF cycles the clock gate and then re-writes every timing
+   register. Skipping that restore leaves the peripheral at default timing, so
+   the next transfer reports `scl_main_st_to` with `arb_lost` — a bus fault that
+   looks electrical and is self-inflicted.
+
+A third correction: the one-bit `fsm_rst` is not usable on this chip at all and
+was removed. And `ack_val = 1` (NACK the last byte) is correct for every read,
+matching ESP-IDF's `I2C_MASTER_LAST_NACK`; the earlier "0 for multi-byte" rule
+came from a test that also had the address-phase bug, so the evidence was
+contaminated.
+
+**What still fails: 16-bit register addresses.** The CST9217 touch controller
+needs a two-byte register address, and that transfer shape hangs:
+
+```
+i2ctransfer w1@0x1a 0x00 r4   ->  data (8-bit address, works)
+i2ctransfer w2@0x1a 0x00 0x02 r1  ->  times out
+```
+
+The register state at failure is unambiguous — `int_raw=0x200` (trans_start
+only, nothing completed), `txfifo_cnt=3` (bytes never sent), `resp_rec=1` (the
+address WAS acknowledged), `bus_busy=0` (bus idle). So the controller sends the
+address, gets its ACK, and never chains to the next command. This affects only
+the touch controller; the PMU and RTC use one-byte addresses and work.
+
+The strongest lead is the command-register budget: a 16-bit register read needs
+8 command registers and `SOC_I2C_CMD_REG_NUM` is 8, so the list may be one over
+what the sequencer will chain. Either merge the address into the data WRITE, or
+split the transfer.
+
+**The board state this leaves.** Running the hardware-I2C kernel: PMU, RTC and
+expander all bind and their values are live; the touch controller does not,
+because of the 16-bit addressing gap above, so `tbtns` is not running. The
+verified backup of exactly this state is
+`~/twatch-backup/working-2026-11-10-1251.bin`. The previous image,
+`working-2026-11-10-1053.bin`, is the `i2c-gpio` build and restores a fully
+functional watch including touch.

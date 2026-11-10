@@ -1,3 +1,34 @@
+## 30 COMMIT Unreleased 2026-11-10T13:01:47-07:00
+
+#### Coming From:
+
+Unreleased be88103
+
+#### Purpose:
+
+Finish the hardware I2C driver by reading ESP-IDF's source rather than by flashing, after entry 29 left the bus working for one transfer and failing thereafter.
+
+#### Outcome:
+
+The hardware I2C bus now works, sustained, and the two defects that made it unfixable by experiment were both one-line errors in a header field list. Reading `i2c_struct.h` and `soc_caps.h` rather than flashing found them: `bus_busy` is bit 4, not bit 3, and bit 3 is `arb_lost`, so with the define one low the driver's `SR_BUS_BUSY` was reading the wrong flag entirely -- a genuinely stuck bus never triggered recovery and the arbitration-lost path never fired, which is the whole "one transfer per boot" symptom. And recovery must restore the timing registers: ESP32-S3 leaves `SOC_I2C_SUPPORT_HW_FSM_RST` undefined with the comment "FSM_RST only resets the FSM, not using it", so ESP-IDF cycles the clock gate and then re-writes every timing register, and skipping that restore left the peripheral at default timing so the next transfer reported `scl_main_st_to` with `arb_lost` -- an electrical-looking fault that was self-inflicted. A third correction followed: the one-bit `fsm_rst` is not usable on this chip at all and is gone, and `ack_val = 1` (NACK the last byte) is correct for every read, matching ESP-IDF's `I2C_MASTER_LAST_NACK`; the earlier "use 0 for multi-byte" rule had been derived from a test that also carried the address-phase bug, so the evidence was contaminated. Verified on hardware and sustained: capacity 100, voltage_now 4178000 uV, status Full, usb online 1, `rtc0` readable and ticking from 19:42:50 to 19:42:58, a credible `i2cdetect` in which only 1a, 20, 34 and 51 answer, and ten consecutive reads with no failure. A full 16 MiB backup of exactly that state was taken and hash-verified, `working-2026-11-10-1251.bin`, sha256 `04cfee94`, confirmed to carry the 40 MHz marker, the `espressif,esp32-i2c` compatible string and no `i2c-gpio`. One gap remains and it is precisely characterised: the CST9217 needs a 16-bit register address and that transfer shape hangs, with the failure state unambiguous -- `int_raw=0x200` (trans_start only), `txfifo_cnt=3` (bytes never sent), `resp_rec=1` (the address WAS acknowledged), `bus_busy=0` -- so the controller sends the address, receives its ACK and never chains to the next command. Only the touch controller is affected; the PMU and RTC use one-byte addresses. The strongest lead is the command-register budget, since a 16-bit read needs 8 command registers and `SOC_I2C_CMD_REG_NUM` is 8. Two observations about the board's behaviour were also settled rather than left as suspicions: the load average of 1.4 shortly after boot decays to 0.48 and the CPU measures 4 percent busy with 96 idle, so it was stale boot-time spin from probe failures and not a live fault; and the RTC and PMU reads that failed while a flash read was in progress recovered on their own, so that was transient contention rather than a regression. The core-syntax audit passed: `.ai/core.md` and `.ai/core-syntax.md` were re-read, the complete `.ai/` diff was inspected, `.ai/core.md` was not modified, KRN-006 was updated in place to record the resolution, and this entry was validated against the template with six sections in canonical order, sequential numbering from 29, an ISO-8601 timestamp carrying the America/Phoenix offset, prose-only Outcome and Next Steps, and Status values within the allowed set.
+
+#### Next Steps:
+
+The touch controller needs one change, and it is small enough that it should not cost another dozen builds: a 16-bit register read currently emits 7 commands plus END, one more than `SOC_I2C_CMD_REG_NUM`, so either fold the address into the data WRITE or split the transfer in two. Until that lands, `tbtns` cannot run and the watch has no local input, which is the only thing standing between this and full function. Everything else on the I2C bus is working and backed up, so the next cycle should be that one fix and nothing else. Beyond the bus, the deferred items are unchanged: the Tamagotchi front end still wants a `S51tamafb` from rcS, and LCD-009's tearing and the LCD-005 versus LCD-010 disagreement remain open.
+
+#### Files Modified:
+
+- patches/kernel/i2c/final/i2c-esp32.c
+- docs/cores.md
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: PASS
+
+---
+
 ## 29 COMMIT Unreleased 2026-11-10T11:56:24-07:00
 
 #### Coming From:

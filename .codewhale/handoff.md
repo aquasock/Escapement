@@ -1,10 +1,10 @@
-# Handoff — Escapement, 2026-11-10T11:57
+# Handoff — Escapement, 2026-11-10T13:03
 
 Linux 7.2.4 on a T-Watch Ultra (ESP32-S3). Real Linux on the watch's own Xtensa
 cores, not emulated. This file is orientation; verify before acting on it.
 
 Canonical detail lives in `.ai/core-reference.md` (63 records, fourteen topics).
-Project history lives in `.ai/core-log.md` (29 entries; newest first — 29, 28, 27, 26, 25, 24, 23,
+Project history lives in `.ai/core-log.md` (30 entries; newest first — 30, 29, 28, 27, 26, 25, 24, 23,
 22, 21, 20, 19, 18, 17, then 1 through 16). Do not re-derive what those hold.
 
 ## Current objective (verbatim)
@@ -17,10 +17,10 @@ persistence, any wake-from-sleep path, and moving the emulator to core 0.
 
 ## Reconstruct (in this order)
 
-1. `git log --oneline -8` — `main` was at `8e19197`, clean and fully pushed,
+1. `git log --oneline -8` — `main` was at `be88103`, clean and fully pushed,
    before the commit carrying this file.
 2. `.ai/core.md` (policy), then `.ai/core-reference.md` (hardware facts — open
-   the record, not the index line), then `.ai/core-log.md` entries 29, 28, 27.
+   the record, not the index line), then `.ai/core-log.md` entries 30, 29, 28.
 3. `git -C build/esp-hosted/esp_hosted_ng branch --show-current` — expect
    `ble-bond-wip`, five local-only commits.
 
@@ -33,29 +33,25 @@ after a reboot; WiFi 10.10.0.15 at ~409 KB/s; three touch bars paint, click and
 emit BTN_0/1/2; the Tamagotchi runs at a true 1.00x from the flash-resident ROM
 at 40 MHz with eight clean full-width bands.
 
-**The hardware I2C bus WORKS, but only for single-byte reads.** `i2cdetect`
-returns a credible scan (only 1a/20/34/51 answer), the PMU probes fully and
-publishes both supplies, `rtc0` registers, and `axp20x-pek` is an input device.
-Multi-byte reads return only their first byte, so `hctosys` and `pca953x`
-fail and `tbtns` is not running. Restore for a fully working watch:
+**The hardware I2C bus WORKS**, sustained and verified: `rtc0` readable and
+ticking, PMU publishing capacity 100 / 4178000 uV / Full / usb online, expander
+bound, ten consecutive reads with no failure, credible `i2cdetect`.
+
+**Touch is the one gap.** The CST9217 needs a 16-bit register address and that
+transfer shape hangs (`txfifo_cnt=3` stuck, `resp_rec=1`). Needs 8 command
+registers; `SOC_I2C_CMD_REG_NUM` is 8. So `tbtns` is not running.
+
+**Two bugs cost a dozen builds each, both one line:** `bus_busy` is bit 4 not
+bit 3 (so `SR_BUS_BUSY` read `arb_lost`), and recovery must restore the timing
+registers. See `docs/cores.md` and KRN-006.
+
+**Verified backups, newest first:**
 
 ```
-~/twatch-backup/working-2026-11-10-1053.bin    <- i2c-gpio, fully working
+~/twatch-backup/working-2026-11-10-1251.bin   40 MHz + hardware I2C (current)
+~/twatch-backup/working-2026-11-10-0940.bin   40 MHz + i2c-gpio, touch works
+~/twatch-backup/twatch-factory-16MB.bin       stock
 ```
-
-**The 40 MHz kernel is in that image too**, so restoring loses nothing except
-the I2C attempt. KRN-006 records the two boot-time blockers that were found and
-fixed (clock gate closed, reset held) — check those first on any future attempt.
-
-**There is now exactly one image worth restoring**, and it is qualified:
-
-```
-~/twatch-backup/working-2026-11-10-0940.bin    16 MiB, sha256 fd7e5bf9
-~/twatch-backup/twatch-factory-16MB.bin        untouched stock state
-```
-
-Use the first. Do not hunt for others — the directory was pruned from 17 images
-to those two on 2026-11-10, and every older one was 20 MHz.
 
 **Restore command, corrected this session** (the previously documented form was
 wrong and cost an hour):
