@@ -1,3 +1,36 @@
+## 44 COMMIT Unreleased 2026-11-10T16:46:42-07:00
+
+#### Coming From:
+
+Unreleased 17099e0
+
+#### Purpose:
+
+Restore the three touch bars after the touch daemon was retired, and settle whether the emulator is faster without it.
+
+#### Outcome:
+
+Both, and the second was the point. Retiring `tbtns` stranded three things it owned, discovered one at a time as each stopped working: the haptic call, then the `touch-buttons` input device, then the bar-to-button mapping itself. All three are now in the kernel. `cst92xx` decodes the strip below fb0 into three buttons and registers a second input device named exactly `touch-buttons` carrying BTN_0, BTN_1 and BTN_2 -- the same name and codes the retired daemon used, chosen so `tamafb` needs no change and no consumer written against the old daemon breaks. The band mirrors `co5300_paint_frame()`'s painted geometry, y >= 440 split at x = 22, 158 and 294, with two details measured rather than assumed: the Y threshold is 440 and not the painted 445 because taps decode a few pixels high near the bottom of the glass (TCH-004), and a press on a bar deliberately reports no ABS_X/ABS_Y, because the strip is outside fb0 by construction so a coordinate there would only invite a consumer to clamp it in. Sliding along the strip changes button without firing a second click, so a drag across three bars is one press rather than three. With that working the operator reports the emulator running **materially faster**, which is EMU-010's predicted 30 percent arriving now that nothing polls the controller on the CPU the emulator runs on. This closes the trade the documentation had recorded as "you can have buttons or 34.7 percent, not both": that trade only existed because the bars were decoded by a userspace poller competing with the emulator, and on the touch interrupt they cost nothing. The stale passages were superseded rather than deleted -- the reasoning about why stopping the daemon killed the buttons is still the reason the mapping was hard to get right, so it is kept with a note that its conclusion no longer applies. One honest limit on this cycle's evidence: the emulator's log confirms it found the device (`buttons: /dev/input from touch-buttons` rather than its "buttons will do nothing" error) and the operator confirmed all three bars respond, but no press line was captured in the log, so the evidence that a press traverses the new path is the operator's report plus the device registration rather than a recorded event. Nothing was left running that could capture it, and the emulator is still up for the next cycle. The stall log also shows 29 stalls still occurring, 14 of them with `dirty 0xFC`, which is the time-screen transition of EMU-002 and unrelated to throughput; it is deliberately left for the next cycle at the operator's request.
+
+#### Next Steps:
+
+The stalls are the next discussion, and this cycle's numbers sharpen what they are: 29 stalls in an otherwise faster emulator, 14 of them on `dirty 0xFC` and the longest early ones at 286 and 211 ms wall with panel time at 104 and 41 ms. That is the EMU-002 shape -- the guest stops changing display RAM, the loop falls behind, and the panel figure during a stall runs an order of magnitude above its 9.5 ms benchmark. EMU-002 names the next measurement: read the stall log against a press. The watch is in the right state for it -- touch is interrupt driven, the bars work, and `tamafb` writes the stall log -- so it needs only a press on the middle bar while the log is tailed. Beyond that, a full 16 MiB backup should be taken, since `working-2026-11-10-1621.bin` predates the haptic driver and the bar mapping. The deferred items are unchanged and none should be started without asking: BLE media keys, the Rii K06 touchpad and Logitech keyboard, firmware-side BLE bond persistence, wake-from-sleep, and moving the Tamagotchi emulator to core 0.
+
+#### Files Modified:
+
+- patches/kernel/touch/final/cst92xx.c
+- docs/tamagotchi.md
+- docs/panel-reservations.md
+- .ai/core-reference.md
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: PASS
+
+---
+
 ## 43 COMMIT Unreleased 2026-11-10T16:36:09-07:00
 
 #### Coming From:

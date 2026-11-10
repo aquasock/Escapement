@@ -148,6 +148,7 @@ Topic IDs are the `record_id` prefix. An entry reserves a name; it does not clai
 | Should the emulator's ROM live in flash or PSRAM? | EMU | EMU-009 |
 | Why is the emulator slower with the touch buttons running? | EMU | EMU-010 |
 | How fast does the emulator actually run the real ROM? | EMU | EMU-011 |
+| Why did the emulator speed up when the touch daemon was retired? | EMU | EMU-012 |
 | Why does a 512 KB allocation work once and then fail? | KERNEL | KRN-004 |
 | Why not put the hardware behind the RTOS on core 0? | KERNEL | KRN-005 |
 | Why is the hardware I2C that slow? | KERNEL | KRN-006 |
@@ -1348,6 +1349,21 @@ EMU-010: "The touch daemon costs the emulator about 30 percent of its throughput
     - "KRN-004 for why the 512 KB PSRAM block is a one-shot allocation per boot and why later runs fall back to flash"
     - "EMU-002 for the stall that is still open, and EMU-009 for the corebench PSRAM figure this deliberately does not overwrite"
   verification: "Measured on hardware 2026-11-10 with the touch daemon retired, so no polling competes with the run. Bench: PSRAM 511711 and 513765 on two separate boots, flash 409532 and 407079 on one boot, both arms retiring an identical 692707 instructions. Display sweep at 2/4/8/16 fps held 1.00-1.01x. Speed ramp at 100/150/200 percent held 1.01/1.50/2.01x with 120 frames drawn at each. A 20 s, 10 fps run logged zero stalls."
+
+- record_id: EMU-012
+  kind: EMU
+  topic_id: EMU
+  status: VERIFIED
+  verified_date: 2026-11-10
+  title: "Retiring the touch daemon gave the emulator the 30 percent EMU-010 predicted, and the bars still work because they moved into the kernel"
+  statement: "The three touch bars below fb0 are decoded in `cst92xx`, which registers a second input device named exactly `touch-buttons` carrying BTN_0, BTN_1 and BTN_2, and fires `drv2605_tap()` on a press that starts on a bar. The band is y >= 440 split at x = 22, 158 and 294, mirroring `co5300_paint_frame()`'s painted geometry. With that in place the retired userspace daemon is no longer needed for input at all, and the operator reports the emulator running materially faster with the bars working."
+  consequence: "This closes the trade recorded in docs/tamagotchi.md as 'you can have buttons or 34.7 percent, not both'. That trade existed only because the bars were decoded by a userspace poller competing with the emulator for the CPU; on the touch interrupt they cost nothing and the 34.7 percent stays. It also completes a pattern that ran through this whole session: retiring the daemon stranded three separate things it owned -- the bar-to-button mapping, the `touch-buttons` input device, and the haptic call -- and each was found only when something visibly stopped working. All three now live in the kernel, which is where a button's behaviour belongs. Two details of the mapping are measured rather than assumed: the Y threshold is 440 and not 445 because taps decode a few pixels high near the bottom of the glass (TCH-004), and a press on a bar deliberately does not report ABS_X/ABS_Y, because the strip is outside fb0 by construction and a coordinate there would only invite a consumer to clamp it in. Sliding along the strip changes button without firing a second click, so a drag across three bars is one press, not three."
+  sources:
+    - "patches/kernel/touch/final/cst92xx.c: cst92xx_button_at(), the touch-buttons input device, and the routing in cst92xx_report_touch()"
+    - "patches/kernel/display/final/co5300.c: BTN_Y0, BTN_EDGE0..2 and BTN_SEP, the painted geometry this mirrors"
+    - "TamaHarness/portable/tamafb.c: BTN_DEV_NAME \"touch-buttons\" and the BTN_0..BTN_2 read, the contract the device name satisfies"
+    - "TCH-004 for the 440 threshold, and EMU-010 for the 30 percent the daemon cost"
+  verification: "Verified on hardware 2026-11-10. /proc/bus/input/devices lists a fourth device, Name=\"touch-buttons\", as event3 alongside cst92xx-touch on event2. The emulator's own log confirms `buttons: /dev/input from touch-buttons` rather than its 'buttons will do nothing' error, and the operator confirmed the pet responds to all three bars and that the emulator is materially faster than with the daemon running."
 ```
 
 ---

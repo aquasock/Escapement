@@ -115,6 +115,15 @@
 struct cst92xx {
 	struct i2c_client	*client;
 	struct input_dev	*input;
+	/*
+	 * The three bars below fb0 are buttons, not a touch surface, so they get
+	 * their own input device. tamafb looks for a device named exactly
+	 * "touch-buttons" and reads BTN_0..BTN_2 from it; that name and those
+	 * codes are the contract the retired userspace daemon had, and keeping
+	 * them means neither tamafb nor anything else has to change.
+	 */
+	struct input_dev	*buttons;
+	int			btn_down;	/* 0..2, or -1 for none */
 	struct gpio_desc	*reset_gpio;
 	struct gpio_desc	*int_gpio;
 	struct delayed_work	poll;
@@ -127,6 +136,42 @@ struct cst92xx {
 	u32			idle_poll_ms;
 	u32			irq_count;	/* diagnostics: reports seen from the IRQ */
 };
+
+/*
+ * The button band, mirroring co5300.c's geometry rather than inventing it.
+ *
+ * co5300_paint_frame() paints three bars into the strip below fb0:
+ *
+ *     y 445..501, x 22..431 split at 158 and 294
+ *
+ * A press in that strip is a button, not a point on the screen -- it is
+ * outside fb0 by construction, so there is nothing to report as a coordinate.
+ *
+ * The Y threshold is 440, not 445, and that is measured rather than copied:
+ * TCH-004 records taps on a bar decoding to panel Y 442 and 443 against a bar
+ * painted from 445, because the touch controller reads a few pixels high near
+ * the bottom of the glass. A threshold at the painted edge loses taps at the
+ * top of each bar; 440 costs at most a few console rows being read as a press
+ * and buys the property the bars exist for.
+ */
+#define CST92XX_BTN_Y0		440
+#define CST92XX_BTN_EDGE0	22
+#define CST92XX_BTN_EDGE1	158
+#define CST92XX_BTN_EDGE2	294
+
+/* Which bar, if any, a panel coordinate falls in. -1 for the screen. */
+static int cst92xx_button_at(unsigned int x, unsigned int y)
+{
+	if (y < CST92XX_BTN_Y0)
+		return -1;
+	if (x < CST92XX_BTN_EDGE0 || x > CST92XX_BTN_EDGE2)
+		return -1;
+	if (x < CST92XX_BTN_EDGE1)
+		return 0;
+	if (x < CST92XX_BTN_EDGE2)
+		return 1;
+	return 2;
+}
 
 /*
  * Read n bytes from a 16-bit register: two address bytes, repeated start, n
@@ -279,6 +324,7 @@ static void cst92xx_report_touch(struct cst92xx *ts, u8 *blk)
 	struct input_dev *input = ts->input;
 	u8 *p = blk;		/* finger 0 is at offset 0 */
 	unsigned int x, y;
+	int button;
 
 	x = (p[1] << 4) | (p[3] >> 4);
 	y = (p[2] << 4) | (p[3] & 0x0f);
@@ -287,6 +333,40 @@ static void cst92xx_report_touch(struct cst92xx *ts, u8 *blk)
 		x = ts->max_x;
 	if (y > ts->max_y)
 		y = ts->max_y;
+
+	/*
+	 * The strip below fb0 is three buttons, and a press there is not a
+	 * point on the screen -- it is outside fb0 by construction, so
+	 * reporting a coordinate would only invite a consumer to clamp it in.
+	 */
+	button = cst92xx_button_at(x, y);
+	if (button >= 0) {
+		if (ts->btn_down != button) {
+			if (ts->btn_down >= 0)
+				input_report_key(ts->buttons,
+						 BTN_0 + ts->btn_down, 0);
+			input_report_key(ts->buttons, BTN_0 + button, 1);
+			input_sync(ts->buttons);
+			ts->btn_down = button;
+		}
+		/*
+		 * Sliding along the strip changes button without lifting, and
+		 * that must not click: the click belongs to a press, and a drag
+		 * across three bars would otherwise fire three of them.
+		 */
+		if (!ts->touching)
+			drv2605_tap();
+		ts->touching = true;
+		ts->last_report = jiffies;
+		return;
+	}
+
+	/* A press on the screen itself, which may follow one on the strip. */
+	if (ts->btn_down >= 0) {
+		input_report_key(ts->buttons, BTN_0 + ts->btn_down, 0);
+		input_sync(ts->buttons);
+		ts->btn_down = -1;
+	}
 
 	input_report_abs(input, ABS_X, x);
 	input_report_abs(input, ABS_Y, y);
@@ -312,6 +392,11 @@ static void cst92xx_report_touch(struct cst92xx *ts, u8 *blk)
 
 static void cst92xx_report_release(struct cst92xx *ts)
 {
+	if (ts->btn_down >= 0) {
+		input_report_key(ts->buttons, BTN_0 + ts->btn_down, 0);
+		input_sync(ts->buttons);
+		ts->btn_down = -1;
+	}
 	input_report_key(ts->input, BTN_TOUCH, 0);
 	input_sync(ts->input);
 	ts->touching = false;
@@ -411,7 +496,7 @@ static int cst92xx_probe(struct i2c_client *client)
 {
 	struct device *dev = &client->dev;
 	struct cst92xx *ts;
-	int ret, irq;
+	int ret, irq, i;
 
 	ts = devm_kzalloc(dev, sizeof(*ts), GFP_KERNEL);
 	if (!ts)
@@ -451,6 +536,28 @@ static int cst92xx_probe(struct i2c_client *client)
 	input_set_capability(ts->input, EV_ABS, ABS_X);
 	input_set_capability(ts->input, EV_ABS, ABS_Y);
 
+	/*
+	 * The bar buttons, as their own device.
+	 *
+	 * The name is load-bearing: tamafb searches /proc/bus/input/devices for
+	 * exactly "touch-buttons" and reads BTN_0..BTN_2 from it. That was the
+	 * contract with the userspace daemon, and keeping it means the emulator
+	 * needs no change and neither does any other consumer written against
+	 * the old daemon.
+	 */
+	ts->buttons = devm_input_allocate_device(dev);
+	if (!ts->buttons)
+		return -ENOMEM;
+
+	ts->buttons->name = "touch-buttons";
+	ts->buttons->id.bustype = BUS_I2C;
+	ts->buttons->dev.parent = dev;
+
+	for (i = 0; i < 3; i++)
+		input_set_capability(ts->buttons, EV_KEY, BTN_0 + i);
+
+	ts->btn_down = -1;
+
 	ret = cst92xx_reset(ts);
 	if (ret)
 		return ret;
@@ -466,6 +573,10 @@ static int cst92xx_probe(struct i2c_client *client)
 	ret = input_register_device(ts->input);
 	if (ret)
 		return dev_err_probe(dev, ret, "cannot register input device\n");
+
+	ret = input_register_device(ts->buttons);
+	if (ret)
+		return dev_err_probe(dev, ret, "cannot register buttons device\n");
 
 	/*
 	 * The idle period is a property so the interrupt can be proved rather

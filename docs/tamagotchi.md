@@ -528,6 +528,17 @@ profiled before anything is changed on the strength of it.
 
 ### What the daemon does now
 
+**Superseded 2026-11-10.** The daemon is retired, and with it the whole
+trade-off below. The bars are now decoded in the kernel, inside `cst92xx`, which
+registers a `touch-buttons` device carrying `BTN_0/1/2` and fires the haptic
+click. That puts them on the touch interrupt rather than on a 15 ms poll, so
+they cost the emulator nothing -- there is no daemon to slow down and no
+throughput to trade. The operator confirmed the emulator feels materially faster
+with the bars working, which is EMU-010's predicted 30 percent arriving.
+
+What follows is kept because it is why the bars were hard to get right, but the
+conclusion no longer applies.
+
 An earlier version of this fix stopped polling entirely while a fullscreen app
 was running, which recovered the full 34.7 percent and **made the buttons dead**.
 That was wrong and worth recording: `tamafb`'s only input is the `BTN_0/1/2`
@@ -546,9 +557,9 @@ tbtns: back to 15 ms, tamafb has exited
 ```
 
 The honest summary: **you can have buttons or 34.7 percent, not both**, and with
-the current understanding the buttons win. The speed belongs to starting the
-emulator at boot where the ROM may fit in PSRAM, which recovers 33.8 percent
-without touching this daemon at all.
+the current understanding the buttons win. That trade existed only because the
+bars were decoded in userspace by a poller competing with the emulator. In the
+kernel, on the interrupt, the bars cost nothing and the 34.7 percent stays.
 
 ## Still to do
 
@@ -571,6 +582,5 @@ without touching this daemon at all.
   the allocation to happen while an order-8 block still exists, which means a
   `S51tamafb` started from `rcS`. See KRN-004.
 - **`tbtns` slowing down is done**, and it buys only 1.1 percent -- the 34.7
-  percent it costs is not the poll rate. Profiling it is unscheduled. A
-  `S51tamafb` should write `/var/run/tamafb.pid` the same way `run-tama.sh`
-  does, or the daemon will not slow down.
+  percent it costs is not the poll rate. Superseded: the daemon is retired and
+  the bars are decoded on the touch interrupt, so there is no poll to slow.

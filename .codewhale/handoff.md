@@ -1,10 +1,10 @@
-# Handoff — Escapement, 2026-11-10T16:37
+# Handoff — Escapement, 2026-11-10T16:47
 
 Linux 7.2.4 on a T-Watch Ultra (ESP32-S3). Real Linux on the watch's own Xtensa
 cores, not emulated. This file is orientation; verify before acting on it.
 
-Canonical detail lives in `.ai/core-reference.md` (77 records, fourteen topics).
-Project history lives in `.ai/core-log.md` (43 entries; newest first — 43, 42, 41, 40, 39, 38, 37, 36, 35, 34, 33,
+Canonical detail lives in `.ai/core-reference.md` (78 records, fourteen topics).
+Project history lives in `.ai/core-log.md` (44 entries; newest first — 44, 43, 42, 41, 40, 39, 38, 37, 36, 35, 34, 33,
 31, 30, 29, 28, 27, 26, 25, 24, 23, 22, 21, 20, 19, 18, 17, then 1 through 16).
 Do not re-derive what those hold.
 
@@ -18,10 +18,10 @@ persistence, any wake-from-sleep path, and moving the emulator to core 0.
 
 ## Reconstruct (in this order)
 
-1. `git log --oneline -8` — `main` was at `a253f61`, clean and fully pushed,
+1. `git log --oneline -8` — `main` was at `17099e0`, clean and fully pushed,
    before the commit carrying this file.
 2. `.ai/core.md` (policy), then `.ai/core-reference.md` (hardware facts — open
-   the record, not the index line), then `.ai/core-log.md` entries 43, 42, 41.
+   the record, not the index line), then `.ai/core-log.md` entries 44, 43, 42.
 3. `git -C build/esp-hosted/esp_hosted_ng branch --show-current` — expect
    `ble-bond-wip`, five local-only commits.
 
@@ -101,6 +101,16 @@ through TCH-010 in the reference. The five things that matter:
 
 `0xD1 = 0x1E` is **not** part of official bring-up — it lives in `setMode()`,
 whose only caller is `sleep()`. TCH-002 was corrected in place.
+
+**The three bars work, and cost nothing.** `cst92xx` decodes the strip below fb0
+into `BTN_0/1/2` and registers a second input device named exactly
+`touch-buttons` — the name and codes the retired daemon used, so `tamafb` needs
+no change. Band is `y >= 440` split at `x = 22/158/294` (mirroring
+`co5300_paint_frame()`); 440 not 445 because taps read a few px high near the
+bottom (TCH-004). Bar presses report **no** `ABS_X/ABS_Y` — the strip is outside
+fb0 by construction. Sliding across bars is one press, not three. With this the
+emulator is **materially faster** (~30%, EMU-010) and the old "buttons or 34.7%
+not both" trade is dead: on the interrupt the bars are free.
 
 **Each press clicks.** `patches/kernel/haptic/final/drv2605.c` drives the
 DRV2605 at 0x5A and `cst92xx` calls `drv2605_tap()` on the press transition
@@ -187,6 +197,11 @@ Compare corebench to corebench, tamafb to tamafb, never across. See EMU-011.
 
 The old claim "4 fps gives ~1.0x; the panel is the limit" is **retired** — it
 was true with the touch daemon competing and is false now.
+
+**Stalls are the open thread** (next up by operator request). 29 in an otherwise
+faster emulator, 14 on `dirty 0xFC`, longest early ones 286 and 211 ms wall with
+panel 104 and 41 ms. That is the EMU-002 shape: guest stops touching display RAM,
+loop falls behind, panel an order of magnitude above its 9.5 ms benchmark.
 
 **What is left: EMU-002**, the ~1.5 s time-screen entry. Not throughput, not the
 panel, not the frame rate, not the ROM's location — those are all excluded now.

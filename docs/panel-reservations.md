@@ -192,7 +192,9 @@ Consumers of that one operation:
   jffs2; a slot config belongs there). Still open; the API document deliberately
   keeps the driver ignorant of slot semantics.
 - Whether the top bar is drawn by a daemon or by the kernel. A daemon is
-  consistent with `blekbd` and `tbtns`, and it is the intended shape.
+  consistent with `blekbd`, and it is the intended shape. Note `tbtns` was
+  retired 2026-11-10 and its bar decoding moved into `cst92xx`, so "a daemon
+  like the buttons use" is no longer the precedent it was.
 - Whether partial top cells (1 and 7) are offered at all.
 
 ## Verification
