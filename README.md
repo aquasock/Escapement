@@ -193,6 +193,15 @@ The HID host runs in the firmware, not in Linux: the kernel's `CONFIG_BT_HIDP`
 is Bluetooth *Classic* only, HID-over-GATT lives in BlueZ, and BlueZ cannot run
 on this NOMMU board.
 
+**The pairing survives a reboot.** The firmware cannot write flash after Linux
+starts (an NVS write parks the other core, which is running Linux, and aborts),
+so the split is forced: Linux writes `/etc/ble-bond.bin` when a pairing
+completes, and the firmware reads it at boot and restores the keys before it
+scans. The keyboard then reconnects on the stored key without being put into
+pairing mode. `docs/bluetooth-bond.md` records the three defects that hid each
+other before this worked — the last of them was that the reader was trying to
+copy a 448 KiB partition into PSRAM that this firmware does not expose as a heap.
+
 **The current keyboard is a Rii K06 combo**, in its Bluetooth LE mode. It
 pairs, encrypts, and types. It exposed one more defect worth knowing about,
 because the failure looked like "connected but no keys" and the cause was a
@@ -386,23 +395,14 @@ the stream was also never compiled, so the device did not exist. Both are
   keycodes (`KEY_POWER`, `KEY_ENTER`) but nothing consumes them, and the three
   touch buttons below the console emit `BTN_0/1/2` for the same reason. Typing is
   via the Bluetooth keyboard, or the USB port.
-- **BLE media keys do nothing.** Boot protocol carries only the 8-byte keyboard
-  report, so volume and browser keys never reach the host. They live on the
-  consumer-page reports that report protocol exposes — and report protocol is
-  what exhausted the ATT buffers and broke the link. Adding them back needs a
-  second subscription and the report map read, done serially.
-- **No bond is kept, so the keyboard re-pairs after every reboot.** The pairing
-  is saved — `blekbd` reports `bond saved (332 bytes)` — but the firmware's
-  load path is unfinished, so the key it stores is never restored. The firmware
-  cannot write flash after Linux starts (an NVS write parks the other core,
-  which is running Linux, and aborts).
-  **With the current firmware this is not automatic**: `sm_bonding` is enabled
-  while the load path is unfinished, so after a reboot the keyboard has to be
-  put into pairing mode by hand. That is a regression against the earlier
-  behaviour, where the failed bond simply caused a silent re-pair, and it is
-  the reason the next Bluetooth cycle exists. A jffs2-based workaround is half
-  built — export to `/etc/ble-bond.bin` works, the boot-time load does not. See
-  `docs/bluetooth-bond.md`.
+- **BLE media keys are untested, and probably close.** The host now subscribes
+  to every notifying input report, not just the boot input, so the consumer-page
+  reports that carry volume and browser keys do reach Linux, and `blekbd` has a
+  consumer usage map to decode them. What is missing is the report map: the
+  firmware's `map_step()` is not called, so the daemon falls back to the boot
+  layout and cannot tell a report ID from a keycode. Reading the map is what
+  exhausted the ATT buffers once before (BLE-002), so if it is added it has to
+  be chunked and serialised.
 - **The console is slow to repaint.** Every fbcon drawing op goes straight to
   the panel as one spi-mem op through a 64-byte FIFO, with no DMA and no dirty
   region tracking. Correct first; fast later.

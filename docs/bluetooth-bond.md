@@ -1,9 +1,17 @@
 # Keeping the BLE bond across a reboot
 
-**Status: half done.** Export works. Load does not. The watch does not
-currently restore a pairing at boot, so the keyboard needs pairing mode after a
-reboot. Nothing here is enabled on the watch — the running firmware is from
-`ble-bond-wip` and is not in a state to ship.
+**Status: works, verified on hardware 2026-11-09.** Export writes
+`/etc/ble-bond.bin`, the firmware reads it at boot and restores the keys, and
+the Rii K06 reconnects on the stored key without being put into pairing mode:
+
+```
+bond: loaded 4 entries from ble-bond.bin (0 rejected)
+```
+
+Getting there meant finding three defects, each of which hid the next. They are
+recorded below in the order they were uncovered, because the diagnostic lesson
+is the transferable part: the load had been "failing to load" for several
+sessions when in fact it was never reaching the file.
 
 ## Why not NVS
 
@@ -54,21 +62,47 @@ Small files are stored uncompressed, so the guard did not bite. `/etc` and
 
 8 + 2 × 81 = 170. Magic, size check, both key sets, correct address.
 
-## What does not work
+## What was wrong with the load, and how it was found
 
-The load at boot. After rebooting with that 170-byte file in place, the
-keyboard woke, failed to reconnect, and went back to sleep — behaving exactly
-as if the watch had never stored anything.
+After rebooting with a valid file in place the keyboard woke, failed to
+reconnect, and went back to sleep — behaving exactly as if the watch had never
+stored anything. Three defects, each hiding the next.
 
-**The blocker is observability, not the protocol.** `bond_load()` runs from the
-NimBLE host-sync callback, which fires long before Linux is reading
-`/dev/esp-log`. Every `fw_log()` from it is dropped. So there is no evidence
-either way: the file may have been read and rejected, loaded and then ignored,
-or never read at all.
+**1. It never read the file, and said so to nobody.** `bond_load()` runs from the
+NimBLE host-sync callback, which fires before Linux starts, so every `fw_log()`
+from it was dropped. The doc called this an observability problem and it was
+right: the fix was `fw_log_defer()` / `fw_log_flush()`, a small fixed pool of
+boot-time lines released when Linux first speaks on the pipe. The very first
+flush printed the cause:
 
-The next step is therefore instrumentation — buffer the boot-time bond lines and
-flush them once the pipe is live, or park a result code somewhere the daemon can
-read — not another attempt at the load logic.
+```
+bond: no room to read etc (458752 bytes)
+```
+
+**2. PSRAM is not a heap here.** `map_bond_partition()` asked for
+`heap_caps_malloc(part->size, MALLOC_CAP_SPIRAM)`. This firmware sets
+`CONFIG_SPIRAM_USE_MEMMAP`, so PSRAM is mapped as address space for the kernel
+and is not registered as a heap region — no allocation on this board can carry
+`MALLOC_CAP_SPIRAM`, and that call could never succeed. It now allocates
+internal RAM and reads a **bounded prefix**: 16 KiB, doubling until the file is
+found. The whole 448 KiB partition never fits alongside everything else at boot
+and does not need to, because jffs2 appends and this partition holds a handful
+of small files.
+
+**3. The reader trusted a node's own length.** `jffs2_walk()` bounds-checked the
+node header but then called the callback with `node.totlen` bytes, so an image
+truncated mid-node read past the buffer. That was latent while the image was
+always whole; bounded reads make a partial trailing node normal, so the check
+had to be added with them.
+
+**The blocker was observability, and that is worth keeping as a lesson.**
+`bond_load()` runs from the NimBLE host-sync callback, which fires long before
+Linux is reading `/dev/esp-log`, so every `fw_log()` from it was dropped — and
+there was no evidence either way: the file may have been read and rejected,
+loaded and then ignored, or never read at all. Several sessions were spent
+revising the load logic on that basis. The instrumentation came first in the
+end, and it answered the question in a single boot. When a path cannot report
+its own failure, build the reporting before touching the logic.
 
 ## Three findings worth keeping
 
@@ -97,11 +131,19 @@ successfully. A 1.5 s delayed callout is what produced the 170-byte file.
 packed. Taking the address of a packed member and handing it to the security
 manager is unaligned access; copy to an aligned local first.
 
-## Is it worth finishing?
+## Is it worth having?
 
-It buys a fraction of a second per reconnect. With `sm_bonding = 0` the keyboard
-already reconnects unattended after a reboot — that was verified, and it is the
-configuration the watch shipped with. Bonding is only worth having if the load
-works, because a keyboard bonded to a host that has lost the key stops
-advertising until it is re-paired by hand; that is the failure mode the
-`-wip` branch currently leaves you in.
+It is no longer a question: the load works, so `sm_bonding = 1` is safe to keep.
+The argument for finishing it was that a bond which saves but does not load is
+worse than no bond at all — a keyboard bonded to a host that has lost the key
+stops advertising until it is re-paired by hand, which is exactly the failure
+mode `ble-bond-wip` left the watch in. That is fixed, and the keyboard now
+reconnects on the stored key after a reboot without pairing mode.
+
+What it buys is small — a fraction of a second per reconnect, and no manual
+re-pairing — but it is the difference between a keyboard that works after every
+boot and one that needs the user to hold a key combination each time.
+
+Still open, and separate: the slot layout is a single file holding every key
+set, with `ENTRY_MAX` 8 and the K06 using 4. If a second device is ever paired
+alongside it, check that count before assuming both fit.

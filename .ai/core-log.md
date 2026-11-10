@@ -358,3 +358,34 @@ The bond is the obvious next cycle and it is now the only thing standing between
 - User Test: PASS
 
 ---
+
+## 12 COMMIT Unreleased 2026-11-09T17:34:21-07:00
+
+#### Coming From:
+
+Unreleased b4600dc
+
+#### Purpose:
+
+Make the Rii K06 reconnect on its stored bond after a reboot, without the user putting it into pairing mode.
+
+#### Outcome:
+
+The bond now loads and the keyboard reconnects unattended, and the three defects that prevented it had been hiding each other for several sessions. The first was observability, exactly as `docs/bluetooth-bond.md` predicted: `bond_load()` runs from the NimBLE host-sync callback, before Linux starts, so every line it logged was dropped and there was no evidence whether the file had been read, rejected, or never opened. `fw_log_defer()` and `fw_log_flush()` now hold boot-time lines in a small fixed pool and release them when Linux first speaks on the pipe; the first flush printed the cause immediately, as `bond: no room to read etc (458752 bytes)`. The second was PSRAM. `map_bond_partition()` asked for `heap_caps_malloc(part->size, MALLOC_CAP_SPIRAM)`, and this firmware sets `CONFIG_SPIRAM_USE_MEMMAP`, which maps PSRAM as address space for the Linux kernel instead of registering it as a heap region -- so no allocation on this board can carry that capability and the call could never succeed. `bond_load()` therefore returned before it opened the file, which is why every earlier attempt to fix the load logic was revising code that never ran. It now allocates internal RAM and reads a bounded prefix, 16 KiB doubling until the file is found, rather than the whole 448 KiB partition that never fits and does not need to. The third was in the jffs2 reader: the node walk bounds-checked the header but then trusted `node.totlen`, so a truncated image read past the buffer. That was latent while the image was always whole, but bounded reads make a partial trailing node normal, so the check had to be added with them. Verified on hardware with the full cycle: flash, reboot, `bond: loaded 4 entries from ble-bond.bin (0 rejected)`, then a keypress with the keyboard NOT in pairing mode, after which it reconnected on the stored key and typed, with KEY_G decoded by blekbd. Two documentation errors were corrected in the same pass. README claimed re-pairing was automatic, and separately listed the bond as not done; both are now stated as working, with the forced split explained -- the firmware cannot write flash after Linux starts, so Linux writes the file and the firmware only reads it. And the media-keys limitation was stale: since the host now subscribes to every notifying input report, the consumer-page reports carrying volume and browser keys do reach Linux and blekbd has a consumer usage map for them, so what is actually missing is the report map, whose reader `map_step()` is never called, leaving the daemon on the boot-layout fallback. That is stated as untested rather than either working or absent. The firmware change is committed locally in build/esp-hosted/esp_hosted_ng, whose remote is upstream jcmvbkbc/esp-hosted and must never be pushed. The core-syntax audit passed: the `.ai/` diff was inspected, `.ai/core.md` was not modified, entry 12 was validated against the template with six sections in canonical order, sequential numbering from 11, an ISO-8601 timestamp carrying the America/Phoenix offset, prose-only Outcome and Next Steps, eligible Files Modified, and Status values within the allowed set.
+
+#### Next Steps:
+
+The Rii K06 is now working as intended: it pairs, types, and reconnects after a reboot on its stored bond. The next thing the user asked for is the same treatment for the Logitech keyboard, which should be mostly a matter of checking it against the changed subscription rule and confirming both devices can hold a bond at once -- `ENTRY_MAX` is 8 and the K06 uses 4, so a second device needs the count checked before anything is assumed. Two capabilities are now reachable and unbuilt: the K06's touchpad, which its report map declares as report ID 3 with X, Y and wheel, and media keys, which need the report map read -- `map_step()` exists but is not called -- chunked and serialised because that read is what exhausted the ATT buffers once before. Beyond Bluetooth, the tearing root cause in LCD-009 remains open with SPI clock the remaining suspect, and re-measuring the 320x400 frame through the real repaint path to settle the 4.2x disagreement with LCD-005 is still outstanding. The top-bar status daemon has not been started.
+
+#### Files Modified:
+
+- docs/bluetooth-bond.md
+- README.md
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: PASS
+
+---

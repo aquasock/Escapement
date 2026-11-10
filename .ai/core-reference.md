@@ -161,6 +161,10 @@ Topic IDs are the `record_id` prefix. An entry reserves a name; it does not clai
 | Boot protocol or report protocol? | BLE | BLE-003 |
 | Why does the board reset-loop when Bluetooth scans? | BLE | BLE-004 |
 | Why does an unattended reboot miss the keyboard entirely? | BLE | BLE-004 |
+| Why does the keyboard connect but type nothing? | BLE | BLE-003 |
+| Why does a saved bond never come back at boot? | BLE | BLE-006 |
+| Can firmware allocate scratch space in PSRAM? | BLE | BLE-006 |
+| Why does logging break the WiFi interface? | BLE | BLE-005 |
 | What is WiFi's real throughput and latency? | NET | NET-001 |
 | Is `wifi scan` a safe connectivity test? | NET | NET-002 |
 | Why does the console fill with `bad if_type 6`? | NET | NET-003 |
@@ -223,6 +227,7 @@ BLE-002: "At MTU 23 an ATT read returns 22 bytes, so a 934-byte report map costs
 BLE-003: "HID boot protocol (0 to 0x2A4E) gives a fixed 8-byte report with no report ID and no report map; report protocol needs the map and is what exhausted the ATT buffers"
 BLE-004: "A continuous scan starves core 0's idle task and trips the task watchdog (rst:0x7 TG0WDT_SYS_RST); and an idle BLE keyboard advertises only for a few seconds, so an 8 s scan gap is deaf 35% of the time and can miss it with no log trace"
 BLE-005: "Firmware logging rides the same shmem link as WiFi bring-up, so one log line per BLE advertisement stops the interface coming up with `Command[1] timed out` -- logging is traffic on this board, and the failure also kills the log channel that would report it"
+BLE-006: "PSRAM is mmap, not a heap (CONFIG_SPIRAM_USE_MEMMAP), so MALLOC_CAP_SPIRAM allocations always fail; and fw_log from a pre-Linux path is dropped, so boot-time diagnostics must be deferred with fw_log_defer/fw_log_flush"
 
 NET-001: "WiFi delivers about 409 KB/s bulk and 30-50 ms to the gateway over esp-hosted on a shared shmem link and one core"
 NET-002: "`wifi scan` proves the radio and scan path only, not the data path; repeated scans while associated disrupt the link, so ping the gateway and use the board's own `wifi connect` helper"
@@ -534,6 +539,21 @@ EXT-001: "The SPLB32 Tamagotchi core runs at 4.05x realtime headless on this boa
     - "build/esp-hosted/esp_hosted_ng/esp/esp_driver/network_adapter/main/ble_prov.c: ble_prov_log_nonblocking(), which enqueues one IPC message per line"
     - "kernel log on hardware: Command[1] timed out, esp_add_network_ifaces failure, network interface init failed"
   verification: "Reproduced twice on hardware 2026-11-09: the firmware with per-advertisement logging produced no espsta0 and no /dev/esp-log on two consecutive boots, and the same firmware with the logging removed restored both immediately. This is the same mechanism as NET-003."
+
+- record_id: BLE-006
+  kind: BLE
+  topic_id: BLE
+  title: "PSRAM is not a heap on this firmware, and boot-time firmware logs need deferring to be seen"
+  status: VERIFIED
+  verified_date: 2026-11-09
+  statement: "Two facts that together explain why bond persistence appeared to do nothing for several sessions. First, the firmware is built with `CONFIG_SPIRAM_USE_MEMMAP=y`, so the 8 MiB PSRAM is mapped as address space for the Linux kernel rather than registered as a heap region: `heap_caps_malloc(n, MALLOC_CAP_SPIRAM)` can never succeed on this board, whatever n is. Second, `fw_log()` sends over the shmem pipe and the reader is Linux, so any call made from a path that runs before Linux starts — the NimBLE host-sync callback is the one that matters — is dropped with no trace."
+  consequence: "`bond_load()` combined both: it tried to copy the whole 448 KiB etc partition into PSRAM, failed, and returned before opening the file, while its diagnostic was emitted into a pipe nobody was reading. Every previous attempt to fix the load logic was therefore working on a path that never ran. The fixes are a bounded prefix read into internal RAM (16 KiB doubling until the file is found) and `fw_log_defer()` / `fw_log_flush()`, a small fixed pool of boot-time lines released when Linux first speaks. Both are general: any firmware code that needs large scratch space at boot must use internal RAM, and any diagnostic in a pre-Linux path must be deferred or it will not be seen."
+  sources:
+    - "build/esp-hosted/esp_hosted_ng/esp/esp_driver/network_adapter/sdkconfig: CONFIG_SPIRAM=y, CONFIG_SPIRAM_MODE_QUAD=y, CONFIG_SPIRAM_USE_MEMMAP=y"
+    - "build/esp-hosted/esp_hosted_ng/esp/esp_driver/network_adapter/main/bond.c: map_bond_partition() and bond_load()"
+    - "build/esp-hosted/esp_hosted_ng/esp/esp_driver/network_adapter/main/log_pipe.c: fw_log_defer() and fw_log_flush()"
+    - "docs/bluetooth-bond.md: what works, and the three defects in the order they were found"
+  verification: "Verified on hardware 2026-11-09. Before the change the only visible symptom was a bond file that was written and never restored; after deferring the logs, the first boot printed `bond: no room to read etc (458752 bytes)` and named the cause. With bounded internal-RAM reads the load reports `bond: loaded 4 entries from ble-bond.bin (0 rejected)`, and the Rii K06 then reconnected on the stored key without pairing mode and typed."
 
 - record_id: PMU-001
   kind: PMU
