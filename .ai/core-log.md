@@ -1,3 +1,37 @@
+## 21 COMMIT Unreleased 2026-11-10T08:23:11-07:00
+
+#### Coming From:
+
+Unreleased b02dfb7
+
+#### Purpose:
+
+Take the interpreter measurement entry 18 left open, so the decision between a block-register rewrite and the core-0 design rests on counts instead of arithmetic on timings.
+
+#### Outcome:
+
+The emulator now has a measured decomposition and a baseline to be judged against. Running the real V3 ROM for 40,000,011 emulated cycles on the watch with the prof counters enabled retires 454305 instructions in 736660 interpreter steps and 282355 sleep steps, performing 1032471 reads and 61692 writes, so one emulated instruction costs 1.622 steps and 2.408 guest bus accesses; the steps figure is exact rather than approximate because 736660 minus 282355 is 454305, which is to say the interpreter takes exactly one step per opcode and the extra 0.622 is sleep ticks. Wall clock on the plain build is 2.236 s, three consecutive runs giving 204045, 203945 and 203488 instructions/s at 4.48 to 4.49x realtime, so an emulated instruction costs 4922 ns, about 1181 native cycles at 240 MHz. That answers the question the count was for and it answers it in the useful direction: memory is 2.408 accesses at a measured 53 ns, about 128 ns or 2.6 percent of the total, so 97 percent of the cost is the interpreter's own instruction stream, which is exactly what a block-register rewrite removes. Dividing the residual by the cost of a simple dependent operation puts the interpreter at the order of 150 native instructions per emulated instruction, between the 30-80 a tuned core needs and the 250 entry 18 had derived, so the headroom is real and it is in userspace. Two supporting measurements close the obvious objections. Instruction fetch is not the cost even though there is no I-cache: three tests running identical arithmetic and identical dependent table loads over 64 bytes, about 1 KB and about 8 KB of code gave 56.83, 30.52 and 31.69 ns per operation, so expanding the footprint eightfold costs 3.8 percent and a rewrite need not fear growing its code. And the ROM's location is a genuine lead: a dependent read from the linear flash window costs 738.04 ns over a 256-byte window and 757.05 ns over 16 KB against 53.13 to 55.67 ns for the same arithmetic on PSRAM, a control that isolates the window at a factor of 14, and since the ROM is 72.6 percent of the emulator's accesses, moving it into PSRAM is worth a predicted fifth to a quarter of throughput. That is stated as a lead and not a result because it could not be A/B'd: a 512 KB contiguous block does not exist once the board has been up a few minutes, measured at 256 KB largest free block with the allocation failing as 'cannot allocate 524288 bytes for the ROM', so it needs a fresh boot. Getting this far required fixing the instrument three times, and all three are worth recording. The 601 KB compiled-in build does not exec at all, refused with 'nommu: Allocation of length 565248 from process 207 (corebench) failed', which also corrects entry 18's ~575 KB estimate and shows the requirement falls on a loaded segment because the ROM lands in .rodata rather than .bss; the build script gained a third variant, corebench-flash, which reads the ROM through the window at 0x42480000 and allocates nothing, and that is the one that ran. The file-based variant had always been failing on a bug rather than on the board, asking malloc for the file length plus a second full ROM copy, 1052672 bytes for a 512 KB image, which is the defect the harness's own prepared diff describes; it is fixed to allocate exactly n bytes and to report the failure instead of returning silently. And two of the measurements were initially wrong in ways that would have produced confident nonsense: the code-footprint benchmark reported 0.00 ns per operation for its middle variant because the compiler folded a chain whose data and trip counts were visible, fixed by seeding the table from the clock and routing the bounds through a volatile, and the dependent-load figure of 178.83 ns carried in EMU-003 turned out to come from a run of the original memlat.c that was crashing on this NOMMU heap, so the true PSRAM latency is 50.6 to 53.4 ns. The reference was corrected to match: EMU-003 and EMU-005 revised in place with their errors stated, and EMU-006, EMU-007 and EMU-008 added for the decomposition, the fetch result and the flash-window cost, with the index and routing table extended. Emulation is deterministic, which gave a free correctness check: every build reports 454305 instructions and 88.05 cycles per instruction, matching the host build exactly, and romverify confirmed the ROM in the slot first with crc32 301F0E87 and first bytes A5 5F 10 49. The core-syntax audit passed: `.ai/core.md` and `.ai/core-syntax.md` were re-read, the complete `.ai/` diff was inspected, `.ai/core.md` was not modified, the reference validates as 60 records with 60 index keys, no orphans in either direction, every routing target resolving and all fences balanced, and this entry was validated against the template with six sections in canonical order, sequential numbering from 20, an ISO-8601 timestamp carrying the America/Phoenix offset, prose-only Outcome and Next Steps, and Status values within the allowed set.
+
+#### Next Steps:
+
+Two things are now worth doing and one of them is cheap. The cheap one is the ROM-location A/B: on the next fresh boot, before anything else allocates, deploy corebench-rom with the ROM file and run it against corebench-flash on the same boot, which either confirms the predicted fifth to a quarter of throughput or kills the lead, and the largest free block at boot needs to be read first because the run is only meaningful if it is at least 512 KB. The other is the block-register interpreter, which is now justified by measurement rather than by estimate -- 97 percent of the cost is the interpreter's own instruction stream, 150 native instructions per emulated instruction against a target of 30-80, and fetch is nearly free so a larger code body is not a risk -- and it has a baseline to be judged against at 204045 instructions/s and 4.49x. Neither is started. Beyond the interpreter, the parked ~1.5 s time-screen wait remains the same problem from the other end, and the display items are unchanged: LCD-009's tearing root cause, and the 4.2x disagreement between LCD-005 and LCD-010.
+
+#### Files Modified:
+
+- userspace/memlat.c
+- userspace/codecost.c
+- scripts/build-corebench.sh
+- docs/tamagotchi.md
+- .gitignore
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: NOT RUN
+
+---
+
 ## 20 COMMIT Unreleased 2026-11-10T07:56:53-07:00
 
 #### Coming From:

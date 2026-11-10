@@ -269,64 +269,101 @@ project's console depends on, and starving core 0 trips the FreeRTOS watchdog
 
 ## The smaller lever, and the one to try first
 
-The interpreter retires on the order of 250 native instructions per emulated
-instruction, against the 30-80 a tuned 6502 core needs. Keeping guest registers,
-flags and PC in host variables across a decoded block -- instead of reloading
-each field from PSRAM per access, in handlers spread across a 6796-instruction
-switch -- is worth 2-3x, in userspace, with no firmware risk.
+The interpreter spends the order of 150 native instructions per emulated
+instruction (measured 2026-11-10, see below), against the 30-80 a tuned 6502 core
+needs and 97 percent of it in its own instruction stream rather than in memory
+access. Keeping guest registers, flags and PC in host variables across a decoded
+block -- instead of reloading each field per access, in handlers spread across a
+6796-instruction switch -- is therefore the right lever, in userspace, with no
+firmware risk. Recorded as EMU-005 and EMU-006.
 
-**That 250 is derived from timing, not counted.** Counting it is the first task
-for whoever continues; if it comes out near 80 instead, this port tops out
-around 0.5x and the core-0 design is the only real answer. Recorded as EMU-005.
-
-## Measuring the interpreter: corebench, and what it cannot tell you
+## Measuring the interpreter: corebench, measured
 
 `corebench` runs the SPLB32 core with nothing behind it -- no panel, no
-framebuffer, no touch polling -- and reports emulated cycles/s, instructions/s,
-average emulated cycles per instruction and the realtime factor. That makes it
-the instrument for the interpreter itself, as distinct from the emulator as a
-whole, and it is the before/after baseline any interpreter work needs.
-
-It is built by script now, because two hand-built deploys failed for want of
+framebuffer, no touch polling -- so it prices the interpreter and nothing else.
+It is built by script, because hand-built deploys kept failing for want of
 memory:
 
 ```sh
-./scripts/build-corebench.sh              # both variants
+./scripts/build-corebench.sh              # three variants
 ./scripts/build-corebench.sh --selftest   # and run it on the host first
 ```
 
-Two variants, both needing a large *contiguous* block (KRN-001), which is why
-they are deployed on a fresh boot:
+There are three now, and which one runs is not a preference:
 
-- `userspace/corebench` -- 601,780 bytes, ROM compiled in, no arguments. The ROM
-  lands in `.rodata`, so the 562,700-byte segment the kernel loads is the one
-  that must be contiguous. This is the shape entry 18 asked for. Note the size:
-  it is ~600 KB, not the ~575 KB that was estimated before it was built.
-- `userspace/corebench-rom` -- 78,364 bytes, takes the ROM as a path argument
-  and `malloc()`s 512 KB. Smaller to transfer, same contiguity requirement, but
-  at malloc time instead of exec time.
+- `corebench-flash` (77 KB) reads the ROM from the memory-mapped flash window at
+  `0x42480000` and allocates nothing. **This is the one that works.** It is what
+  produced every number below.
+- `corebench` (601 KB) compiles the ROM in. It does not exec on this board: the
+  kernel refuses `nommu: Allocation of length 565248 from process 207
+  (corebench) failed`, the largest free block being 512 KB. This corrects entry
+  18's estimate of ~575 KB, and shows the requirement is on a loaded segment
+  because the ROM lands in `.rodata`, not `.bss`.
+- `corebench-rom` (78 KB) takes the ROM as a path and `malloc()`s it. Same
+  512 KB problem at malloc time; on a board that has been up a while it reports
+  `cannot allocate 524288 bytes for the ROM`. Needs a fresh boot.
 
-```sh
-./scripts/watch-deploy.sh corebench
-./scripts/watch-telnet.py "/home/corebench"
+### What an emulated instruction costs
+
+Measured on hardware 2026-11-10, 40,000,011 emulated cycles, three consecutive
+runs of the plain build:
+
+```
+instructions      454305      (identical every run -- deterministic)
+avg cycles/instr  88.05
+instructions/s    204045 / 203945 / 203488
+realtime factor   4.48-4.49x  (target 4,000,000 cycles/s)
 ```
 
-**What it does not do is count native instructions**, and that is precisely
-what EMU-005 needs. The board offers no way to count them: the Xtensa has
-`CCOUNT` for cycles but no retired-instruction counter, there is no PMU on this
-part, and the host has `perf_event_paranoid` at 4 with no `CAP_PERFMON`, so
-`perf stat -e instructions` refuses even for a host build. Cycles per emulated
-instruction are measurable (3676 ns at 240 MHz is about 880 native cycles); the
-instructions inside them are not, because with no cache and PSRAM stalls the IPC
-is low and varies by what the guest is executing.
+and from the counter build, whose counts are exact:
 
-So the 250 figure stays a hypothesis unless one of these is paid for: weighting
-a static disassembly of `exec_op_sem` by a measured opcode histogram, or running
-the same binary under `qemu-xtensa` with instruction counting. Both are real
-work. The cheaper and arguably better experiment is to skip the count, do the
-block-register rewrite, and measure the resulting instructions/s against this
-baseline -- which answers the question that actually matters ("is there 2-3x
-here?") without first proving the mechanism.
+```
+steps             736660      sleep steps 282355   irqs 731
+steps/instr       1.622       <- 736660 - 282355 = 454305, to the digit
+reads             1032471     writes 61692
+accesses/instr    2.408
+rom 72.6%   ram 21.4%   dpram 0.0%   sfr 0.3%
+```
+
+So one emulated instruction is **exactly one interpreter step plus the sleep
+ticks around it**, 2.4 guest bus accesses, and 4922 ns of wall clock -- about
+1181 native cycles at 240 MHz.
+
+### What that means for the rewrite
+
+Memory is not the cost. 2.408 accesses at the measured 53 ns is about 128 ns,
+**2.6 percent** of the 4922 ns. The other 97 percent is the interpreter's own
+instruction stream, which is precisely what keeping guest registers, flags and PC
+in host locals across a decoded block removes. Dividing the residual by the
+measured cost of a simple dependent operation puts the interpreter at the order
+of **150 native instructions per emulated instruction**, against the 30-80 a
+tuned core needs and the 250 that entry 18 derived by a cruder route. The
+headroom is real and it is in userspace.
+
+Two supporting measurements close off the obvious objections:
+
+- **Fetch is not the problem.** With `XCHAL_ICACHE_SIZE=0` every fetched
+  instruction comes from PSRAM, which looked like it might be the whole cost.
+  It is not: identical arithmetic over ~1 KB of code costs 30.5 ns/op and over
+  ~8 KB costs 31.7 ns/op, 3.8 percent apart. A rewrite need not fear growing its
+  code body.
+- **The ROM's location is worth testing, and could not be tested here.** A
+  dependent read from the flash window costs 738 ns against 53 ns for PSRAM, a
+  factor of 14, and the ROM is 72.6 percent of the accesses. If the interpreter
+  stalled on every one of those it would cost 1290 ns of the 4922, so moving the
+  ROM into PSRAM is worth a predicted fifth to a quarter of throughput -- which
+  would land near the 265k instructions/s that entry 18 recorded in a session
+  where the ROM was allocated. It needs a fresh boot to A/B, because 512 KB
+  contiguous does not exist after a few minutes of uptime. Until that is run,
+  treat the gain as a lead, not a result.
+
+What the prof counters cannot give is the native instruction count itself: the
+boards offers no retired-instruction counter (`CCOUNT` is cycles only), and the
+host has `perf_event_paranoid` at 4 with no `CAP_PERFMON`, so `perf stat -e
+instructions` refuses. The ~150 above is derived from cycles and the measured
+cost of an operation, not counted. It is enough to justify the rewrite, which is
+the question that matters; a rewrite measured against the 204k instructions/s
+baseline above settles it definitively.
 
 ## Parked: the ~1.5 s wait entering the time screen
 

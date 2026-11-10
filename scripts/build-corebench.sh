@@ -19,13 +19,21 @@
 #                            the binary is ~600 KB and the kernel must find one
 #                            contiguous run that size at exec time.
 #
-#   userspace/corebench-rom  No ROM inside. ~78 KB, needs `corebench rom.bin`,
-#                            and malloc()s 512 KB contiguously at startup.
+#   userspace/corebench-flash ROM read from the memory-mapped flash window at
+#                            0x42480000, so it allocates nothing at all. ~78 KB
+#                            to deploy and no contiguity requirement beyond its
+#                            own load segment. THIS IS THE ONE THAT RUNS: on
+#                            2026-11-10 the 601 KB build failed to exec with
+#                            'nommu: Allocation of length 565248 ... failed',
+#                            the largest free block being 512 KB.
 #
-# Both need a large contiguous block, because this is NOMMU (KRN-001): the one
-# at exec time, the other at malloc time. A fresh boot is the only reliable
-# moment for either -- the largest free block was measured at 256 KB after a
-# few minutes of uptime, against ~850 KB at boot.
+#   userspace/corebench-rom  No ROM inside and no flash window. ~78 KB, needs
+#                            `corebench rom.bin`, and malloc()s the file.
+#
+# Both the embedded and the file variants need a large contiguous block, one at
+# exec time and the other at malloc time, which is why the flash window exists:
+# this is NOMMU (KRN-001) and a 512 KB block survives only while memory is
+# unfragmented. EXT-002 is the record behind the window.
 #
 # Source lives outside this repository, in the TamaHarness checkout beside it.
 # Override the location with TAMAHARNESS=/path/to/TamaHarness/portable.
@@ -80,14 +88,18 @@ build() {
         | awk '$1=="LOAD" { printf "    LOAD    filesz %s  memsz %s\n", $5, $6 }'
 }
 
-build corebench     rom_embed.c -DEMBED_ROM
-build corebench-rom ""
+build corebench       rom_embed.c -DEMBED_ROM
+build corebench-flash ""         -DROM_FLASH_ADDR=0x42480000
+build corebench-prof  ""         -DROM_FLASH_ADDR=0x42480000 -DSPLB32_PROF
+build corebench-rom   ""
 
-printf '\nBoth built. Deploy and run on a FRESH boot -- exec and malloc are both\n'
-printf 'subject to the contiguity rule (KRN-001), and the largest free block is\n'
-printf 'largest at boot:\n\n'
-printf '    ./scripts/watch-deploy.sh corebench\n'
-printf '    ./scripts/watch-telnet.py "/home/corebench"\n\n'
-printf 'or the small one, which needs the ROM as a file:\n\n'
-printf '    ./scripts/watch-deploy.sh corebench-rom\n'
-printf '    ./scripts/watch-telnet.py "/home/corebench-rom /home/rom.bin"\n'
+printf '\nBuilt. The flash variant allocates no ROM at all and is the one to use:\n\n'
+printf '    ./scripts/watch-deploy.sh corebench-flash\n'
+printf '    ./scripts/watch-telnet.py "/home/corebench-flash --cycles 40000000"\n\n'
+printf 'It reads the ROM at 0x42480000, which is flash offset 0x480000. Verify\n'
+printf 'that slot still holds the ROM before trusting a measurement from it.\n'
+printf 'The other two need a large contiguous block (KRN-001), which on this board\n'
+printf 'means a fresh boot, and the 601 KB one may not fit at all.\n\n'
+printf 'corebench-prof counts interpreter steps and guest bus accesses per retired\n'
+printf 'instruction. Its wall-clock figures are PERTURBED by the counters -- use it\n'
+printf 'for counts only, and corebench-flash for timing.\n'

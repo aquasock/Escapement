@@ -23,6 +23,11 @@ scripts/__pycache__/
 userspace/memlat
 userspace/storetest
 userspace/tamafb_*
-# Built by scripts/build-corebench.sh; deploy /home/corebench on the watch.
+# Built by scripts/build-corebench.sh; deploy /home/corebench-* on the watch.
+# corebench-flash is the one that runs here; see docs/tamagotchi.md.
 userspace/corebench
+userspace/corebench-flash
+userspace/corebench-prof
 userspace/corebench-rom
+# Built by hand for the memory and code-footprint measurements.
+userspace/codecost

@@ -1,11 +1,11 @@
-# Handoff — Escapement, 2026-11-10T07:55
+# Handoff — Escapement, 2026-11-10T08:25
 
 Linux 7.2.4 on a T-Watch Ultra (ESP32-S3). Real Linux on the watch's own Xtensa
 cores, not emulated. This file is orientation; verify before acting on it.
 
-Canonical detail lives in `.ai/core-reference.md` (57 records, fourteen topics).
-Project history lives in `.ai/core-log.md` (19 entries; newest first — 19, 18,
-17, then 1 through 16). Do not re-derive what those hold.
+Canonical detail lives in `.ai/core-reference.md` (60 records, fourteen topics).
+Project history lives in `.ai/core-log.md` (21 entries; newest first — 21, 20,
+19, 18, 17, then 1 through 16). Do not re-derive what those hold.
 
 ## Current objective (verbatim)
 
@@ -33,9 +33,10 @@ after a reboot; WiFi 10.10.0.15 at ~409 KB/s; three touch bars paint, click and
 emit BTN_0/1/2; the Tamagotchi runs at a true 1.00x from the flash-resident ROM
 at 40 MHz with eight clean full-width bands.
 
-**The watch is not connected right now.** No `/dev/ttyACM*` exists and
-`10.10.0.15` is 100 % packet loss from a host on the same subnet. Nothing can
-be built to it, deployed, or user-tested until it comes back.
+**The watch is up as of 2026-11-10T08:00**, `/dev/ttyACM0` present and
+`10.10.0.15` answering. It had been up about 9 minutes and the largest free
+contiguous block was already down to 256 KB, so anything needing 512 KB
+contiguous needs a reboot first — check `/proc/buddyinfo` before assuming.
 
 Live check: `./scripts/watch-telnet.py 'uptime; /etc/init.d/S48blekbd status'`
 
@@ -55,31 +56,42 @@ password and the keyboard deployment. Restore with `esptool ... write_flash 0
 
 ## Where the engineering actually stands
 
-The display is not the bottleneck and the CPU is not the limit either — PSRAM
-latency is. Linux runs on core 1, which has no data cache (`XCHAL_DCACHE_SIZE=0`,
-no locality effect across three working sets) and no reachable internal SRAM, and
-a dependent load costs 178.83 ns. The interpreter therefore pays roughly a dozen
-PSRAM round trips per emulated instruction. Steady state the guest sleeps and the
-emulator holds 1.00x; when the ROM computes, throughput collapses to ~0.38x,
-which is the parked ~1.5 s time-screen wait seen from the other end.
+**The interpreter is measured, at last.** EMU-005/006/007/008 now hold counts
+rather than estimates, taken on hardware 2026-11-10:
 
-**The open question is a count, not a theory.** EMU-005 is OPEN: the interpreter
-spends ~3676 ns per emulated instruction against a 12.77 ns native yardstick, on
-the order of 250 native instructions where a tuned core needs 30 to 80 — but that
-figure is derived from timing and has never been counted. Count it first. Near
-250 justifies the block-register interpreter (keep guest registers, flags and PC
-in host locals across a decoded block; 2-3x). Nearer 80 means this port tops out
-around 0.5x and the honest answer is the core-0 design or nothing.
+```
+454305 instructions  736660 steps  282355 sleep steps   204045 instr/s   4.49x
+1.622 steps/instr    2.408 accesses/instr   4922 ns/instr = ~1181 cycles
+rom 72.6%   ram 21.4%   memory = 2.6% of cost   interpreter stream = 97%
+```
 
-Already excluded by measurement — do not re-tread: SPI clock (+13 %), DMA
-(per-chunk cost is not on the critical path), frame rate (does not touch
-instruction throughput), and `float` (not slow — it faults, because the kernel
-does not enable the FPU coprocessor for user tasks).
+That settles the question entry 18 left open, in the useful direction. Memory is
+2.6 percent of an emulated instruction's cost, instruction fetch is nearly free
+(8x the code footprint costs 3.8 percent), and the other 97 percent is the
+interpreter's own instruction stream — the order of **150 native instructions
+per emulated instruction** against the 30-80 a tuned core needs. The
+block-register rewrite is justified and has a baseline to be judged against.
+
+One lead is open and cheap to close: a read from the flash window costs **738 ns**
+against **53 ns** for PSRAM, and the ROM is 72.6 percent of accesses, so moving
+the ROM into PSRAM is worth a predicted fifth to a quarter of throughput. It
+needs a fresh boot to A/B — 512 KB contiguous does not survive a few minutes of
+uptime.
+
+**How to run the instrument.** `./scripts/build-corebench.sh` builds four
+variants; only `corebench-flash` (77 KB, ROM read through the window at
+0x42480000) actually execs here. The 601 KB compiled-in build is refused by the
+kernel as 565248 bytes not contiguous, and the file-based one cannot malloc
+512 KB. `corebench-prof` prints the counters — never trust its wall clock, the
+counters perturb it.
 
 ## Open items, in the order they are worth doing
 
-- The native-instruction count of EMU-005, then the interpreter restructure if it
-  warrants it.
+- The ROM-location A/B on the next fresh boot: read the largest free block
+  first, then run `corebench-rom /home/rom.bin` against `corebench-flash` on the
+  same boot. Confirms or kills the flash-window lead.
+- The block-register interpreter, now justified by measurement (2-3x predicted,
+  baseline 204045 instr/s).
 - LCD-009's tearing root cause: a long single-transfer window into the right
   strip splits diagonally, 2-row bands are clean, and the driver caps bands at
   two rows as a workaround. SPI clock is excluded as the explanation.
@@ -100,6 +112,7 @@ does not enable the FPU coprocessor for user tasks).
   through one console session; netcat is unavailable on that channel.
 - `./scripts/build-userspace.sh` — cross-compile; `--selftest` runs the HID
   decoder and touch-band tests.
+- `./scripts/build-corebench.sh` — the emulator instrument; see above.
 - **`export XTENSA_GNU_CONFIG=$PWD/build/toolchain/xtensa-dynconfig/esp32s3.so`
   before any cross-compile.** Unset, the compiler emits big-endian objects and
   the link fails with "file in wrong format", which reads as a broken toolchain.
