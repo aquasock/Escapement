@@ -1,3 +1,33 @@
+## 22 COMMIT Unreleased 2026-11-10T08:37:52-07:00
+
+#### Coming From:
+
+Unreleased 199dc64
+
+#### Purpose:
+
+Test the ROM-location lead entry 21 left open, so the emulator's ROM has a measured home instead of a predicted one.
+
+#### Outcome:
+
+The lead was right and the effect is larger than predicted. With the ROM read from the memory-mapped flash window the emulator sustains 204033 instructions/s and 4.49x realtime; with the ROM in PSRAM it sustains 273098 instructions/s and 6.01x, a gain of 33.8 percent, which is 1239 ns saved per emulated instruction, 4901 ns down to 3662 and 1176 native cycles down to 879. Nine flash runs across three boots gave 203008 to 205065 with no overlap against the PSRAM figure, and the PSRAM arm was sampled twice on two separate boots at 273115 and 273080. Both arms retired exactly 454305 instructions at 88.05 emulated cycles per instruction, so the same work was done both times and only the memory differed. The mechanism is confirmed rather than merely observed: the ROM is 72.6 percent of the 2.408 bus accesses an instruction makes, 1.748 of them, and a flash-window read costs 738 ns, which predicts 1290 ns saved; the measured saving is 1239 ns, within 4 percent, so the interpreter was indeed stalling close to full dependent latency on most of its ROM reads. The trade is recorded rather than resolved: the flash window always works at any uptime and costs 33.8 percent every time, while PSRAM buys 6.01x but depends on a 512 KB contiguous block that exists only briefly after boot, measured at 1 MB at 0 minutes, 256 KB by 9 minutes and 128 KB by 32 minutes, with one such allocation consuming it for the rest of the session. That is now KRN-004, and it is why a S51tamafb has to start from rcS. Getting a trustworthy number took correcting two things that would otherwise have produced a wrong one. The first is that the flash baseline was initially read as 141k against entry 21's 204k on what looked like a regression after a reboot, and the cause was not the reboot: the touch daemon was running, it had not been running during entry 21's measurement, and stopping it restored 204k on the same boot, which makes the daemon's cost a finding in its own right at about 30 percent of throughput because it polls the CST9217 over the bit-banged bus every 60 ms and each poll NAKs and prints at KERN_ERR. The second is that the PSRAM arm can only be sampled once per boot, so the first single reading of 273k was re-taken on a fresh boot before being believed, and the two agree to 0.01 percent. With tbtns restored to running and the board left on the flash ROM, both services are up and the flash baseline is intact. The reference was updated to match: EMU-008's consequence now records the lead as closed and quantified, EMU-009 holds the A/B and EMU-010 the daemon cost, KRN-004 records the allocation window, and the index and routing table were extended to 63 records. The core-syntax audit passed: `.ai/core.md` and `.ai/core-syntax.md` were re-read, the complete `.ai/` diff was inspected, `.ai/core.md` was not modified, the reference validates at 63 records with 63 index keys, no orphan in either direction, every routing target resolving and all fences balanced, and this entry was validated against the template with six sections in canonical order, sequential numbering from 21, an ISO-8601 timestamp carrying the America/Phoenix offset, prose-only Outcome and Next Steps, and Status values within the allowed set.
+
+#### Next Steps:
+
+The ROM should move to PSRAM, and it is the cheapest large win left: 33.8 percent for a small change to the Tamagotchi front end rather than an interpreter rewrite, with the constraint that the allocation must happen at boot, which the still-unbuilt S51tamafb was already going to do. Alongside it, and worth a comparable amount for no memory at all, the touch daemon should stand down while a fullscreen app owns the panel, which is the same coordination the console loglevel already needs. Those two are worth more together than the block-register rewrite that entry 21 recommended, and they are far smaller, so they should come first and the rewrite should be re-justified against a 6.01x baseline rather than the 4.49x one. The push of entry 21 was completed at the start of this cycle, `main` is at 199dc64 on origin, and this cycle's commit follows it.
+
+#### Files Modified:
+
+- docs/tamagotchi.md
+
+#### Status:
+
+- Build: N/A
+- Deployment: N/A
+- User Test: NOT RUN
+
+---
+
 ## 21 COMMIT Unreleased 2026-11-10T08:23:11-07:00
 
 #### Coming From:

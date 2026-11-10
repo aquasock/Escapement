@@ -1,11 +1,11 @@
-# Handoff — Escapement, 2026-11-10T08:25
+# Handoff — Escapement, 2026-11-10T08:38
 
 Linux 7.2.4 on a T-Watch Ultra (ESP32-S3). Real Linux on the watch's own Xtensa
 cores, not emulated. This file is orientation; verify before acting on it.
 
-Canonical detail lives in `.ai/core-reference.md` (60 records, fourteen topics).
-Project history lives in `.ai/core-log.md` (21 entries; newest first — 21, 20,
-19, 18, 17, then 1 through 16). Do not re-derive what those hold.
+Canonical detail lives in `.ai/core-reference.md` (63 records, fourteen topics).
+Project history lives in `.ai/core-log.md` (22 entries; newest first — 22, 21,
+20, 19, 18, 17, then 1 through 16). Do not re-derive what those hold.
 
 ## Current objective (verbatim)
 
@@ -72,11 +72,21 @@ interpreter's own instruction stream — the order of **150 native instructions
 per emulated instruction** against the 30-80 a tuned core needs. The
 block-register rewrite is justified and has a baseline to be judged against.
 
-One lead is open and cheap to close: a read from the flash window costs **738 ns**
-against **53 ns** for PSRAM, and the ROM is 72.6 percent of accesses, so moving
-the ROM into PSRAM is worth a predicted fifth to a quarter of throughput. It
-needs a fresh boot to A/B — 512 KB contiguous does not survive a few minutes of
-uptime.
+**The ROM's location is now measured, and it is the biggest win available.**
+ROM 204033 instr/s (4.49x) in the flash window against 273098 (6.01x) in PSRAM —
+**+33.8%**, nine flash runs across three boots, two PSRAM samples on two boots,
+identical instruction counts. The saving of 1239 ns per instruction matches the
+1290 ns the ROM-access cost predicted, within 4 percent. So the ROM should move
+to PSRAM; the cost is that a 512 KB contiguous block exists only briefly at boot
+(1 MB at 0 min, 256 KB by 9 min, 128 KB by 32 min) and one allocation consumes
+it — KRN-004 — which means the emulator must start from rcS.
+
+**And the touch daemon costs a third of the emulator's speed.** Same boot, same
+binary: 141k instr/s with `S50tbtns` running, 204k with it stopped. Worth fixing
+by having it stand down while a fullscreen app owns the panel.
+
+Those two together are larger and far cheaper than the block-register rewrite,
+which should now be re-justified against a 6.01x baseline rather than 4.49x.
 
 **How to run the instrument.** `./scripts/build-corebench.sh` builds four
 variants; only `corebench-flash` (77 KB, ROM read through the window at
@@ -87,20 +97,19 @@ counters perturb it.
 
 ## Open items, in the order they are worth doing
 
-- The ROM-location A/B on the next fresh boot: read the largest free block
-  first, then run `corebench-rom /home/rom.bin` against `corebench-flash` on the
-  same boot. Confirms or kills the flash-window lead.
-- The block-register interpreter, now justified by measurement (2-3x predicted,
-  baseline 204045 instr/s).
-- LCD-009's tearing root cause: a long single-transfer window into the right
-  strip splits diagonally, 2-row bands are clean, and the driver caps bands at
-  two rows as a workaround. SPI clock is excluded as the explanation.
-- The 4.2x disagreement between LCD-005's ~190 ms frame and LCD-010's 45.7 ms
-  projection; re-measure through the real repaint path before quoting either.
-- The top-bar status daemon — never started; needs no further kernel work.
-- Three things must be re-installed by hand after any **full-image** flash:
-  `/etc/TZ`, `S01hwclock` and `S50tbtns` (`scripts/watch-time.sh` covers the
-  first two). A kernel-only flash leaves `/etc` alone.
+- **Move the ROM to PSRAM** — 33.8 percent, small change to the front end, needs
+  a boot-time allocation.
+- **Make `tbtns` stand down while the emulator owns the panel** — ~30 percent,
+  needs no memory, same coordination the console loglevel already needs.
+- The block-register interpreter, now re-justified against 6.01x rather than
+  4.49x (150 native instructions per emulated instruction, 97 percent of cost in
+  the interpreter's own stream, fetch nearly free).
+- The parked ~1.5 s time-screen wait — the same problem from the other end.
+- LCD-009's tearing root cause; the 4.2x disagreement between LCD-005 and
+  LCD-010.
+- The top-bar status daemon — never started.
+- `/etc/TZ`, `S01hwclock` and `S50tbtns` must be re-installed by hand after any
+  **full-image** flash (`scripts/watch-time.sh` covers the first two).
 
 ## Tooling
 

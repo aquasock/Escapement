@@ -20,6 +20,11 @@ rate           4 fps gives ~1.0x realtime; the panel is the limit
 
 ## Why the ROM lives in flash
 
+**Read this together with the next section:** the flash window is the reliable
+choice, not the fast one. It costs 33.8 percent against a PSRAM-resident ROM,
+measured 2026-11-10. The history below explains why it was chosen and is still
+accurate about the mechanism; the recommendation has since changed.
+
 The obvious approach — `malloc` 512 KB — works on a fresh boot and then stops
 working. This is KRN-001: NOMMU has no overcommit, so the ROM must be one
 contiguous run of free memory, and after a few minutes of uptime no 512 KB run
@@ -48,6 +53,58 @@ Two things that were tried and are **not** the answer:
 - **`MAP_POPULATE` / demand paging** does not help: the copy happens either way.
 
 So the ROM is written to flash once and read through the window.
+
+## The ROM's location is worth 33.8 percent, and it is in flash
+
+**Measured 2026-11-10, and it changes the recommendation.** Reading the ROM
+through the flash window works and costs no RAM, but it is not fast:
+
+```
+ROM in flash window   204033 instr/s   4.49x   4901 ns per emulated instruction
+ROM in PSRAM          273098 instr/s   6.01x   3662 ns per emulated instruction
+                                  +33.8%,  1239 ns saved per instruction
+```
+
+That is nine runs of the flash build across three boots (203008 to 205065, no
+overlap with the PSRAM figure) against two PSRAM runs on two separate boots
+(273115 and 273080). Both arms retired exactly 454305 instructions at 88.05
+emulated cycles each, so the same work was done both times and only the memory
+differs.
+
+The mechanism is confirmed rather than merely observed. The ROM is 72.6 percent
+of the emulator's 2.408 bus accesses per instruction — 1.748 of them — and a
+dependent read from the flash window costs 738 ns, so the prediction was
+1.748 × 738 ≈ **1290 ns**. The measured saving is **1239 ns**, within 4 percent.
+The interpreter really was stalling close to full latency on most of its ROM
+reads.
+
+### So why is the ROM in flash at all
+
+Because putting it in PSRAM is a one-shot bet, and that has not changed. The
+512 KB contiguous run exists at boot and is gone quickly: 1 MB at 0 minutes,
+256 KB by 9 minutes, 128 KB by 32 minutes, and a single such allocation consumes
+it for the rest of the session (KRN-004). A malloc build succeeds exactly once
+per boot, and `free` reports plenty of memory the whole time, which is what makes
+the failure so misleading.
+
+So the honest position is a trade, not a bug:
+
+- **In flash** — always runs, any uptime, no contiguity requirement. Costs 33.8
+  percent, every time the emulator runs.
+- **In PSRAM** — 6.01x instead of 4.49x, but only if the allocation happens
+  before the heap fragments, which means starting the emulator early from rcS
+  rather than on demand.
+
+The second is the better emulator and the more fragile service. Since a
+`S51tamafb` was already going to have to start early for its own reasons
+(KRN-001), the fragility it adds is not new — and 33.8 percent is most of what
+the block-register rewrite was expected to buy, for a fraction of the work.
+
+Two approaches this section used to call settled and that remain excluded:
+**file mmap** (`MAP_PRIVATE` on `/home/rom.bin`) costs 1020 KB, twice the file,
+because NOMMU copies the mapping rather than sharing pages, and `MAP_SHARED`
+fails with `ENODEV`; and **`MAP_POPULATE` / demand paging** does not help because
+the copy happens either way.
 
 ## The slot, and the guard that keeps it safe
 
@@ -347,15 +404,12 @@ Two supporting measurements close off the obvious objections:
   It is not: identical arithmetic over ~1 KB of code costs 30.5 ns/op and over
   ~8 KB costs 31.7 ns/op, 3.8 percent apart. A rewrite need not fear growing its
   code body.
-- **The ROM's location is worth testing, and could not be tested here.** A
-  dependent read from the flash window costs 738 ns against 53 ns for PSRAM, a
-  factor of 14, and the ROM is 72.6 percent of the accesses. If the interpreter
-  stalled on every one of those it would cost 1290 ns of the 4922, so moving the
-  ROM into PSRAM is worth a predicted fifth to a quarter of throughput -- which
-  would land near the 265k instructions/s that entry 18 recorded in a session
-  where the ROM was allocated. It needs a fresh boot to A/B, because 512 KB
-  contiguous does not exist after a few minutes of uptime. Until that is run,
-  treat the gain as a lead, not a result.
+- **The ROM's location was the biggest single win available.** A dependent read
+  from the flash window costs 738 ns against 53 ns for PSRAM, a factor of 14, and
+  the ROM is 72.6 percent of the accesses. The prediction was 1290 ns of the
+  4922; the measured saving from moving the ROM to PSRAM is 1239 ns, and the
+  throughput gain is 33.8 percent. See "The ROM's location is worth 33.8
+  percent" above -- it is measured now, not a lead.
 
 What the prof counters cannot give is the native instruction count itself: the
 boards offers no retired-instruction counter (`CCOUNT` is cycles only), and the
@@ -394,12 +448,41 @@ Next thing to measure, if it is picked up again: what the guest is actually
 doing in those 580 ms. The stall log splits the time but has not yet been read
 against a press on the fixed-point build.
 
+## The touch daemon costs it a third of its speed
+
+Measured 2026-11-10, same boot, same binary:
+
+```
+S50tbtns running   141k instructions/s   load 1.37
+S50tbtns stopped   204k instructions/s   load 0.59
+```
+
+**About 30 percent**, or 42 percent more throughput without it. The daemon polls
+the CST9217 every 60 ms across the bit-banged I2C bus, and each poll is a
+15-byte transfer that frequently NAKs, which also makes `i2c-gpio` print at
+KERN_ERR — so the cost is the bus work and the console traffic behind it, not
+the cadence.
+
+This is worth knowing for two reasons. Anything measuring the emulator must stop
+the daemon first or it benchmarks the contention: the same binary read 204k
+before a reboot and 141k after, and the difference was the daemon, not the
+reboot, which cost a wrong conclusion before it was caught. And the fix is the
+same coordination a fullscreen app already needs for the console — the daemon
+should stand down while something owns the panel.
+
 ## Still to do
 
-- **Not a service.** It is launched by hand. The flash ROM removed the 512 KB
-  allocation, but a `S51tamafb` needs care for a second reason: the binary is
-  249 KB static and *exec* is subject to the same contiguity rule (KRN-001).
-  Measured at a fragmented moment, the same binary started in the foreground
-  every time and died with SIGSEGV about one launch in three when backgrounded
-  with `&`. Starting it early, from rcS, avoids this; starting it late does not.
-  `/home/run-tama.sh` retries up to 8 times, which works but is luck.
+- **Not a service.** It is launched by hand. A `S51tamafb` now has a stronger
+  reason to start early than it did: if the ROM moves to PSRAM for the 33.8
+  percent, the 512 KB allocation must happen before the heap fragments, which is
+  minutes (KRN-004). The binary is also 249 KB static and *exec* is subject to
+  the same contiguity rule (KRN-001): measured at a fragmented moment, the same
+  binary started in the foreground every time and died with SIGSEGV about one
+  launch in three when backgrounded with `&`. Starting it early, from rcS,
+  avoids both problems at once. `/home/run-tama.sh` retries up to 8 times, which
+  works but is luck.
+- **Move the ROM to PSRAM.** Worth 33.8 percent (6.01x against 4.49x) and it is
+  a small change to `tamafb`, not an interpreter rewrite. It is the cheapest
+  large win left on this board.
+- **Have `tbtns` stand down while the emulator owns the panel.** Worth about 30
+  percent, which is comparable and needs no memory at all.

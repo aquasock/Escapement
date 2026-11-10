@@ -145,6 +145,9 @@ Topic IDs are the `record_id` prefix. An entry reserves a name; it does not clai
 | How many steps and memory accesses does one emulated instruction cost? | EMU | EMU-006 |
 | Is instruction fetch the cost, with no I-cache? | EMU | EMU-007 |
 | How fast is a read from the flash window, compared with PSRAM? | EMU | EMU-008 |
+| Should the emulator's ROM live in flash or PSRAM? | EMU | EMU-009 |
+| Why is the emulator slower with the touch buttons running? | EMU | EMU-010 |
+| Why does a 512 KB allocation work once and then fail? | KERNEL | KRN-004 |
 | Why are taps at the top of a bar ignored? | TCH | TCH-004 |
 | Can userspace draw on /dev/fb0? | LCD | LCD-001 |
 | Why does a thin fill draw nothing while a thick one works? | LCD | LCD-002 |
@@ -236,6 +239,7 @@ FLS-003: "A full-image flash rewrites /etc and S03keepconfig carries back only s
 
 KRN-001: "NOMMU with no overcommit: every ELF load segment and every large allocation must be CONTIGUOUS, so 'nommu: Allocation of length N failed' is a contiguity failure, not an out-of-memory one, and a big static array blocks exec rather than failing at run time"
 KRN-002: "init_linux_mmap() extends the linear flash window over the whole 16 MiB only inside map_flash_and_go(), immediately before the jump to Linux; firmware dereferencing 0x42xx0000 earlier reads unmapped memory and reset-loops with no output"
+KRN-004: "A 512 KB contiguous block exists only briefly after boot -- 1 MB at 0 min, 256 KB by 9 min, 128 KB by 32 min -- and one such allocation consumes it for the rest of the session, so a large boot-time allocation gets exactly one attempt"
 KRN-003: "The kernel is linked against a fixed address in the firmware's RAM (CONFIG_VECTORS_ADDR) which is the linker symbol space_for_vectors; moving it via a firmware change gives a kernel that boots and then dies silently at 'Run /sbin/init'"
 
 FLS-001: "16 MiB layout: nvs 0xa000/0x5000, phy_init 0xf000/0x1000, factory 0x10000/0xc0000, etc 0xd0000/0x70000, linux 0x140000/0x400000, rootfs 0x540000/0x780000, home 0xcc0000/0x340000; xipImage is stored RAW at 0x140000 and can be written alone"
@@ -271,6 +275,8 @@ EMU-005: "The interpreter spends about 3676 ns per emulated instruction against 
 EMU-006: "One emulated instruction is 1.622 interpreter steps (exactly one per opcode plus sleep ticks), 2.408 guest bus accesses and about 1181 native cycles; 72.6 percent of the accesses are ROM, and memory is only ~2.6 percent of the cost, so the interpreter's own instruction stream is what to attack"
 EMU-007: "Instruction fetch from PSRAM is not the cost: identical arithmetic over 1 KB of code costs 30.5 ns/op and over 8 KB costs 31.7 ns/op, so growing the interpreter's code body is nearly free"
 EMU-008: "A dependent read from the linear flash window costs about 738 ns against 53 ns for PSRAM, a factor of 14 that does not depend on working-set size, and the ROM is 72.6 percent of the emulator's bus accesses, so the ROM's location is worth testing -- a 512 KB contiguous PSRAM block needs a fresh boot"
+EMU-009: "Putting the ROM in PSRAM instead of the flash window takes the emulator from 204033 to 273098 instructions/s, 4.49x to 6.01x, a gain of 33.8 percent; the 1239 ns saved per instruction matches the 1290 ns the ROM-access prediction implies to within 4 percent"
+EMU-010: "The touch daemon costs the emulator about 30 percent of its throughput -- 141k instructions/s with S50tbtns running against 204k with it stopped, on the same boot, same binary"
 ```
 
 ---
@@ -751,6 +757,21 @@ EMU-008: "A dependent read from the linear flash window costs about 738 ns again
     - "scripts/build.sh: the vectors-address check before flashing"
   verification: "The two agree in the current build: the firmware ELF reports space_for_vectors at 0x40380000 and the kernel config expects 0x40380000. Re-checked on every flash this session; it never moved."
 
+- record_id: KRN-004
+  kind: KERNEL
+  topic_id: KRN
+  title: "A 512 KB contiguous block exists only briefly after boot, and one allocation consumes it for the rest of the session"
+  status: VERIFIED
+  verified_date: 2026-11-10
+  statement: "On a freshly booted board /proc/buddyinfo reports a free order-8 block, 1 MB contiguous. Within about a minute of boot it may already be gone: at nine minutes of uptime the largest free block was 256 KB, and at thirty-two minutes it was 128 KB. A single 512 KB allocation consumes the large block permanently, so the same program that succeeds once fails immediately afterwards with 'cannot allocate 524288 bytes for the ROM', even though `free` still reports over 2 MB available."
+  consequence: "Anything needing 512 KB contiguous gets exactly one attempt per boot, and only if it runs early. This is what makes the emulator's ROM a boot-time problem rather than a runtime one: putting the ROM in PSRAM is worth 33.8 percent (EMU-009) but only if the allocation happens before the block fragments, which is the concrete reason a S51tamafb must start from rcS and not on demand. Read /proc/buddyinfo before assuming a large allocation can be met -- `free` answers a different question and will say there is plenty."
+  sources:
+    - "on the watch: cat /proc/buddyinfo at 0, 1, 9 and 32 minutes of uptime"
+    - "kernel log: 'nommu: Allocation of length 1052672 from process 234 (corebench-rom) failed' and the later 'cannot allocate 524288 bytes for the ROM' from the same binary"
+    - "KRN-001 for the contiguity rule itself"
+  verification: "Measured on hardware 2026-11-10 across four boots, reading the buddy list directly rather than inferring from free memory. The one-shot behaviour was observed three times: an allocation that succeeded on a fresh boot failed on every subsequent attempt in the same session."
+
+
 - record_id: FLS-001
   kind: FLASH
   topic_id: FLS
@@ -1077,12 +1098,40 @@ EMU-008: "A dependent read from the linear flash window costs about 738 ns again
   status: VERIFIED
   verified_date: 2026-11-10
   statement: "The linear flash window is readable from userspace (EXT-002), but it is not fast. A dependent load costs 50.6 to 53.4 ns from PSRAM and 737.23 to 757.05 ns from the flash window at 0x42480000, a factor of about 14, and the figure does not depend on the working set: 738.04 ns over a 256-byte window and 757.05 ns over 16 KB. The control that isolates it runs byte-identical arithmetic over a PSRAM buffer and reports 53.13 to 55.67 ns, so the difference is the window and not the benchmark. Separately, 72.6 percent of the emulator's guest bus accesses are ROM reads (EMU-006), which is what makes this matter."
-  consequence: "The ROM's location has a real price that EXT-002 did not state, because 'costs no RAM' is true and 'costs nothing' is not. At 2.408 accesses per instruction and 72.6 percent of them ROM reads, the ROM contributes on the order of 1.75 accesses at 738 ns if every one cost the full dependent latency, which is 1290 ns of the 4922 ns an emulated instruction costs -- an upper bound, because the interpreter does not stall on every ROM read the way a pointer chase does. The direction of the effect is testable and currently untested: moving the ROM into PSRAM is predicted to recover a fifth to a quarter of throughput, which would put the emulator near the 265k instructions/s that EMU-003 recorded in a session where the ROM was allocated rather than in flash. It cannot be tested on a board that has been up for a while, because a 512 KB contiguous block does not exist -- measured, the largest free block was 256 KB and the allocation failed with 'cannot allocate 524288 bytes for the ROM'. It needs a fresh boot."
+  consequence: "The ROM's location has a real price that EXT-002 did not state, because 'costs no RAM' is true and 'costs nothing' is not. At 2.408 accesses per instruction and 72.6 percent of them ROM reads, the ROM contributes on the order of 1.75 accesses at 738 ns if every one cost the full dependent latency, which is 1290 ns of the 4922 ns an emulated instruction costs -- an upper bound, because the interpreter does not stall on every ROM read the way a pointer chase does. The effect was predicted at a fifth to a quarter of throughput and has since been tested: moving the ROM into PSRAM buys 33.8 percent, more than predicted, and the measured saving of 1239 ns per emulated instruction matches the 1290 ns the prediction implies to within 4 percent (EMU-009). So the ROM's location is no longer a lead, it is a known and quantified cost. Testing it requires a fresh boot, because a 512 KB contiguous block does not survive long -- see KRN-004 for how short that window is."
   sources:
     - "userspace/memlat.c: chase() over PSRAM and chase_flash() over the window, with chase_ctl() as the same arithmetic on PSRAM"
     - "TamaHarness/portable/corebench.c: the SPLB32_PROF address-class counters"
     - "EXT-002 for the window itself and KRN-001 for why the PSRAM alternative is hard"
   verification: "Measured on hardware 2026-11-10 across two runs of the same binary and reproduced to within 2 percent. The window's identity was confirmed before timing it: romverify read crc32 301F0E87 and first bytes A5 5F 10 49 at 0x42480000, so the accesses being priced are real flash reads of the real ROM and not a zero page."
+
+- record_id: EMU-009
+  kind: EMU
+  topic_id: EMU
+  title: "Putting the ROM in PSRAM instead of the flash window buys 33.8 percent, and the saving matches the predicted ROM cost"
+  status: VERIFIED
+  verified_date: 2026-11-10
+  statement: "The same workload -- 40,000,011 emulated cycles of the real V3 ROM, 454305 instructions -- runs at 204033 instructions/s and 4.49x realtime with the ROM read from the memory-mapped flash window, and at 273098 instructions/s and 6.01x with the ROM in PSRAM. That is a gain of 33.8 percent, or 1239 ns saved per emulated instruction: 4901 ns down to 3662 ns, that is 1176 native cycles down to 879. Nine runs of the flash variant across three boots gave 203008 to 205065 instructions/s with no overlap against the PSRAM figure, and two PSRAM runs on two separate boots gave 273115 and 273080."
+  consequence: "This closes the lead EMU-008 opened and it does so with the mechanism confirmed rather than merely observed. The prediction was that the ROM's 1.748 accesses per instruction, at 738 ns each, would account for 1290 ns; the measured saving is 1239 ns, within 4 percent, which says the interpreter was indeed stalling close to full dependent latency on most of its ROM reads. Three things follow. The emulator should read its ROM from PSRAM, not from the flash window -- 6.01x instead of 4.49x is most of what the block-register rewrite was expected to buy, for far less work. That reintroduces the 512 KB contiguous allocation, which is why the emulator must start early from rcS while the block still exists (KRN-004). And the flash window should not be used for anything performance-sensitive again: costing no RAM is not the same as costing nothing."
+  sources:
+    - "TamaHarness/portable/corebench.c: the ROM_FLASH_ADDR path against the malloc'd-file path, differing only in where the ROM lives"
+    - "scripts/build-corebench.sh: the corebench-flash and corebench-rom targets"
+    - "EMU-006 for the access counts and EMU-008 for the per-access cost"
+  verification: "Measured on hardware 2026-11-10 across three boots. Both arms ran with the touch daemon stopped, because it costs about 30 percent on its own (EMU-010), and the flash runs were interleaved before and after the PSRAM run to rule out drift. The determinism check held throughout: every run on both arms retired exactly 454305 instructions at 88.05 emulated cycles per instruction, so the two arms executed identical work and only the memory differed."
+
+- record_id: EMU-010
+  kind: EMU
+  topic_id: EMU
+  title: "The touch daemon costs the emulator about 30 percent of its throughput"
+  status: VERIFIED
+  verified_date: 2026-11-10
+  statement: "With /home/tbtns running, corebench-flash sustains 140491 to 142949 instructions/s on a board at load average 1.37. With the daemon stopped, the same binary on the same boot sustains 202019 to 203950, and the load average falls to 0.59. That is a difference of about 30 percent, or 42 percent more throughput without it."
+  consequence: "Two services that must coexist on this one core are currently fighting, and the emulator loses a third of its speed to a button poller. The daemon polls the CST9217 every 60 ms over the bit-banged I2C bus, and each poll is a 15-byte transfer that frequently NAKs and makes i2c-gpio print at KERN_ERR, so the cost is not the 60 ms cadence but the bus work and the console traffic behind it. Anything measuring the emulator must stop the daemon first or it will benchmark the contention, which is exactly what happened when this was first noticed: the same binary read 204k before a reboot and 141k after, and the difference was the daemon, not the reboot. The fix to consider is to have the daemon stand down while a fullscreen app owns the panel, which is the same coordination the console loglevel already needs (EXT-003)."
+  sources:
+    - "on the watch: /etc/init.d/S50tbtns stop, then the same binary re-run, same boot"
+    - "userspace/tbtns.c: the poll interval and the read-acknowledge sequence"
+    - "TCH-003 for why the polls NAK"
+  verification: "Measured on hardware 2026-11-10 as a same-boot A/B: three runs with the daemon running at 140491/141968/142949, then four runs with it stopped at 203123/202019/203950/204642, with the binary hash unchanged and the instruction count identical at 454305. The effect was then confirmed indirectly on two further boots, where the flash baseline was 204k only once the daemon had been stopped."
 ```
 
 ---
