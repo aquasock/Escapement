@@ -223,8 +223,27 @@ Everything already excluded stays excluded -- SPI clock bought 13 percent, DMA
 targets a cost that is not on this critical path, and frame rate does not touch
 instruction throughput. The only lever with the right magnitude is getting the
 hot state into internal SRAM: under 3 KB, on-die, a few cycles per access
-instead of 43. That is a memory-placement question for this port, the same class
-of constraint as the ROM's 512 KB contiguity limit.
+instead of 43. Both obvious escape routes are closed on this port. The core configuration the
+kernel is built against declares `XCHAL_DCACHE_SIZE=0` and `XCHAL_ICACHE_SIZE=0`
+-- there is no cache, so nothing to enable and `CONFIG_MEMMAP_CACHEATTR` is
+irrelevant. And the device tree declares exactly one memory region, `memory@0`
+at `0x3d800000` for 8 MB of PSRAM, so there is no internal SRAM to move the hot
+state into either.
+
+Confirmed from the other direction with a three-working-set pointer chase:
+
+```
+  4 KB (fits any cache)   70.30 ns
+256 KB (exceeds cache)    68.72 ns
+second 256 KB buffer      78.93 ns
+```
+
+No locality effect at all, which is impossible if a cache were operating.
+
+So PSRAM latency is a hard floor. The lever that remains is reducing the
+*number* of dependent loads rather than their cost: ~37 per emulated step
+against the dozen an interpreter needs with decode state held in locals across a
+block. That is 2-3x, in userspace, with no coherency risk.
 
 ## Parked: the ~1.5 s wait entering the time screen
 
