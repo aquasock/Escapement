@@ -1,10 +1,10 @@
-# Handoff — Escapement, 2026-11-10T15:48
+# Handoff — Escapement, 2026-11-10T15:58
 
 Linux 7.2.4 on a T-Watch Ultra (ESP32-S3). Real Linux on the watch's own Xtensa
 cores, not emulated. This file is orientation; verify before acting on it.
 
-Canonical detail lives in `.ai/core-reference.md` (73 records, fourteen topics).
-Project history lives in `.ai/core-log.md` (39 entries; newest first — 39, 38, 37, 36, 35, 34, 33, 32,
+Canonical detail lives in `.ai/core-reference.md` (75 records, fourteen topics).
+Project history lives in `.ai/core-log.md` (40 entries; newest first — 40, 39, 38, 37, 36, 35, 34, 33, 32,
 31, 30, 29, 28, 27, 26, 25, 24, 23, 22, 21, 20, 19, 18, 17, then 1 through 16).
 Do not re-derive what those hold.
 
@@ -18,10 +18,10 @@ persistence, any wake-from-sleep path, and moving the emulator to core 0.
 
 ## Reconstruct (in this order)
 
-1. `git log --oneline -8` — `main` was at `5b23d84`, clean and fully pushed,
+1. `git log --oneline -8` — `main` was at `f287cad`, clean and fully pushed,
    before the commit carrying this file.
 2. `.ai/core.md` (policy), then `.ai/core-reference.md` (hardware facts — open
-   the record, not the index line), then `.ai/core-log.md` entries 39, 38, 37.
+   the record, not the index line), then `.ai/core-log.md` entries 40, 39, 38.
 3. `git -C build/esp-hosted/esp_hosted_ng branch --show-current` — expect
    `ble-bond-wip`, five local-only commits.
 
@@ -129,10 +129,22 @@ Two distractions already ruled out: `gpio-esp32.c` needs no `xlate` (gpiolib
 supplies `irq_domain_xlate_twothreecell`, and the RTC's line mapping proves it);
 and no GPIO line is otherwise invalid.
 
-**Consequence worth carrying forward:** the RTC's and PMU's interrupts are
-mapped and show **zero counts** in `/proc/interrupts`. That was previously
-blamed on the hardware. Now that the table has room, it is worth suspecting the
-same class of problem rather than assuming the silicon.
+**Settled 2026-11-10: the RTC and PMU interrupts both work.** Their zero counts
+meant *no event had occurred*, not a dead path — and testing it took generating
+an event rather than reading the counter. Arming `wakealarm` 20 s ahead moved
+`7: esp32xx-gpio 1 pcf85063` from 0 to 1; a tap of **Pusher A** (the power key,
+which is not a GPIO and reaches Linux only via `axp20x-pek`) moved
+`8: esp32xx-gpio 7 axp2101_irq_chip` to 2 with both `axp20x-pek-dbr` and
+`-dbf` at 1 — press *and* release. See RTC-004 and PMU-004.
+
+Their quiet defaults are by design, which is why the zero looked alarming:
+PCF85063A Control_2 = `0x07` clears AIE (bit 7), so INT cannot assert until an
+alarm is armed and nothing schedules one; AXP2101 mask `0x40..0x42 = 00 c3 00`
+unmasks only the four sub-IRQs the driver actually registers.
+
+**The DTS `pmic@34` comment claiming LEVEL_LOW on GPIO 7 “storms and hangs the
+boot” was wrong and has been removed** — pin 7 has a pull-up in `pmic_irq_pins`,
+the interrupt is connected, and the kernel boots and services presses normally.
 
 ## The bus defect that was blocking touch
 

@@ -1,3 +1,34 @@
+## 40 COMMIT Unreleased 2026-11-10T15:57:37-07:00
+
+#### Coming From:
+
+Unreleased f287cad
+
+#### Purpose:
+
+Find out whether the RTC's and PMU's interrupts, mapped but with permanently zero counts, were broken or simply quiet.
+
+#### Outcome:
+
+Both work, and neither was ever broken. The zero counts meant no event had occurred, not that the path was dead -- a reading this project had carried as a suspicion about the hardware and had never tested by generating an event. The method in both cases was to drive the device rather than to read its counter. For the RTC that meant arming an alarm through `/sys/class/rtc/rtc0/wakealarm` for 20 s ahead, which advanced `7: esp32xx-gpio 1 pcf85063` from 0 to 1; the PCF85063A's Control_2 register reads 0x07 at rest, with bit 7 (AIE, alarm interrupt enable) and bit 5 (TIE, timer enable) both clear, so the INT pin cannot assert until something arms it, and nothing on this watch schedules an alarm. For the PMU it meant a quick tap of Pusher A -- the power key, which is not a GPIO at all and reaches Linux only through `axp20x-pek` -- which advanced `8: esp32xx-gpio 7 axp2101_irq_chip` from 0 to 2 and both PEK sub-sources from 0 to 1, `axp20x-pek-dbr` (rising, press) and `axp20x-pek-dbf` (falling, release). The AXP2101's pending register confirmed it at `00 08 00`, bank 1 bit 3, PEK_SHORT. Two sub-interrupts from one GPIO line and one press is the expected shape: the top-level handler services each pending source on the PMU. The AXP2101's enabled mask explains its quiet default too -- registers 0x40..0x42 read `00 c3 00`, so only bits 0, 1, 6 and 7 of bank 1 are unmasked, which is exactly the four sub-IRQs the driver registers (PEK rising, PEK falling, VBUS removal, VBUS plug-in) and nothing else. One correction to the record: the device tree carried a comment above the PMU node warning that "GPIO7 has no pull-up here, and a LEVEL_LOW IRQ on it storms and hangs the boot", which contradicted the node beneath it and is now demonstrably wrong -- `pmic_irq_pins` does give pin 7 a weak pull-up, the interrupt is connected and level-low, and two presses later the kernel was healthy with both edges serviced. The comment was replaced rather than left in place, because a comment telling the next reader that a working thing is dangerous is worse than no comment. The DTS change alters no generated output -- the compiled DTB is byte-identical -- so it required no redeployment on its own account; the kernel was reflashed anyway so that the running build string matches the committed source exactly rather than merely behaving the same. The core-syntax audit passed: `.ai/core.md` and `.ai/core-syntax.md` were re-read, the complete `.ai/` diff was inspected, `.ai/core.md` was not modified, all YAML blocks in the reference parse and all 75 records carry the ten required fields with unique ids, and this entry was validated against the template with six sections in canonical order, sequential numbering from 39, an ISO-8601 timestamp carrying the America/Phoenix offset, prose-only Outcome and Next Steps, and Status values within the allowed set.
+
+#### Next Steps:
+
+A full 16 MiB backup should be taken; `working-2026-11-10-1533.bin` predates both the 5 s idle period and this cycle, though this cycle changed no executable behaviour so the image remains a faithful restore of a working watch. The remaining open item on this thread is the absent-address `-ETIMEDOUT` versus `-ENXIO` defect, which makes `i2cdetect` report timeouts for empty addresses and affects no working path; it is small and self-contained. With touch, both PMU edges and the RTC alarm path now verified end to end, every peripheral on the bus has a proven interrupt or a proven reason to be quiet, which closes the interrupt work that began with the touch driver. The deferred items are unchanged and none should be started without asking: BLE media keys, the Rii K06 touchpad and Logitech keyboard, firmware-side BLE bond persistence, wake-from-sleep, and moving the Tamagotchi emulator to core 0.
+
+#### Files Modified:
+
+- patches/kernel/display/final/esp32s3-devkit-c1.dts
+- .ai/core-reference.md
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: PASS
+
+---
+
 ## 39 COMMIT Unreleased 2026-11-10T15:47:12-07:00
 
 #### Coming From:

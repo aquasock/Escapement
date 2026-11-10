@@ -176,7 +176,9 @@ Topic IDs are the `record_id` prefix. An entry reserves a name; it does not clai
 | What registers give battery capacity and voltage, and in what units? | PMU | PMU-001 |
 | Why did the PMU work, then stop, after a rebuild? | PMU | PMU-002 |
 | Which config option publishes axp20x-usb? | PMU | PMU-003 |
+| Does the PMU interrupt work, and does LEVEL_LOW really storm? | PMU | PMU-004 |
 | Where does the RTC's time come from and go to? | RTC | RTC-001 |
+| Does the RTC interrupt actually work, or is it dead? | RTC | RTC-004 |
 | Why does `date` print UTC when the clock is right? | RTC | RTC-002 |
 | Why did the clock jump to last shutdown's time at boot? | RTC | RTC-003 |
 | What survives a full-image flash in /etc? | FLS | FLS-003 |
@@ -826,6 +828,36 @@ EMU-010: "The touch daemon costs the emulator about 30 percent of its throughput
     - "`ls /etc/init.d/S??*` behaviour checked in a scratch directory: S01clock, S01clock.disabled, S01clock.off and S20foo all matched"
     - "scripts/watch-time.sh: disable_stamp_clock()"
   verification: "Verified on hardware: with `/home/.clock` set 90 minutes ahead, `/etc/init.d/S01clock start` printed 'Clock restored to 2026-11-09 19:42:56 UTC' and the clock moved from 18:12:58 to 19:42:56 against a true 18:12:59. After the disable, a shutdown-and-reboot cycle left `/home/.clock` absent -- `rcK` would have recreated it had the script still been in the glob -- with `uptime` 54 s and hctosys seeding true UTC."
+
+- record_id: RTC-004
+  kind: RTC
+  topic_id: RTC
+  status: VERIFIED
+  verified_date: 2026-11-10
+  title: "The RTC's interrupt path works; its zero count meant no alarm had ever been armed, not a broken line"
+  statement: "The PCF85063A's interrupt is GPIO 1 on the esp32 GPIO controller, active low, and it maps and fires correctly. Arming an alarm through `/sys/class/rtc/rtc0/wakealarm` and waiting for it advanced `7: esp32xx-gpio 1 pcf85063` from 0 to 1. Control_2 (0x01) reads 0x07 at rest, in which bit 7 (AIE, alarm interrupt enable) and bit 5 (TIE, timer interrupt enable) are both clear -- so the INT pin cannot assert until an alarm is armed."
+  consequence: "This record exists to stop the zero being misread. A permanently-zero count in `/proc/interrupts` looks like a dead interrupt, and that is how it was previously interpreted, but for this part the default state is genuinely 'no interrupt source enabled': nothing schedules an alarm on this watch, so the line is silent by design rather than by fault. Note that 0x07 also clears bit 5, the STOP bit, so the oscillator is running -- the two facts share a register and only one of them is about interrupts. Anyone re-checking this in future should arm an alarm rather than reading the count and concluding anything."
+  sources:
+    - "on the watch: `i2ctransfer -y -f 0 w1@0x51 0x00 r3` -> 0x00 0x07 0xa2, and Control_2 bit 7 AIE = 0, bit 5 TIE = 0"
+    - "on the watch: `echo <epoch> > /sys/class/rtc/rtc0/wakealarm`, then `grep pcf85063 /proc/interrupts` advancing 0 -> 1"
+    - "drivers/rtc/rtc-pcf85063.c: pcf85063_rtc_set_alarm() writes the alarm registers then sets PCF85063_CTRL2_AIE only when alrm->enabled"
+  verification: "Verified on hardware 2026-11-10: with no alarm armed the count sat at 0 through many boots; arming wakealarm 20 s ahead produced `7: 1 esp32xx-gpio 1 pcf85063`, proving alarm, AIE, the INT pin, the GPIO controller, the chained handler and the driver all work together. No code change was needed -- the path was never broken."
+
+- record_id: PMU-004
+  kind: PMU
+  topic_id: PMU
+  status: VERIFIED
+  verified_date: 2026-11-10
+  title: "The PMU interrupt path works, and its previous zero count was simply 'no event had happened'"
+  statement: "The AXP2101's interrupt is GPIO 7, active low, and it fires correctly. A quick tap of Pusher A -- the power key, which is not a GPIO and reaches Linux only through `axp20x-pek` -- advanced `8: esp32xx-gpio 7 axp2101_irq_chip` from 0 to 2 and both of its sub-sources from 0 to 1: `axp20x-pek-dbr` (0x11, rising edge = press) and `axp20x-pek-dbf` (0x12, falling = release). The PMU's pending-status register confirmed it, reading `00 08 00` with bank 1 bit 3 set, which is PEK_SHORT."
+  consequence: "Two things follow, one of which corrects an earlier reading of this board. First, the interrupt was never broken; the count was zero because nothing had asserted it, and the AXP2101's default enable mask leaves only the PEK edges and VBUS plug/removal unmasked (0x40..0x42 read `00 c3 00`, exactly the four sub-IRQs the driver registers), so a quiet period is the expected state. Second, the DTS comment warning that a LEVEL_LOW interrupt on GPIO 7 'storms and hangs the boot' is now demonstrably wrong: pin 7 is configured with a weak pull-up in `pmic_irq_pins` and driven level-low, and two presses later the kernel is healthy with the handlers serviced. The comment also contradicts its own node, which does declare the interrupt. Whatever originally hung was not this configuration as it now stands."
+  sources:
+    - "on the watch: `grep axp /proc/interrupts` showing 8 -> 2, 17 -> 1, 18 -> 1 after one Pusher A tap"
+    - "on the watch: `i2ctransfer -y -f 0 w1@0x34 0x48 r3` -> 00 08 00 (bank 1 bit 3, PEK_SHORT)"
+    - "on the watch: `i2ctransfer -y -f 0 w1@0x34 0x40 r3` -> 00 c3 00, the enabled mask 0x41 = bits 0,1,6,7"
+    - "patches/kernel/axp2101/final/axp20x.c: axp2101_regmap_irqs[] and axp2101_regmap_irq_chip's unmask_base = AXP2101_IRQ0_EN"
+    - "patches/kernel/display/final/esp32s3-devkit-c1.dts: the pmic@34 node and its stale warning comment"
+  verification: "Verified on hardware 2026-11-10. Before: all five PMU-related counts 0 and status 00 00 00. After one tap of Pusher A: IRQ 8 at 2, both PEK sub-IRQs at 1, status bank 1 bit 3 set. The press/release pair appearing separately confirms both edges are delivered, not just one, and the kernel remained healthy throughout."
 
 - record_id: KRN-001
   kind: KERNEL

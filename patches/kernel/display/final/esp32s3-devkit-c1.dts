@@ -152,10 +152,24 @@
 		};
 
 		/* X-Powers AXP2101 PMU: battery, charging, and the power rails.
-		 * No interrupt: GPIO7 has no pull-up here, and a LEVEL_LOW IRQ
-		 * on it storms and hangs the boot. Without an IRQ the supplies
-		 * still register (see axp2101 local patch 0008), but there are
-		 * no VBUS hotplug events and no wake-from-sleep.
+		 *
+		 * The interrupt works and is wired: GPIO 7, active low, level
+		 * triggered. A tap of Pusher A (the power key, which is not a GPIO
+		 * and reaches Linux only through axp20x-pek) delivers press and
+		 * release as separate sub-IRQs -- verified 2026-11-10, see PMU-004.
+		 *
+		 * This comment previously claimed "no interrupt" and warned that a
+		 * LEVEL_LOW IRQ on GPIO 7 "storms and hangs the boot", which
+		 * contradicted the node below it and is now known to be wrong for
+		 * this configuration: the pin is held up by the weak pull-up in
+		 * pmic_irq_pins, and with the interrupt connected the kernel boots
+		 * and services presses normally. The warning is removed rather than
+		 * left in place, because a comment that tells the next reader a
+		 * working thing is dangerous is worse than no comment at all.
+		 *
+		 * What is genuinely absent, and unrelated to the interrupt: there is
+		 * no wake-from-sleep path, which is a deferred item, not a defect
+		 * here.
 		 */
 		pmic@34 {
 			compatible = "x-powers,axp2101";
