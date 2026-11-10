@@ -1,10 +1,10 @@
-# Handoff — Escapement, 2026-11-10T14:41
+# Handoff — Escapement, 2026-11-10T14:49
 
 Linux 7.2.4 on a T-Watch Ultra (ESP32-S3). Real Linux on the watch's own Xtensa
 cores, not emulated. This file is orientation; verify before acting on it.
 
 Canonical detail lives in `.ai/core-reference.md` (70 records, fourteen topics).
-Project history lives in `.ai/core-log.md` (35 entries; newest first — 35, 34, 33, 32,
+Project history lives in `.ai/core-log.md` (36 entries; newest first — 36, 35, 34, 33,
 31, 30, 29, 28, 27, 26, 25, 24, 23, 22, 21, 20, 19, 18, 17, then 1 through 16).
 Do not re-derive what those hold.
 
@@ -18,10 +18,10 @@ persistence, any wake-from-sleep path, and moving the emulator to core 0.
 
 ## Reconstruct (in this order)
 
-1. `git log --oneline -8` — `main` was at `4b83f00`, clean and fully pushed,
+1. `git log --oneline -8` — `main` was at `6af4934`, clean and fully pushed,
    before the commit carrying this file.
 2. `.ai/core.md` (policy), then `.ai/core-reference.md` (hardware facts — open
-   the record, not the index line), then `.ai/core-log.md` entries 35, 34, 33.
+   the record, not the index line), then `.ai/core-log.md` entries 36, 35, 34.
 3. `git -C build/esp-hosted/esp_hosted_ng branch --show-current` — expect
    `ble-bond-wip`, five local-only commits.
 
@@ -111,27 +111,36 @@ time and clean probe semantics and nothing else. Fix it in the touch cycle.
 
 ## Backups — read the directory, do not trust this file
 
-**No backup contains the touch driver.** The newest, `working-2026-11-10-1353.bin`
-(sha256 `ee2133e0…`, verified three ways), predates both the I2C recovery fix
-and `cst92xx`, so restoring it loses touch. Take a fresh full backup
-(`./scripts/watch-backup.sh`, 16 MiB, ~4 min) before the next kernel change.
+**`working-2026-11-10-1444.bin` is the current, complete state.** Taken
+2026-11-10 14:47, 16 MiB, sha256 `1a2637f5…`. It is the first backup that
+contains working touch on the hardware bus, and it was verified rather than
+trusted:
+
+- the stored `.sha256` matches an independent `sha256sum` of the file;
+- the 2,841,808-byte kernel extracted at offset `0x140000` is byte-identical to
+the built `xipImage` (`d47e2cc3…`), so the right kernel is in the right slot;
+- the image carries the `hynitron,cst92xx` compatible and the recovery format
+  string `%s: int_raw=%08x sr=%08x busy=%u` plus the `ARB_LOST` literal, so
+  both the touch driver and the I2C fix are in it;
+- it was taken **after a reboot**, so it is a cold-boot state rather than a
+  warm one.
 
 ```
-~/twatch-backup/working-2026-11-10-1353.bin   ee2133e0  CURRENT — hardware I2C,
-                                                        multi-byte fixed, no touch
+~/twatch-backup/working-2026-11-10-1444.bin   1a2637f5  CURRENT — hardware I2C,
+                                                        multi-byte fixed, TOUCH WORKS
+~/twatch-backup/working-2026-11-10-1353.bin   ee2133e0  hardware I2C, multi-byte
+                                                        fixed, NO touch
 ~/twatch-backup/working-2026-11-10-1251.bin   04cfee94  hardware I2C, no touch,
                                                         chatty boot, pre-fix
 ~/twatch-backup/working-2026-11-10-1053.bin   b0f31a2d  i2c-gpio — full function
-                                                        incl. touch
+                                                        incl. old touch daemon
 ~/twatch-backup/working-2026-11-10-0940.bin   fd7e5bf9  i2c-gpio, 40 MHz
 ~/twatch-backup/twatch-factory-16MB.bin       471c9a21  stock
 ```
 
-The 1353 image does not contain touch, because `tbtns` is retired. If touch is
-needed before the new driver lands, restore 1053: it is the fully functional
-watch, on the bit-banged bus. Note both images contain the **kernel** at
-`0x140000` and a working `i2c-gpio` driver compiled in, but only 1353 has the
-fixed hardware driver selected by the device tree. Restore command:
+1444 is the one to restore. 1053 remains the fallback if the hardware-I2C path
+is ever suspected: it is the bit-banged build with the old userspace touch
+daemon, fully functional for its time. Restore command:
 
 ```sh
 PY=build/idf-tools/python_env/idf5.1_py3.14_env/bin/python

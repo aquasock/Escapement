@@ -1,3 +1,33 @@
+## 36 COMMIT Unreleased 2026-11-10T14:48:04-07:00
+
+#### Coming From:
+
+Unreleased 6af4934
+
+#### Purpose:
+
+Capture a full 16 MiB backup of the first state in which touch works on the hardware I2C bus, taken from a cold boot rather than a warm one.
+
+#### Outcome:
+
+`~/twatch-backup/working-2026-11-10-1444.bin` is the current recoverable state, 16 MiB read at 628.8 kbit/s in 213.5 seconds, sha256 `1a2637f5f9c781fe3dc0a19476fbb47550d019a10f4b428658e17d1fccd17c5a`. It is the first backup that contains working touch over the hardware bus, and it closes the gap noted at the end of the previous cycle, where no saved image had either the I2C recovery fix or `cst92xx`. The watch was rebooted first and the subsystems were re-verified before the read, so the image is a cold-boot state rather than a warm one: `cst92xx` bound as `CST9220 at 0x1a, 410x502, fw 0x01000003` and registered `cst92xx-touch` as input2, `rtc0` read 21:44:04 against a seven-byte register read of `0x05 0x44` (21:44:05), WiFi was at 10.10.0.15 and the BLE keyboard was running. The image was verified four ways rather than by the script's own OK line, because a backup that silently contains the wrong kernel is worse than none and this project has already lost a session to exactly that. The stored `.sha256` matches an independent `sha256sum`; the 2841808-byte kernel extracted from `0x140000` is byte-identical to the built `xipImage` (`d47e2cc3…`), proving the right kernel is in the right slot; the image contains the `hynitron,cst92xx` compatible string and the recovery format string `%s: int_raw=%08x sr=%08x busy=%u` together with the `ARB_LOST` literal, proving both the touch driver and the I2C fix are inside it; and the running watch reports `7.2.4-forkbank-g0a3083746891-dirty`, the same build string the image carries. One detail worth recording for the next person who greps an image for evidence: the recovery log line does not contain the literal `NACK:`, because it is formatted from `%s` with `"NACK"` or `"ARB_LOST"` selected at the call site, so searching for `NACK:` in a kernel image returns nothing even when the code is present. The core-syntax audit passed: `.ai/core.md` and `.ai/core-syntax.md` were re-read, the complete `.ai/` diff was inspected, `.ai/core.md` was not modified, and this entry was validated against the template with six sections in canonical order, sequential numbering from 35, an ISO-8601 timestamp carrying the America/Phoenix offset, prose-only Outcome and Next Steps, and Status values within the allowed set.
+
+#### Next Steps:
+
+The next kernel change now costs a four-minute restore rather than a session, which matters because the remaining touch work is the one part likeliest to need iteration. That work is interrupt-driven operation: `TP_INT` is GPIO 12 and LilyGo attaches a falling-edge handler to it, which would replace the 20 ms poll and reduce both bus traffic and the NACK rate. It was deferred deliberately again, because the polling path is what proved the protocol and an unverified interrupt would mix two unknowns. A second candidate, smaller and independent, is the absent-address `-ETIMEDOUT` versus `-ENXIO` defect, which still makes `i2cdetect` report timeouts for empty addresses; it is noted in the driver as an open item and does not affect any working path. The deferred items are unchanged and none should be started without asking: BLE media keys, the Rii K06 touchpad and Logitech keyboard, firmware-side BLE bond persistence, wake-from-sleep, and moving the Tamagotchi emulator to core 0.
+
+#### Files Modified:
+
+- None.
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: PASS
+
+---
+
 ## 35 COMMIT Unreleased 2026-11-10T14:40:11-07:00
 
 #### Coming From:
