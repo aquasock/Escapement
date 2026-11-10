@@ -1,3 +1,33 @@
+## 19 COMMIT Unreleased 2026-11-10T07:54:49-07:00
+
+#### Coming From:
+
+Unreleased 99f3d13
+
+#### Purpose:
+
+Repair the `.ai` control plane, which had drifted far enough that an agent following the recovery policy could not reach the newest engineering records or trust the tracked handoff.
+
+#### Outcome:
+
+Three defects of the same kind were found and closed. Six records -- EMU-001 through EMU-005 and LCD-011 -- had been appended after section 8 instead of into section 5, so the file's own records section ended at EXT-001 while five emulator records and the 40 MHz panel record sat below the retired-id table. `EMU` was used as a `kind` and a `topic_id` on those six records but was absent from `record_kinds`, from the section 2 topic catalog and from the template's kind list, so the file declared thirteen kinds and used fourteen. And section 4's fast lookup index, which is where the policy says to look first, carried no `EMU` line and no `LCD-011` line at all, which meant the seven routing rows pointing at EMU resolved to keys that did not exist; section 3 routing itself was already correct. The six records were moved into section 5 in their existing order with their text unchanged, `EMU` was registered in all three places, `LCD-011` and the five `EMU` lines were added to the index, `last_reviewed` moved to 2026-11-10 and the file's purpose line now names the emulator. Verification is structural rather than eyeballed: 57 records, 57 unique ids, 57 index keys, no record without an index line and no index line without a record, every routing target resolving to a record, all fourteen kinds used also declared, all twelve code fences balanced, and all 57 records inside section 5. The tracked handoff at `.codewhale/handoff.md` was by then seventeen entries stale -- it was written from entry 1 and still claimed `main` at `fd5f252` with 35 records across twelve topics, its "next step" was touch input (delivered in entries 3, 4 and 13) and its "known accepted defect" was the `sm_bonding` pairing failure (fixed in entry 12) -- and because it is tracked deliberately so a clean clone can find the baton, a fresh agent would have started from a plan already completed; it has been rewritten against entries 17 and 18. Two facts about this cycle: the watch was not reachable, with no `/dev/ttyACM*` present and 100 percent packet loss to 10.10.0.15 from a host holding 10.10.0.42 on the same subnet, so no build, deployment or user test applied; and the active log's entries 18 and 17 had been prepended in that order ahead of 1 through 16, so this entry was prepended in turn rather than reordering settled history. The core-syntax audit passed: `.ai/core.md` and `.ai/core-syntax.md` were re-read, the complete `.ai/` diff was inspected, `.ai/core.md` was not modified, this entry was validated against the template with six sections in canonical order, sequential numbering from 18, an ISO-8601 timestamp carrying the America/Phoenix offset, prose-only Outcome and Next Steps, `Files Modified` written as None because the cycle changed only project-control metadata, and Status values within the allowed set.
+
+#### Next Steps:
+
+The road to the records is clear, so the measurement entry 18 left open is the work: EMU-005 is still OPEN because the native-instruction count per emulated step is derived from timing and has never been counted, and the decision between the block-register interpreter and the core-0 design turns on whether that figure is near 250 or nearer 80. Counting it needs the watch, which is currently unpowered or unplugged, so nothing on hardware can proceed until it answers on 10.10.0.15 or enumerates as `/dev/ttyACM*`; a dynamic `corebench` build prepared for that moment is the next cycle. After the count, the parked ~1.5 s time-screen wait is the same problem seen from the other end and needs no separate work.
+
+#### Files Modified:
+
+None.
+
+#### Status:
+
+- Build: N/A
+- Deployment: N/A
+- User Test: N/A
+
+---
+
 ## 18 COMMIT Unreleased 2026-11-10T02:00:00-07:00
 
 #### Coming From:

@@ -1,7 +1,7 @@
 # ESCAPEMENT TECHNICAL REFERENCE
 
 > **Project:** Escapement
-> **Purpose:** The authoritative lookup for externally defined facts this project depends on: the T-Watch Ultra's wiring and fitted parts, the ESP32-S3's memory and boot coupling, the CO5300 panel's controller behaviour and fbdev contract, the AXP2101 power management, the Xtensa/uClibc toolchain, and the external projects embedded here.
+> **Purpose:** The authoritative lookup for externally defined facts this project depends on: the T-Watch Ultra's wiring and fitted parts, the ESP32-S3's memory and boot coupling, the CO5300 panel's controller behaviour and fbdev contract, the AXP2101 power management, the Xtensa/uClibc toolchain, the external projects embedded here, and the SPLB32 emulator measured on this board.
 > **Authority:** Per `.ai/core.md`, consult this file before looking anything up online, and open the record behind any hardware fact before acting on it. A record is authoritative to the extent of its `status` and cited `sources`. When a better or newer source is found online, add or revise a record and notify the user.
 
 This file records what an outside source (a datasheet, schematic, vendor SDK, vendor tool, or external repository) says, plus hardware observations that confirm or refute it. It does not record project history, build results, or discussion; those belong in `core-log.md`. It does not record project design choices unless an external fact forces them.
@@ -29,6 +29,7 @@ record_kinds:
   - NETWORK     # esp-hosted WiFi over shmem
   - TOOLCHAIN   # crosstool-NG Xtensa/uClibc, ESP-IDF, esptool
   - EXTERNAL    # interface contracts owned by other projects
+  - EMU         # the SPLB32 emulator: interpreter cost, PSRAM latency, core choice
 
 statuses:
   VERIFIED:   "Primary source cited AND confirmed on this project's hardware or tools."
@@ -108,6 +109,10 @@ Topic IDs are the `record_id` prefix. An entry reserves a name; it does not clai
 - topic_id: EXT
   name: "External projects"
   description: "Interface contracts owned by other projects embedded in or measured by this one."
+
+- topic_id: EMU
+  name: "SPLB32 Tamagotchi emulator"
+  description: "The interpreter measured on this board: what one emulated instruction costs, why PSRAM latency and the absence of a cache set the floor, and which of the two cores the work runs on."
 ```
 
 ---
@@ -211,6 +216,7 @@ LCD-007: "The glass is 410x502 with 45-degree chamfers; the largest unclipped re
 LCD-008: "45x45 windows are honoured, so the edge API needs no full-width fallback; and in RGB565 green is a 6-bit field, so RGB565(31,31,31) is pink (0xFBFF) and white needs 63 (0xFFFF)"
 LCD-009: "A long single-transfer window to the right strip (45x356) tears into diagonal splits; the same rect in 2-row bands is clean. Not width, not X, not height -- the cap is a workaround and the root cause is unestablished, with SPI clock the remaining suspect"
 LCD-010: "Transfers cost 11.42 us per 64-byte chunk with per-transfer fixed cost ~0, at 5.6 MB/s (56% of quad wire); the panel itself is only 1.6% of that, so the remaining 5 us/chunk is CPU FIFO work and DMA caps at about 2x"
+LCD-011: "40 MHz is clean on the glass and is the driver's compiled-in default, but doubling the clock buys only 13 percent (115.15 ms to 100.85 ms per frame), which is the evidence that the transfer is not clock bound"
 TCH-001: "The touch controller is a CST9217 at I2C 0x1A (register 0x0000 reads 0xCA, the family checkcode); 0x5A is the DRV2605 haptic driver, whose register 0x00 reads 0xE0 (DEVICE_ID bits), and only 0x1A completes the CST92xx unlock handshake"
 TCH-002: "A reset CST9217 is in command mode and reports nothing: write 0xD1=0x01, then 0xD1=0x1E twice, require byte 1 of a read of 0x0002 to be 0x1E, then write 0xD1=0x09 for normal mode"
 TCH-003: "Report block at 0xD000 is 15 bytes and the transfer must be all 15 even though only 7 are decoded; byte 0 = 0x06 for a down event and 0xAB means no new report; x=(b1<<4)|(b3>>4), y=(b2<<4)|(b3&0x0F); a short read leaves the ack mid-block so a held touch freezes"
@@ -253,6 +259,12 @@ TOL-003: "A patch loop globbing patches/kernel/*.patch does not recurse, and 'gi
 EXT-001: "The SPLB32 Tamagotchi core runs at 4.05x realtime headless on this board, and 1.00x while painting 320x400 at 4 fps from the flash-resident ROM; the display path is the bottleneck"
 EXT-002: "The linear flash window 0x42000000 is readable from userspace, so a 512 KB ROM at 0x42480000 costs zero RAM -- the fix for contiguity on NOMMU; file mmap costs 2x the file and MAP_SHARED fails ENODEV"
 EXT-003: "A fullscreen app on fb0 flickers against fbcon because every printk repaints the console over it; console_loglevel decides it, and /etc/sysctl.conf sets kernel.printk = 1 4 1 7"
+
+EMU-001: "Doubles cost 711 ns against 121 ns for the integer equivalent, so SPLB32's accumulators are 64-bit fixed-point at CYC_SHIFT=7; float is not slow but fatal, because the kernel does not enable the FPU coprocessor for user tasks and the process dies with SIGSEGV"
+EMU-002: "Entering the time screen takes about 1.5 s because the guest computes for 580.1 ms of emulated time and emulated time then runs at about a third of real; parked by user decision, with 43-135 ms per frame during the stall still unexplained"
+EMU-003: "A dependent load from PSRAM costs 178.83 ns, about 43 cycles, and there is no cache at all (XCHAL_DCACHE_SIZE=0, no locality effect across three working sets), so the roughly 12 PSRAM round trips per emulated step bound the emulator at 265k instructions/s"
+EMU-004: "Both cores are LX7 at 240 MHz, but Linux runs on core 1, which has no cache and no reachable internal SRAM, while core 0 has both; SMP is not supportable (CONFIG_HAVE_SMP unset, XCHAL_HAVE_EXCLUSIVE=0), so moving emulation to core 0 is the only full-speed design and it is deliberately not started"
+EMU-005: "The interpreter spends about 3676 ns per emulated instruction against a 12.77 ns native yardstick, on the order of 250 native instructions against the 30 to 80 a tuned core needs; the count is derived from timing and NOT measured, and counting it is the first task"
 ```
 
 ---
@@ -944,49 +956,6 @@ EXT-003: "A fullscreen app on fb0 flickers against fbcon because every printk re
     - "TamaHarness for-escapement/RESULTS-3.md and tamabench-on-watch.txt"
     - "TamaHarness portable VALIDATION.md and BUGS.md for the correctness claims"
   verification: "All figures measured on hardware in a single process on one boot, with frame cost derived by subtracting the separately measured headless rate. The rendered output was read off the panel and confirmed to be the expected egg sprite. Revised 2026-11-09 (core-log entry 14): re-measured with the ROM read from flash rather than allocated, at 320x400 and 4 fps, giving 1.00x realtime -- 16 frames in 4 s at 3833499 emulated cycles/s. Earlier figures used the desktop front end's 324x348 geometry and a malloc'd ROM."
-```
-
----
-
-## 6. Record template
-
-```yaml
-- record_id: <TOPIC>-<NNN>
-  kind: SOC | BOARD | DISPLAY | PMU | RTC | KERNEL | FLASH | JFFS2 | BLE | NETWORK | TOOLCHAIN | EXTERNAL
-  topic_id: <TOPIC>
-  title: "Short noun phrase"
-  status: VERIFIED | SOURCED | INFERRED
-  verified_date: YYYY-MM-DD
-  statement: "What the source says, with exact values and units"
-  consequence: "What it means for this project, or where it is implemented"
-  sources:
-    - "Document or repository, revision/commit/path/symbol, URL"
-  verification: "How and when it was confirmed, or why it is not yet confirmed; then any 'Revised <date> (core-log entry N): ...' notes"
-```
-
----
-
-## 7. Maintenance boundary
-
-- Keep external facts, their sources, and their verification status here.
-- Keep build results, failures, rationale, and chronology in `core-log.md`; cite a log entry number in `verification` instead of repeating it.
-- Do not add speculative records for topics that have not been looked up. An unanswered question stays out of this file until a source answers it.
-- Keep this file current rather than historical: when a record's source is replaced by a newer document or tool version, or its fact changes, revise the record in place and let git and `core-log.md` carry the history (section 1).
-- **The panel is write-only and never acknowledges.** Records about what appears on the glass are admissible only when their verification says the observation came from looking at the screen. A return code of 0 from a display operation is not evidence that anything was drawn, and three separate display defects in this project reported success while drawing nothing.
-- Records about the SoC/firmware boundary should say which core they concern: core 0 runs ESP-IDF and its radios, core 1 runs Linux, and anything requiring the two to cooperate must account for that split.
-- A `core-syntax.md` audit is required whenever this file changes, per `.ai/core.md`.
-
-```yaml
-last_reviewed: 2026-11-09
-```
-
----
-
-## 8. Retired record ids
-
-| record_id | Folded into | Why |
-|---|---|---|
-| — | — | No records retired yet. |
 
 - record_id: EMU-001
   kind: EMU
@@ -1069,3 +1038,46 @@ last_reviewed: 2026-11-09
     - "TamaHarness/portable/splb32.c: exec_op_sem, read8/write8, splb32_step"
     - "docs/tamagotchi.md: 'Why the emulator crawls when the ROM computes'"
   verification: "The 3676 ns per step and the 12.77 ns yardstick are measured on hardware. The native-instruction count is derived, not counted -- explicitly unresolved. Of 393 instructions sampled from exec_op_sem, 39 are memory operations (10 percent), which bounds how much of the cost can be memory access within the handler itself."
+```
+
+---
+
+## 6. Record template
+
+```yaml
+- record_id: <TOPIC>-<NNN>
+  kind: SOC | BOARD | DISPLAY | PMU | RTC | KERNEL | FLASH | JFFS2 | BLE | NETWORK | TOOLCHAIN | EXTERNAL | EMU
+  topic_id: <TOPIC>
+  title: "Short noun phrase"
+  status: VERIFIED | SOURCED | INFERRED
+  verified_date: YYYY-MM-DD
+  statement: "What the source says, with exact values and units"
+  consequence: "What it means for this project, or where it is implemented"
+  sources:
+    - "Document or repository, revision/commit/path/symbol, URL"
+  verification: "How and when it was confirmed, or why it is not yet confirmed; then any 'Revised <date> (core-log entry N): ...' notes"
+```
+
+---
+
+## 7. Maintenance boundary
+
+- Keep external facts, their sources, and their verification status here.
+- Keep build results, failures, rationale, and chronology in `core-log.md`; cite a log entry number in `verification` instead of repeating it.
+- Do not add speculative records for topics that have not been looked up. An unanswered question stays out of this file until a source answers it.
+- Keep this file current rather than historical: when a record's source is replaced by a newer document or tool version, or its fact changes, revise the record in place and let git and `core-log.md` carry the history (section 1).
+- **The panel is write-only and never acknowledges.** Records about what appears on the glass are admissible only when their verification says the observation came from looking at the screen. A return code of 0 from a display operation is not evidence that anything was drawn, and three separate display defects in this project reported success while drawing nothing.
+- Records about the SoC/firmware boundary should say which core they concern: core 0 runs ESP-IDF and its radios, core 1 runs Linux, and anything requiring the two to cooperate must account for that split.
+- A `core-syntax.md` audit is required whenever this file changes, per `.ai/core.md`.
+
+```yaml
+last_reviewed: 2026-11-10
+```
+
+---
+
+## 8. Retired record ids
+
+| record_id | Folded into | Why |
+|---|---|---|
+| — | — | No records retired yet. |
