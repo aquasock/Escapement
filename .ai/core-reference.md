@@ -177,6 +177,7 @@ Topic IDs are the `record_id` prefix. An entry reserves a name; it does not clai
 | Why did the PMU work, then stop, after a rebuild? | PMU | PMU-002 |
 | Which config option publishes axp20x-usb? | PMU | PMU-003 |
 | Does the PMU interrupt work, and does LEVEL_LOW really storm? | PMU | PMU-004 |
+| Why did the click disappear when the touch daemon was retired? | HAPTIC | HAP-001 |
 | Where does the RTC's time come from and go to? | RTC | RTC-001 |
 | Does the RTC interrupt actually work, or is it dead? | RTC | RTC-004 |
 | Why does `date` print UTC when the clock is right? | RTC | RTC-002 |
@@ -747,6 +748,20 @@ EMU-010: "The touch daemon costs the emulator about 30 percent of its throughput
     - "patches/kernel/display/NOTES provenance and TinyPetz firmware/bringup/main/board.c: EXPANDS_DRV_EN = 6, the expander bit that enables the haptic rail"
     - "userspace/haptic.c: the driver, with the register map and the library choice recorded"
   verification: "Verified on hardware 2026-11-09: the registers were read as above before any code was written, haptic_init() then reported `haptic ready (DRV2605, ERM)` in the daemon log, and the operator confirmed the click is felt when a bar is tapped. TinyPetz was checked first and does not drive the chip at all -- it only raises the expander bit at boot -- so the effect was established here from the datasheet IDs rather than copied."
+
+- record_id: HAP-001
+  kind: HAPTIC
+  topic_id: HAP
+  status: VERIFIED
+  verified_date: 2026-11-10
+  title: "The tap click belongs in the kernel, because the userspace library that made it died with its only caller"
+  statement: "The DRV2605's Strong Click is now produced by a kernel driver, `patches/kernel/haptic/final/drv2605.c`, exposing `drv2605_tap()`, which the touch driver calls on each press transition. The sequence is MODE 0x01 = 0x00 (internal trigger), RTP 0x02 = 0x00, LIBRARY 0x03 = 0x01 (TS2200 A, the ERM set), WAVESEQ1 0x04 = 0x01 (Strong Click 100%), WAVESEQ2 0x05 = 0x00 (the zero that terminates the sequence), then GO 0x0C = 0x01. The sequence is rewritten on every tap rather than once at probe."
+  consequence: "This is a regression repair, and the shape of the regression is the lesson. The click used to come from `userspace/haptic.c`, a library whose only caller was the touch daemon; when that daemon was retired the library stayed behind with no callers, so the motor went silent while the file remained in the tree looking maintained. Moving the sequence into the kernel puts it where the button is, so it survives whatever userspace does. Two details are load-bearing and both were inherited from measurement, not from a datasheet: library 6 is for LRA motors and buzzes weakly on this ERM part, and writing GO with a stale sequence replays whatever was in the wave registers, which is how a \"tap\" ends up buzzing for a second. The click must also fire on the press transition only -- the controller re-reports a held finger about every 66 ms, so clicking per report gives a continuous buzz instead of a tap."
+  sources:
+    - "patches/kernel/haptic/final/drv2605.c: the register sequence, the DEVICE_ID check on STATUS bits 7:5, and drv2605_tap()"
+    - "patches/kernel/touch/final/cst92xx.c: the call gated on `if (!ts->touching)` inside cst92xx_report_touch()"
+    - "BRD-005 for the device ID, the ERM-vs-LRA decision from FEEDBACK 0x36, and the XL9555 port 0 bit 6 rail"
+  verification: "Verified on hardware 2026-11-10. The driver bound and logged 'DRV2605 ready, ERM motor' followed by 'library 1, effect 1 on tap'. Firing the sysfs trigger eight times produced eight distinct felt clicks, confirming the sequence and the motor independently of touch. Tapping the screen five times then produced five felt clicks, and /proc/interrupts advanced 100 interrupts on IRQ 33 over the same window, confirming the touch-to-driver-to-motor path end to end."
 
 - record_id: PMU-001
   kind: PMU

@@ -179,6 +179,33 @@ grep -q 'EXTRA_NR_IRQS' "$K/arch/xtensa/include/asm/irq.h" \
 # and its Kconfig/Makefile entries appended rather than patched, guarded by a
 # grep so a rebuild cannot duplicate them.
 cp "$here"/patches/kernel/touch/final/cst92xx.c "$K/drivers/input/touchscreen/cst92xx.c"
+cp "$here"/patches/kernel/haptic/final/drv2605.c "$K/drivers/input/misc/drv2605.c"
+cp "$here"/patches/kernel/haptic/final/drv2605.h "$K/include/linux/drv2605.h"
+
+kconfig_hp="$K/drivers/input/misc/Kconfig"
+makefile_hp="$K/drivers/input/misc/Makefile"
+
+if ! grep -q 'config INPUT_DRV2605' "$kconfig_hp"; then
+	cat >> "$kconfig_hp" <<'EOF'
+
+config INPUT_DRV2605
+	tristate "TI DRV2605 haptic driver"
+	depends on I2C
+	help
+	  Say Y here for the DRV2605 ERM/LRA haptic driver found on the
+	  LilyGo T-Watch Ultra at I2C address 0x5a. Effects are triggered by
+	  writing a wave sequence, not by an interrupt.
+EOF
+fi
+
+if ! grep -q 'drv2605.o' "$makefile_hp"; then
+	printf 'obj-$(CONFIG_INPUT_DRV2605)\t\t+= drv2605.o\n' >> "$makefile_hp"
+fi
+
+grep -q 'config INPUT_DRV2605' "$kconfig_hp" \
+	|| die "INPUT_DRV2605 Kconfig entry did not land in $kconfig_hp"
+grep -q 'drv2605.o' "$makefile_hp" \
+	|| die "drv2605.o did not land in $makefile_hp"
 
 kconfig_tp="$K/drivers/input/touchscreen/Kconfig"
 makefile_tp="$K/drivers/input/touchscreen/Makefile"

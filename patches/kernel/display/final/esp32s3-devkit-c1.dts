@@ -72,6 +72,22 @@
 		};
 
 		/*
+		 * TI DRV2605 haptic driver at 0x5A, driving an ERM motor.
+		 *
+		 * Its rail is XL9555 P06, which the expander leaves high, so no
+		 * regulator node is needed here. It has no interrupt: effects are
+		 * triggered by writing GO, not by an event from the chip.
+		 *
+		 * This restores a click on touch. The sequence used to live in a
+		 * userspace library whose only caller was the retired touch daemon,
+		 * so the motor went silent when that daemon went away.
+		 */
+		haptic@5a {
+			compatible = "ti,drv2605";
+			reg = <0x5a>;
+		};
+
+		/*
 		 * Hynitron CST9217 capacitive touch at 0x1A.
 		 *
 		 * The reset line is not an SoC GPIO: it is P08 of the XL9555

@@ -1,10 +1,10 @@
-# Handoff — Escapement, 2026-11-10T15:58
+# Handoff — Escapement, 2026-11-10T16:16
 
 Linux 7.2.4 on a T-Watch Ultra (ESP32-S3). Real Linux on the watch's own Xtensa
 cores, not emulated. This file is orientation; verify before acting on it.
 
-Canonical detail lives in `.ai/core-reference.md` (75 records, fourteen topics).
-Project history lives in `.ai/core-log.md` (40 entries; newest first — 40, 39, 38, 37, 36, 35, 34, 33, 32,
+Canonical detail lives in `.ai/core-reference.md` (76 records, fourteen topics).
+Project history lives in `.ai/core-log.md` (41 entries; newest first — 41, 40, 39, 38, 37, 36, 35, 34, 33, 32,
 31, 30, 29, 28, 27, 26, 25, 24, 23, 22, 21, 20, 19, 18, 17, then 1 through 16).
 Do not re-derive what those hold.
 
@@ -18,25 +18,23 @@ persistence, any wake-from-sleep path, and moving the emulator to core 0.
 
 ## Reconstruct (in this order)
 
-1. `git log --oneline -8` — `main` was at `f287cad`, clean and fully pushed,
+1. `git log --oneline -8` — `main` was at `913f9e3`, clean and fully pushed,
    before the commit carrying this file.
 2. `.ai/core.md` (policy), then `.ai/core-reference.md` (hardware facts — open
-   the record, not the index line), then `.ai/core-log.md` entries 40, 39, 38.
+   the record, not the index line), then `.ai/core-log.md` entries 41, 40, 39.
 3. `git -C build/esp-hosted/esp_hosted_ng branch --show-current` — expect
    `ble-bond-wip`, five local-only commits.
 
-## State verified on hardware 2026-11-10 15:29
+## State verified on hardware 2026-11-10 16:16
 
 ```
-PMU        capacity 100 / voltage_now / Full / usb online 1
-RTC        21:38:55, hwclock -r works (used to fail EINVAL)
-0x51 read  w1 0x04 r7 -> 0x55 0x38 0x21 0x10 0x02 0x11 0x26 = 21:38:55 UTC
-PMU 2-byte 0x64 0x00    expander 0x20: 0xff 0xff    haptic 0x5a: 0xe0 0x00
+PMU        capacity 100 / Full / usb online 1; both PEK edges fire (PMU-004)
+RTC        hwclock -r works; alarm path fires IRQ 1 (RTC-004)
 panel      co5300 bound, fb0 320x400 @16 bpp
 TOUCH      cst92xx-touch input2, CST9220 410x502, IRQ 33, interrupt driven
            idle poll 5000 ms, active 20 ms, release 250 ms
-WiFi       10.10.0.15            BLE keyboard  running
-i2c errs   11 (touch-poll NACKs, all recovered)
+HAPTIC     drv2605 bound at 0x5a, ERM; click on every press (HAP-001)
+BLE kbd    running            WiFi  flaky — see the BLE trap below
 ```
 
 Seven distinct non-`0xff` bytes decoding to the exact RTC time is the shape
@@ -103,6 +101,16 @@ through TCH-010 in the reference. The five things that matter:
 
 `0xD1 = 0x1E` is **not** part of official bring-up — it lives in `setMode()`,
 whose only caller is `sleep()`. TCH-002 was corrected in place.
+
+**Each press clicks.** `patches/kernel/haptic/final/drv2605.c` drives the
+DRV2605 at 0x5A and `cst92xx` calls `drv2605_tap()` on the press transition
+only — a held finger re-reports every ~66 ms, so per-report clicking would buzz
+instead of tap. Test it without touching: `echo 1 > /sys/bus/i2c/devices/0-005a/tap`.
+
+This was a **regression this project caused**: the sequence lived in
+`userspace/haptic.c`, whose only caller was the retired `tbtns` daemon, so the
+motor went silent while the file sat in the tree looking maintained. Now in the
+kernel, and the dead library is deleted (HAP-001).
 
 ## Why no GPIO interrupt on this board ever worked
 

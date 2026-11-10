@@ -52,6 +52,8 @@
 #include <linux/slab.h>
 #include <linux/workqueue.h>
 
+#include <linux/drv2605.h>
+
 #define CST92XX_DRV_NAME	"cst92xx"
 
 #define CST92XX_REG_REPORT	0xd000
@@ -290,6 +292,19 @@ static void cst92xx_report_touch(struct cst92xx *ts, u8 *blk)
 	input_report_abs(input, ABS_Y, y);
 	input_report_key(input, BTN_TOUCH, 1);
 	input_sync(input);
+
+	/*
+	 * Click once per press, not once per report. The controller re-reports
+	 * the same finger about every 66 ms while it is held, so clicking on
+	 * every report would buzz continuously instead of tapping. The
+	 * transition is what matters, which is why this is gated on the state
+	 * before this report rather than on the event alone.
+	 *
+	 * The click is best-effort feedback: drv2605_tap() is a no-op if the
+	 * haptic chip did not probe, and nothing here depends on its success.
+	 */
+	if (!ts->touching)
+		drv2605_tap();
 
 	ts->touching = true;
 	ts->last_report = jiffies;

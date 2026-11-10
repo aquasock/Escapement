@@ -1,3 +1,41 @@
+## 41 COMMIT Unreleased 2026-11-10T16:15:16-07:00
+
+#### Coming From:
+
+Unreleased 913f9e3
+
+#### Purpose:
+
+Restore haptic feedback on touch, which went silent when the touch daemon was retired, by moving the DRV2605 sequence from a now-uncalled userspace library into the kernel.
+
+#### Outcome:
+
+The click is back, and this was a regression this project caused rather than a missing feature. `userspace/haptic.c` held the DRV2605 sequence and its only caller was the retired touch daemon, so when that daemon was removed the library stayed behind with no callers and the motor went silent while the file remained in the tree looking maintained. The sequence is now `patches/kernel/haptic/final/drv2605.c`, an `i2c_driver` exporting `drv2605_tap()`, which the touch driver calls on the press transition. The order is the one established by measurement: MODE 0x01 = 0x00 for internal trigger, RTP 0x02 = 0x00, LIBRARY 0x03 = 0x01 for the TS2200 A ERM set (library 6 is for LRA parts and buzzes weakly here), WAVESEQ1 0x04 = effect 1 (Strong Click 100%), WAVESEQ2 0x05 = 0x00 as the terminator, then GO 0x0C = 0x01. The sequence is rewritten on every tap rather than once at probe, because writing GO with a stale sequence replays whatever was in the wave registers, which is how a tap ends up buzzing for a second. One gating detail matters and was carried over deliberately: the controller re-reports a held finger about every 66 ms, so the click fires on the `!touching` to `touching` transition only -- clicking per report would buzz continuously instead of tapping. The driver identifies the part by STATUS bits 7:5 and refuses to write effect IDs to anything else, and it exposes a `tap` sysfs attribute so the motor can be exercised without a touch. Verified on hardware in three stages, each separating a different layer: the sysfs trigger fired eight times produced eight distinct felt clicks, proving the sequence and motor without involving touch at all; tapping the screen five times then produced five felt clicks, proving the touch-to-driver-to-motor chain end to end; and `/proc/interrupts` advanced 100 interrupts on IRQ 33 over that window, proving the events came through the interrupt path rather than the idle poll. `userspace/haptic.c` and `haptic.h` were deleted, since an uncalled copy of a sequence that the kernel now owns is exactly the sort of thing that gets edited by mistake later, and `scripts/build-userspace.sh` still builds its three remaining binaries cleanly without them. The README's haptic section was rewritten to describe the kernel driver and to record why the sequence lives there. The core-syntax audit passed: `.ai/core.md` and `.ai/core-syntax.md` were re-read, the complete `.ai/` diff was inspected, `.ai/core.md` was not modified, all YAML blocks in the reference parse and all 76 records carry the ten required fields with unique ids, and this entry was validated against the template with six sections in canonical order, sequential numbering from 40, an ISO-8601 timestamp carrying the America/Phoenix offset, prose-only Outcome and Next Steps, and Status values within the allowed set.
+
+#### Next Steps:
+
+A full 16 MiB backup should be taken; `working-2026-11-10-1533.bin` predates the 5 s idle period, the RTC and PMU verification and this driver, so it is several cycles stale even though it still restores a working watch. With touch, both PMU edges, the RTC alarm path and haptics all verified, the I2C story is closed: every device on the bus either has a working driver or a proven reason not to. That leaves the second SPI bus as the largest remaining unknown, and it is unstarted ground rather than a gap to fill -- BRD-004 records that it has never been proven to transfer a byte, the NFC probe never received a reply with MISO clamped low, and `CONFIG_MMC` is absent so the SD card cannot mount even if the bus works. Proving the bus itself, with a loopback or a single readable register from one device, is the honest next step there rather than wiring three drivers to an unvalidated bus. The smaller open item remains the absent-address `-ETIMEDOUT` versus `-ENXIO` defect in `i2cdetect`. The deferred items are unchanged and none should be started without asking: BLE media keys, the Rii K06 touchpad and Logitech keyboard, firmware-side BLE bond persistence, wake-from-sleep, and moving the Tamagotchi emulator to core 0.
+
+#### Files Modified:
+
+- patches/kernel/haptic/final/drv2605.c
+- patches/kernel/haptic/final/drv2605.h
+- patches/kernel/touch/final/cst92xx.c
+- patches/kernel/display/final/esp32s3-devkit-c1.dts
+- patches/kernel/config/devkit_c1_16m_linux.config
+- scripts/build-kernel.sh
+- README.md
+- userspace/haptic.c (removed)
+- userspace/haptic.h (removed)
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: PASS
+
+---
+
 ## 40 COMMIT Unreleased 2026-11-10T15:57:37-07:00
 
 #### Coming From:
