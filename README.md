@@ -144,6 +144,12 @@ device-tree touch node, and changing a band boundary is a flag rather than a
 rebuild and a flash. The bars are drawn by the driver (`co5300_paint_frame()`),
 because the strip is outside fb0 and only the driver can paint there.
 
+It runs as `S50tbtns` in `/etc/init.d`, started by rcS like the keyboard daemon.
+That script is the reason the buttons survive a reboot: the daemon works
+perfectly but had only ever been launched by hand, so every reboot since it was
+written quietly lost it. Deploy it with `scripts/watch-deploy.sh` after a
+full-image flash, since `/etc` is rewritten by one.
+
 Three things about the CST9217 at I2C 0x1A that cost time and are worth knowing:
 `0x5A` on the same bus is the DRV2605 haptic driver, not touch; the report block
 must start with `0x06`, where a `0xAB` in byte 0 means "no new report" and will

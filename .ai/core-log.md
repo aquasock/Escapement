@@ -389,3 +389,34 @@ The Rii K06 is now working as intended: it pairs, types, and reconnects after a 
 - User Test: PASS
 
 ---
+
+## 13 COMMIT Unreleased 2026-11-09T17:51:08-07:00
+
+#### Coming From:
+
+Unreleased 7ac454d
+
+#### Purpose:
+
+Check whether the three touch buttons still work, after several firmware and kernel cycles had rebooted past the point where they were last tested.
+
+#### Outcome:
+
+They did not work, and the reason was not the driver. The daemon had only ever been started by hand with nohup during the cycle that built it, so nothing brought it back at boot: after the reboots of the last few cycles there was no `tbtns` process and no `touch-buttons` device. `userspace/S50tbtns` now installs to `/etc/init.d` and is started by rcS alongside the keyboard daemon, deployed with a sha256 check; `/etc` is jffs2 so it survives a reboot, and only a full-image flash removes it. With the service running, the buttons were then verified twice over. The daemon log recorded three presses in the order they were made with a matching release after each, decoding to bands 0, 1 and 2. And a raw read of `/dev/input/event3` during a second round of presses carried 192 bytes decoding to `type=1 code=256 value=1`, `SYN_REPORT`, `value=0`, then 257, then 258 -- so the events reach the kernel's input layer and not merely the daemon's log, on the firmware built earlier today. `/proc/bus/input/devices` reports `EV=3`, which is EV_SYN plus EV_KEY and nothing else: three on/off switches, no pointer, which is what these are meant to be. Two characteristics of the touch part are worth restating because they are visible in the log during any of this: `i2c i2c-0: sendbytes: NAK bailout` appears as the CST9217 intermittently refuses a read, which the daemon tolerates by retrying and by never treating a failed read as a release; and the press path has a known ceiling where a tap shorter than one poll interval can fall between samples, already recorded. Neither showed up in this test: three presses, three presses registered. No code changed in this cycle beyond the init script, so there was nothing to build. The core-syntax audit passed: the `.ai/` diff was inspected, `.ai/core.md` was not modified, entry 13 was validated against the template with six sections in canonical order, sequential numbering from 12, an ISO-8601 timestamp carrying the America/Phoenix offset, prose-only Outcome and Next Steps, eligible Files Modified, and Status values within the allowed set.
+
+#### Next Steps:
+
+Nothing consumes the three buttons yet: they emit BTN_0, BTN_1 and BTN_2 and no daemon acts on them, so pressing them changes nothing on the glass. Wiring them to something is the obvious next use of them, and pressing should eventually repaint the bar with its pressed image, which needs the panel region write path already built for `CO5300_IOC_WRITE_RECT`. The user has designated the Rii K06 as the official input device and deferred both its touchpad and the Logitech keyboard, so those stay parked. One piece of housekeeping is worth doing before the next full-image flash: three things now have to be re-installed by hand after one -- `/etc/TZ`, `S01hwclock` and now `S50tbtns` -- plus the deployed binaries on `/home`, and consolidating them behind one installer would remove a step people forget. Beyond that, the tearing root cause in LCD-009 is still open with SPI clock the remaining suspect, re-measuring the 320x400 frame through the real repaint path to settle the 4.2x disagreement with LCD-005 is still outstanding, and the top-bar status daemon has not been started.
+
+#### Files Modified:
+
+- userspace/S50tbtns
+- README.md
+
+#### Status:
+
+- Build: N/A
+- Deployment: PASS
+- User Test: PASS
+
+---

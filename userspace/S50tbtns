@@ -1,0 +1,66 @@
+#!/bin/sh
+#
+# S50tbtns - start the touch button daemon.
+#
+# The CO5300 driver paints three coloured bars in the strip below fb0, and
+# /home/tbtns reads the CST9217 at I2C 0x1A and turns a finger on those bars
+# into BTN_0, BTN_1 and BTN_2 through /dev/uinput. Without this running the
+# bars are decoration: they draw and nothing reads them.
+#
+# Runs after S49tty1shell so the console's own login is up first, and before
+# S50crond only because of sort order. The dependencies that actually matter
+# are /dev/i2c-0 and /dev/uinput, both created by devtmpfs at boot.
+#
+# No -v. The daemon logs press and release unconditionally, which is what a
+# diagnostic needs; -v adds one line per raw report and a census every two
+# seconds, and this log lives on jffs2 where unbounded growth is flash wear.
+# Start it by hand with -v when a press is not behaving.
+
+DAEMON=/home/tbtns
+PIDFILE=/var/run/tbtns.pid
+LOG=/home/tbtns.log
+
+case "$1" in
+start)
+	[ -x "$DAEMON" ] || exit 0
+	if [ -e "$PIDFILE" ] && kill -0 "$(cat "$PIDFILE")" 2>/dev/null; then
+		exit 0
+	fi
+	printf 'Starting touch buttons: '
+	# Launched explicitly rather than with start-stop-daemon -b, for the same
+	# reason as S48blekbd: -b sends the child's output to /dev/null, and this
+	# log is the only evidence available for a daemon that injects input
+	# nobody is watching.
+	"$DAEMON" > "$LOG" 2>&1 &
+	echo $! > "$PIDFILE"
+	sleep 1
+	if kill -0 "$(cat "$PIDFILE")" 2>/dev/null; then
+		echo "OK"
+	else
+		echo "FAIL"
+		rm -f "$PIDFILE"
+	fi
+	;;
+status)
+	if start-stop-daemon -K -t -q -p "$PIDFILE"; then
+		echo 'touch buttons: running'
+	else
+		echo 'touch buttons: not running'
+	fi
+	;;
+stop)
+	printf 'Stopping touch buttons: '
+	start-stop-daemon -K -q -p "$PIDFILE"
+	rm -f "$PIDFILE"
+	echo "OK"
+	;;
+restart|reload)
+	"$0" stop
+	sleep 1
+	"$0" start
+	;;
+*)
+	echo "Usage: $0 {start|stop|restart|status}"
+	exit 1
+	;;
+esac
