@@ -1,3 +1,37 @@
+## 37 COMMIT Unreleased 2026-11-10T15:29:30-07:00
+
+#### Coming From:
+
+Unreleased 8eebe06
+
+#### Purpose:
+
+Drive the touch controller from its interrupt instead of polling it, and in doing so find out why no GPIO interrupt on this board had ever worked.
+
+#### Outcome:
+
+Touch is interrupt driven, and the reason it could not be is a port defect that had been silently costing every driver its interrupt since the beginning. The intended change was small: `cst92xx` now requests TP_INT as a GPIO with `int-gpios = <&gpio0 12 GPIO_ACTIVE_LOW>`, turns it into an IRQ with `gpiod_to_irq()` rather than through an `interrupts` property, and keeps polling at two rates -- 20 ms while a finger is down and 250 ms when idle as a safety net -- so that a wrong polarity or a lost pull-up degrades to latency rather than to no touch at all. What blocked it was that `gpiod_to_irq()` returned `-ENXIO`. Mapping a spread of lines in one boot settled the shape of the fault: lines 1 and 7 returned IRQs 7 and 8 while lines 0, 6, 12, 16 and 17 all returned `-ENXIO`, so the discriminator was not the line but whether something had already claimed it. That pointed away from the GPIO controller and at the allocation itself. The cause is in `arch/xtensa/include/asm/irq.h`: with `CONFIG_SPARSE_IRQ` unavailable on xtensa, the descriptor table is sized `NR_IRQS = XCHAL_NUM_INTERRUPTS + PLATFORM_NR_IRQS + 1`, which on this core is 32 + 0 + 1 = 33. That is right for peripherals hanging directly off the CPU's interrupt lines and wrong for this SoC, where the GPIO controller maps one Linux IRQ per GPIO line a driver asks for and the AXP2101 adds a virtual domain on top. The table was full. `irq_create_mapping()` returned ENOSPC, `gpiod_to_irq()` turned it into `-ENXIO`, and every driver that treats its interrupt as optional fell back to polling and worked -- so the visible symptom was "this board's GPIO interrupts do not work" rather than "the table is full". It also explains a detail that had been recorded but not understood: both of the interrupts that do exist, the RTC's and the PMU's, show zero counts in `/proc/interrupts`, because mapping a line is not the same as its parent firing. Two false leads were pursued and discarded on evidence rather than assumption, both worth recording. The first was that `gpio-esp32.c` lacks a `xlate` callback; it does not need one, because gpiolib supplies `gpiochip_domain_ops` with `irq_domain_xlate_twothreecell`, which accepts two cells, and the RTC's line mapping proves it works. The second was `CONFIG_PLATFORM_NR_IRQS`, which would have been the natural knob; it is a hidden symbol with no prompt, so `olddefconfig` recomputes it straight back to 0, and the config check in the build script caught that rather than letting it through. The fix is therefore a larger table in `patches/kernel/irq/final/irq.h`: `EXTRA_NR_IRQS 128`, about 18 KB of image and roughly 24 KB of `.bss` against 7.8 MiB of RAM, carried whole because nothing else in the tree touches that header and a patch would have to track it forever. Verified on hardware: `gpiod_to_irq()` now returns IRQ 33 -- the first number past the old limit -- the driver reports "interrupt driven", `/proc/interrupts` gains `33: esp32xx-gpio 12 cst92xx`, and 331 interrupts accumulated across three taps while a captured event stream showed three presses, three releases and smooth coordinate tracks including `(174,254)` through `(214,393)` and `(258,428)` through `(291,441)`. Idle rate measured at 20 interrupts in 10 seconds, against the ~50 reads per second the previous unconditional 20 ms poll generated. The bus, RTC, PMU, panel, WiFi and BLE keyboard all remained healthy throughout, with the RTC reading 22:29:09 against a seven-byte register read of `0x09 0x29 0x22`. The core-syntax audit passed: `.ai/core.md` and `.ai/core-syntax.md` were re-read, the complete `.ai/` diff was inspected, `.ai/core.md` was not modified, all YAML blocks in the reference parse and all 72 records carry the ten required fields with unique ids, and this entry was validated against the template with six sections in canonical order, sequential numbering from 36, an ISO-8601 timestamp carrying the America/Phoenix offset, prose-only Outcome and Next Steps, and Status values within the allowed set.
+
+#### Next Steps:
+
+A full 16 MiB backup should be taken: `working-2026-11-10-1444.bin` contains working touch but predates the interrupt work, so no saved image has interrupt-driven touch or the enlarged interrupt table. The interrupt is now the wake-up path rather than the only path, which is the safe shape, so the next question for touch is not whether it works but whether the 250 ms idle poll can be raised much higher, making the interrupt demonstrably the sole source of idle discovery; the driver already takes `hynitron,idle-poll-ms` as a property for exactly that experiment, and it was not run in this cycle. Two smaller open items remain. The absent-address `-ETIMEDOUT` versus `-ENXIO` defect still makes `i2cdetect` report timeouts for empty addresses. And the RTC's and PMU's own interrupts, now that the table has room and the mapping is understood, are worth revisiting: both are mapped and neither has ever fired, which was previously attributed to the hardware and may simply be the same class of problem. The deferred items are unchanged and none should be started without asking: BLE media keys, the Rii K06 touchpad and Logitech keyboard, firmware-side BLE bond persistence, wake-from-sleep, and moving the Tamagotchi emulator to core 0.
+
+#### Files Modified:
+
+- patches/kernel/touch/final/cst92xx.c
+- patches/kernel/irq/final/irq.h
+- patches/kernel/display/final/esp32s3-devkit-c1.dts
+- scripts/build-kernel.sh
+- .ai/core-reference.md
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: PASS
+
+---
+
 ## 36 COMMIT Unreleased 2026-11-10T14:48:04-07:00
 
 #### Coming From:

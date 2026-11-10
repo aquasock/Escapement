@@ -166,6 +166,15 @@ cp "$here"/patches/kernel/display/final/esp32s3-devkit-c1.dts \
 # and a device tree describing hardware nothing bound to.
 cp "$here"/patches/kernel/i2c/final/i2c-esp32.c "$K/drivers/i2c/busses/i2c-esp32.c"
 
+# The interrupt descriptor table size. Upstream sizes it to the CPU's own
+# interrupt lines plus one, which is 33 here and demonstrably too few once the
+# GPIO controller and the PMU's virtual domain are added -- see KRN-008 and the
+# comment in the header. Carried whole because the change is to an arch header
+# that nothing else in this tree touches.
+cp "$here"/patches/kernel/irq/final/irq.h "$K/arch/xtensa/include/asm/irq.h"
+grep -q 'EXTRA_NR_IRQS' "$K/arch/xtensa/include/asm/irq.h" \
+	|| die "irq.h did not carry EXTRA_NR_IRQS"
+
 # CST9217 touch. A whole-file copy for the same reason as the drivers above,
 # and its Kconfig/Makefile entries appended rather than patched, guarded by a
 # grep so a rebuild cannot duplicate them.

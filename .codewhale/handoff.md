@@ -1,10 +1,10 @@
-# Handoff — Escapement, 2026-11-10T14:49
+# Handoff — Escapement, 2026-11-10T15:30
 
 Linux 7.2.4 on a T-Watch Ultra (ESP32-S3). Real Linux on the watch's own Xtensa
 cores, not emulated. This file is orientation; verify before acting on it.
 
-Canonical detail lives in `.ai/core-reference.md` (70 records, fourteen topics).
-Project history lives in `.ai/core-log.md` (36 entries; newest first — 36, 35, 34, 33,
+Canonical detail lives in `.ai/core-reference.md` (72 records, fourteen topics).
+Project history lives in `.ai/core-log.md` (37 entries; newest first — 37, 36, 35, 34, 33, 32,
 31, 30, 29, 28, 27, 26, 25, 24, 23, 22, 21, 20, 19, 18, 17, then 1 through 16).
 Do not re-derive what those hold.
 
@@ -18,14 +18,14 @@ persistence, any wake-from-sleep path, and moving the emulator to core 0.
 
 ## Reconstruct (in this order)
 
-1. `git log --oneline -8` — `main` was at `6af4934`, clean and fully pushed,
+1. `git log --oneline -8` — `main` was at `8eebe06`, clean and fully pushed,
    before the commit carrying this file.
 2. `.ai/core.md` (policy), then `.ai/core-reference.md` (hardware facts — open
-   the record, not the index line), then `.ai/core-log.md` entries 36, 35, 34.
+   the record, not the index line), then `.ai/core-log.md` entries 37, 36, 35.
 3. `git -C build/esp-hosted/esp_hosted_ng branch --show-current` — expect
    `ble-bond-wip`, five local-only commits.
 
-## State verified on hardware 2026-11-10 14:39
+## State verified on hardware 2026-11-10 15:29
 
 ```
 PMU        capacity 100 / voltage_now / Full / usb online 1
@@ -33,9 +33,10 @@ RTC        21:38:55, hwclock -r works (used to fail EINVAL)
 0x51 read  w1 0x04 r7 -> 0x55 0x38 0x21 0x10 0x02 0x11 0x26 = 21:38:55 UTC
 PMU 2-byte 0x64 0x00    expander 0x20: 0xff 0xff    haptic 0x5a: 0xe0 0x00
 panel      co5300 bound, fb0 320x400 @16 bpp
-TOUCH      cst92xx-touch as input2, CST9220 410x502 fw 0x01000003
+TOUCH      cst92xx-touch input2, CST9220 410x502, IRQ 33, interrupt driven
+           idle poll 250 ms, active 20 ms, release 250 ms
 WiFi       10.10.0.15            BLE keyboard  running
-i2c errs   12 (touch-poll NACKs, all recovered)
+i2c errs   11 (touch-poll NACKs, all recovered)
 ```
 
 Seven distinct non-`0xff` bytes decoding to the exact RTC time is the shape
@@ -62,14 +63,23 @@ command-register budget was never the problem. A 1-byte-address read and a
 moved to `/etc/disabled/` on the watch, and deleted from the tree (recoverable
 from `1c37c50`).
 
-Its replacement is **`patches/kernel/touch/final/cst92xx.c`**, a polling
-`i2c_driver` registering `cst92xx-touch` with `ABS_X`/`ABS_Y`/`BTN_TOUCH` and
+Its replacement is **`patches/kernel/touch/final/cst92xx.c`**, an `i2c_driver`
+registering `cst92xx-touch` with `ABS_X`/`ABS_Y`/`BTN_TOUCH` and
 `INPUT_PROP_DIRECT`. Verified on hardware 2026-11-10: bound as
 `CST9220 at 0x1a, 410x502, fw 0x01000003`, registered as `input2`, and captured
-real events including a drag and a release.
+three presses and three releases with smooth coordinate tracks.
+
+**Interrupt driven** on TP_INT (GPIO 12, falling edge, `int-gpios` +
+`gpiod_to_irq()`, INPUT_PULLUP). Polling is kept at two rates as a safety net:
+**20 ms while touched, 250 ms idle**. That is deliberate — the interrupt wakes
+it, it does not have to be the only path, so a wrong polarity degrades to
+latency instead of losing touch. Idle measured at ~2 interrupts/s. The driver
+takes `hynitron,idle-poll-ms` as a property so the idle poll can be raised to
+prove the interrupt alone is doing the discovery; **that experiment has not
+been run**.
 
 The driver was written from LilyGo's own source, not from a guess — see TCH-005
-through TCH-008 in the reference. The four things that matter:
+through TCH-009 in the reference. The five things that matter:
 
 - **Reset is XL9555 P08, not an SoC GPIO.** Port 1 reads `0xFF` at boot (all
   inputs), so nothing had ever reset the part. The driver gets it as
@@ -83,13 +93,41 @@ through TCH-008 in the reference. The four things that matter:
   `(41,451)`.
 - **There is no release event.** The part just stops reporting, so release is a
   250 ms gap (~4 of its ~66 ms report periods).
+- **INT is GPIO 12, and the pull-up is part of the contract** — the controller
+  drives it low and releases it, so without the pull the line floats.
 
 `0xD1 = 0x1E` is **not** part of official bring-up — it lives in `setMode()`,
 whose only caller is `sleep()`. TCH-002 was corrected in place.
 
-Next improvement is interrupt-driven polling on `TP_INT` (GPIO 12, falling
-edge). Not attempted yet: the poll is what proved the protocol, and adding an
-unverified interrupt would have mixed two unknowns.
+## Why no GPIO interrupt on this board ever worked
+
+**`NR_IRQS` was 33 and the board ran out.** `arch/xtensa/include/asm/irq.h`
+sizes the descriptor table `XCHAL_NUM_INTERRUPTS (32) + PLATFORM_NR_IRQS (0) +
+1`, and `CONFIG_SPARSE_IRQ` is not selectable on xtensa. That is fine for
+peripherals on the CPU's own lines and wrong here, where the GPIO controller
+maps one Linux IRQ per line a driver asks for and the AXP2101 adds a virtual
+domain on top.
+
+The failure is silent: `irq_create_mapping()` gives ENOSPC, `gpiod_to_irq()`
+turns that into `-ENXIO`, and every driver with an optional interrupt falls back
+to polling and works. It reads as "this board's GPIO interrupts don't work".
+The tell is that it is **line-independent** — probing seven lines gave irq 7 and
+8 for the two already claimed and `-ENXIO` for the other five, so prior use was
+the discriminator, not the line.
+
+Fixed in **`patches/kernel/irq/final/irq.h`** with `EXTRA_NR_IRQS 128`
+(~18 KB image, ~24 KB `.bss`). `CONFIG_PLATFORM_NR_IRQS` is **not** the fix —
+it is a hidden symbol and `olddefconfig` recomputes it to 0; the build's config
+check catches that.
+
+Two distractions already ruled out: `gpio-esp32.c` needs no `xlate` (gpiolib
+supplies `irq_domain_xlate_twothreecell`, and the RTC's line mapping proves it);
+and no GPIO line is otherwise invalid.
+
+**Consequence worth carrying forward:** the RTC's and PMU's interrupts are
+mapped and show **zero counts** in `/proc/interrupts`. That was previously
+blamed on the hardware. Now that the table has room, it is worth suspecting the
+same class of problem rather than assuming the silicon.
 
 ## The bus defect that was blocking touch
 
@@ -111,10 +149,13 @@ time and clean probe semantics and nothing else. Fix it in the touch cycle.
 
 ## Backups — read the directory, do not trust this file
 
-**`working-2026-11-10-1444.bin` is the current, complete state.** Taken
-2026-11-10 14:47, 16 MiB, sha256 `1a2637f5…`. It is the first backup that
-contains working touch on the hardware bus, and it was verified rather than
-trusted:
+**No backup has interrupt-driven touch.** `working-2026-11-10-1444.bin`
+(sha256 `1a2637f5…`) contains working touch but predates both the interrupt work
+and the enlarged interrupt table, so restore it and touch goes back to polling
+only. Take a fresh full backup (`./scripts/watch-backup.sh`, 16 MiB, ~4 min)
+before the next kernel change.
+
+The verification that was done on 1444, worth repeating on the next one:
 
 - the stored `.sha256` matches an independent `sha256sum` of the file;
 - the 2,841,808-byte kernel extracted at offset `0x140000` is byte-identical to

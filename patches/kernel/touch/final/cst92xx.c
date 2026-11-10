@@ -48,6 +48,7 @@
 #include <linux/interrupt.h>
 #include <linux/module.h>
 #include <linux/of.h>
+#include <linux/of_irq.h>
 #include <linux/slab.h>
 #include <linux/workqueue.h>
 
@@ -73,7 +74,7 @@
 #define CST92XX_CHECKCODE_ID	0xcaca0000
 
 /*
- * Polling period.
+ * Polling periods.
  *
  * The controller produces a report roughly every 66 ms while a finger is down,
  * so polling faster than that only reads the same block again -- and every
@@ -82,11 +83,21 @@
  * case latency at a fifth of a frame, while producing about a third of the
  * traffic that a 5 ms poll would.
  *
- * Interrupt-driven operation (TP_INT on GPIO 12) would be cheaper still and is
- * the obvious next step, but it needs the interrupt line verified on hardware
- * first, and the polling path is what proves the protocol.
+ * This is now the period used ONLY while a finger is down. When nothing is
+ * touching, the driver parks and lets the interrupt wake it, so an idle watch
+ * generates no bus traffic at all instead of fifty reads a second. The
+ * interrupt is on TP_INT, GPIO 12, falling edge, exactly as LilyGo attaches it
+ * (`pinMode(TP_INT, INPUT_PULLUP); attachInterrupt(TP_INT, ..., FALLING)`).
+ *
+ * The idle period below is a safety net, not the normal path. If the interrupt
+ * never fires -- wrong polarity, a pin that lost its pull-up, a controller
+ * revision that drives INT differently -- the driver degrades to polling this
+ * slowly rather than losing touch entirely. 250 ms is four report periods, so
+ * a tap still registers, just later; and a DT property can raise it to prove
+ * the interrupt is doing the work (see cst92xx_probe).
  */
 #define CST92XX_POLL_MS		20
+#define CST92XX_IDLE_POLL_MS	250
 
 /*
  * How long a press survives without a fresh report.
@@ -103,12 +114,16 @@ struct cst92xx {
 	struct i2c_client	*client;
 	struct input_dev	*input;
 	struct gpio_desc	*reset_gpio;
+	struct gpio_desc	*int_gpio;
 	struct delayed_work	poll;
 	struct mutex		lock;		/* one transfer at a time */
 	u16			max_x;
 	u16			max_y;
 	bool			touching;
 	unsigned long		last_report;
+	int			irq;
+	u32			idle_poll_ms;
+	u32			irq_count;	/* diagnostics: reports seen from the IRQ */
 };
 
 /*
@@ -287,65 +302,101 @@ static void cst92xx_report_release(struct cst92xx *ts)
 	ts->touching = false;
 }
 
-static void cst92xx_poll(struct work_struct *work)
+/*
+ * One read-and-report cycle, shared by the poll and the interrupt path.
+ *
+ * Returns 1 if a point is currently held, 0 otherwise, so the caller can pick
+ * the next wake-up period. Must be called with ts->lock held.
+ */
+static int cst92xx_service(struct cst92xx *ts)
 {
-	struct cst92xx *ts = container_of(work, struct cst92xx, poll.work);
 	u8 blk[CST92XX_BLOCK_LEN];
 	int ret, points;
 
-	mutex_lock(&ts->lock);
-
 	ret = cst92xx_read_report(ts, blk);
-	if (ret) {
+	if (!ret) {
 		/*
 		 * A failed read is not a release. The controller NACKs while it
-		 * has nothing to hand over, and those gaps sit between reports
-		 * -- treating them as a lift would make every drag stutter.
-		 * The release timer below is what ends a touch.
+		 * has nothing to hand over, and those gaps sit between reports --
+		 * treating them as a lift would make every drag stutter. The
+		 * release timer below is what ends a touch.
 		 */
-		goto out;
+		if (blk[0] != CST92XX_ACK && blk[0] != 0x00) {
+			/*
+			 * blk[6] is the block's own validity marker. LilyGo
+			 * requires 0xAB and returns no points otherwise, which
+			 * rejects blocks that carry a plausible finger count but
+			 * are not a report.
+			 */
+			points = blk[5] & 0x7f;
+			/*
+			 * Only event 0x06 is a press. A non-zero finger count with
+			 * event 0x00 is not a touch: counting it invents a phantom
+			 * at full-scale.
+			 */
+			if (blk[6] == CST92XX_ACK && points > 0 &&
+			    points <= CST92XX_MAX_FINGERS &&
+			    (blk[0] & 0x0f) == CST92XX_EVENT_DOWN)
+				cst92xx_report_touch(ts, blk);
+		}
 	}
 
-	/* Nothing new, or no data at all. */
-	if (blk[0] == CST92XX_ACK || blk[0] == 0x00)
-		goto out;
-
-	/*
-	 * blk[6] is the block's own validity marker. LilyGo requires it to be
-	 * 0xAB and returns no points otherwise, which rejects the blocks that
-	 * carry a plausible finger count but are not a report.
-	 */
-	if (blk[6] != CST92XX_ACK)
-		goto out;
-
-	points = blk[5] & 0x7f;
-	if (points == 0 || points > CST92XX_MAX_FINGERS)
-		goto out;
-
-	/*
-	 * Only event 0x06 is a press. A non-zero finger count with event 0x00
-	 * is not a touch: counting it invents a phantom at full-scale.
-	 */
-	if ((blk[0] & 0x0f) == CST92XX_EVENT_DOWN)
-		cst92xx_report_touch(ts, blk);
-
-out:
 	/* Release by elapsed time, since the part emits no release event. */
 	if (ts->touching &&
 	    time_after(jiffies, ts->last_report +
-		       msecs_to_jiffies(CST92XX_RELEASE_MS)))
+		       msecs_to_jiffies(CST92XX_RELEASE_MS))) {
 		cst92xx_report_release(ts);
+		return 0;
+	}
 
+	return ts->touching;
+}
+
+/*
+ * Interrupt: TP_INT is active low and the controller pulses it when it has a
+ * report. The handler is threaded because reading the report is an I2C
+ * transfer, which sleeps.
+ *
+ * IRQF_ONESHOT keeps the line masked until this function returns, so a
+ * controller that holds INT low until it is read cannot re-enter here.
+ */
+static irqreturn_t cst92xx_irq(int irq, void *data)
+{
+	struct cst92xx *ts = data;
+	int holding;
+
+	mutex_lock(&ts->lock);
+	ts->irq_count++;
+	holding = cst92xx_service(ts);
 	mutex_unlock(&ts->lock);
 
-	schedule_delayed_work(&ts->poll, msecs_to_jiffies(CST92XX_POLL_MS));
+	/* Keep the fast poll running while a finger is down. */
+	mod_delayed_work(system_wq, &ts->poll,
+			 msecs_to_jiffies(holding ? CST92XX_POLL_MS
+						  : ts->idle_poll_ms));
+
+	return IRQ_HANDLED;
+}
+
+static void cst92xx_poll(struct work_struct *work)
+{
+	struct cst92xx *ts = container_of(work, struct cst92xx, poll.work);
+	int holding;
+
+	mutex_lock(&ts->lock);
+	holding = cst92xx_service(ts);
+	mutex_unlock(&ts->lock);
+
+	mod_delayed_work(system_wq, &ts->poll,
+			 msecs_to_jiffies(holding ? CST92XX_POLL_MS
+						  : ts->idle_poll_ms));
 }
 
 static int cst92xx_probe(struct i2c_client *client)
 {
 	struct device *dev = &client->dev;
 	struct cst92xx *ts;
-	int ret;
+	int ret, irq;
 
 	ts = devm_kzalloc(dev, sizeof(*ts), GFP_KERNEL);
 	if (!ts)
@@ -359,6 +410,16 @@ static int cst92xx_probe(struct i2c_client *client)
 	if (IS_ERR(ts->reset_gpio))
 		return dev_err_probe(dev, PTR_ERR(ts->reset_gpio),
 				     "cannot get the reset GPIO\n");
+
+	/*
+	 * INPUT_PULLUP, as LilyGo does: the controller drives INT low and
+	 * releases it, so the line needs the pull to return high. Without it the
+	 * pin floats and the edge either never arrives or arrives constantly.
+	 */
+	ts->int_gpio = devm_gpiod_get_optional(dev, "int", GPIOD_IN);
+	if (IS_ERR(ts->int_gpio))
+		return dev_err_probe(dev, PTR_ERR(ts->int_gpio),
+				     "cannot get the INT GPIO\n");
 
 	ts->input = devm_input_allocate_device(dev);
 	if (!ts->input)
@@ -391,11 +452,80 @@ static int cst92xx_probe(struct i2c_client *client)
 	if (ret)
 		return dev_err_probe(dev, ret, "cannot register input device\n");
 
-	INIT_DELAYED_WORK(&ts->poll, cst92xx_poll);
-	schedule_delayed_work(&ts->poll, msecs_to_jiffies(CST92XX_POLL_MS));
+	/*
+	 * The idle period is a property so the interrupt can be proved rather
+	 * than assumed: setting it to a large value makes the slow poll
+	 * effectively never fire, so touch working at all is then evidence the
+	 * interrupt is doing the work. Default 250 ms.
+	 */
+	if (device_property_read_u32(dev, "hynitron,idle-poll-ms",
+				     &ts->idle_poll_ms))
+		ts->idle_poll_ms = CST92XX_IDLE_POLL_MS;
+	if (ts->idle_poll_ms < CST92XX_POLL_MS)
+		ts->idle_poll_ms = CST92XX_POLL_MS;
 
-	dev_info(dev, "polling every %d ms, release after %d ms\n",
-		 CST92XX_POLL_MS, CST92XX_RELEASE_MS);
+	INIT_DELAYED_WORK(&ts->poll, cst92xx_poll);
+
+	/*
+	 * The interrupt is optional on purpose. If it cannot be acquired -- no
+	 * interrupt in the device tree, or a conflict -- the driver keeps
+	 * working on the poll above rather than failing probe. A watch whose
+	 * touch is slower is better than a watch with no touch at all.
+	 *
+	 * client->irq is normally filled in by the i2c core from the device
+	 * tree, but on this kernel it arrives as 0, so the mapping is done
+	 * here as well. Both values are logged: if the core ever starts
+	 * providing it, the second lookup simply does not happen.
+	 */
+	/*
+	 * The interrupt comes from the GPIO, not from the DT `interrupts`
+	 * property. gpiod_to_irq() asks the gpiochip to map its own line, which
+	 * is the idiom every input driver uses and which also gives control of
+	 * the pin's electrical configuration -- LilyGo sets INPUT_PULLUP before
+	 * attaching the handler, and the pull is part of the contract rather
+	 * than a default worth inheriting.
+	 *
+	 * This replaces an earlier attempt that read the DT interrupt specifier
+	 * directly. That path parsed correctly (hwirq 12, falling edge, parent
+	 * gpio0) but the mapping step returned 0, so no virq was ever produced,
+	 * while the RTC's line 1 mapped fine through the same domain. Going
+	 * through the gpiochip avoids whatever that asymmetry is and is the
+	 * supported interface besides.
+	 */
+	irq = -ENOENT;
+	if (ts->int_gpio)
+		irq = gpiod_to_irq(ts->int_gpio);
+
+	if (irq == -EPROBE_DEFER)
+		return -EPROBE_DEFER;
+
+	dev_info(dev, "irq: client=%d gpiod_to_irq=%d\n", client->irq, irq);
+
+	ts->irq = -ENOENT;
+	if (irq > 0) {
+		ret = devm_request_threaded_irq(dev, irq, NULL, cst92xx_irq,
+						IRQF_ONESHOT |
+						IRQF_TRIGGER_FALLING |
+						IRQF_NO_AUTOEN,
+						CST92XX_DRV_NAME, ts);
+		if (ret) {
+			dev_warn(dev, "no interrupt (%d), polling only\n", ret);
+		} else {
+			ts->irq = irq;
+			enable_irq(ts->irq);
+		}
+	}
+
+	/*
+	 * Start the poll rather than waiting for an interrupt. That way the
+	 * first report is seen even if the controller asserted INT before this
+	 * driver existed, and a dead interrupt line is invisible in practice.
+	 */
+	mod_delayed_work(system_wq, &ts->poll, 0);
+
+	dev_info(dev, "idle %u ms, active %d ms, release %d ms, %s\n",
+		ts->idle_poll_ms, CST92XX_POLL_MS, CST92XX_RELEASE_MS,
+		ts->irq > 0 ? "interrupt driven" : "polling only");
 
 	return 0;
 }

@@ -82,11 +82,25 @@
 		 *
 		 * Active low: asserting reset drives the line low, exactly as
 		 * LilyGo's initTouch() does (low 20 ms, high 60 ms).
+		 *
+		 * TP_INT is GPIO 12: active low, pulsed when the controller has a
+		 * report. LilyGo configures it as INPUT_PULLUP with a FALLING edge
+		 * handler, which is what this mirrors -- the pull-up matters, and
+		 * it is why the pin is in touch_int_pins below. The handler is
+		 * threaded because servicing it reads I2C.
 		 */
 		touch@1a {
 			compatible = "hynitron,cst92xx";
 			reg = <0x1a>;
 			reset-gpios = <&xl9555 8 GPIO_ACTIVE_LOW>;
+			/*
+			 * INT is requested as a GPIO and turned into an IRQ with
+			 * gpiod_to_irq(), not through interrupt-parent/interrupts.
+			 * The pull is set here rather than inherited.
+			 */
+			int-gpios = <&gpio0 12 GPIO_ACTIVE_LOW>;
+			pinctrl-0 = <&touch_int_pins>;
+			pinctrl-names = "default";
 		};
 
 		/* XL9555: 16-bit GPIO expander, a PCA9555 clone at 0x20.
@@ -232,6 +246,15 @@
 	pmic_irq_pins: pmic_irq_pins {
 		pinctrl-single,pins = <
 			PIN(7) FUN0_20MA_IE_WPU>;		/* AXP2101 IRQ, open drain */
+	};
+	/* TP_INT, GPIO 12. LilyGo sets INPUT_PULLUP before attaching the
+	 * falling-edge handler, so the weak pull-up is part of the contract and
+	 * not a default worth inheriting: without it the line floats and the
+	 * edge either never comes or comes continuously.
+	 */
+	touch_int_pins: touch_int_pins {
+		pinctrl-single,pins = <
+			PIN(12) FUN0_20MA_IE_WPU>;	/* CST9217 INT, active low */
 	};
 	/* The watch's panel is on SPI2 with its own pin set: SCK 40, data
 	 * D0..D3 on 38, 39, 42, 45. FUN_SEL(4) is the SPI2 function. CS is a

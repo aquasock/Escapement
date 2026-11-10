@@ -152,12 +152,14 @@ Topic IDs are the `record_id` prefix. An entry reserves a name; it does not clai
 | Why is the hardware I2C that slow? | KERNEL | KRN-006 |
 | Why does the I2C controller ignore every register write? | KERNEL | KRN-006 |
 | Why does one bad I2C transfer kill the whole bus until reboot? | KERNEL | KRN-007 |
+| Why can no driver map a GPIO interrupt on this board? | KERNEL | KRN-008 |
 | Is Linux really only using one core? | KERNEL | KRN-005 |
 | Why are taps at the top of a bar ignored? | TCH | TCH-004 |
 | Why does the touch controller answer but never report a touch? | TOUCH | TCH-005 |
 | Which way round are the touch axes, and do they need calibrating? | TOUCH | TCH-006 |
 | What is the official sequence to bring the CST9217 up? | TOUCH | TCH-007 |
 | Why does a finger count of 1 not mean a finger is down? | TOUCH | TCH-008 |
+| Which pin is the touch interrupt, and does it help? | TOUCH | TCH-009 |
 | Can userspace draw on /dev/fb0? | LCD | LCD-001 |
 | Why does a thin fill draw nothing while a thick one works? | LCD | LCD-002 |
 | Does a 45x45 window draw, or is it too narrow? | LCD | LCD-008 |
@@ -587,6 +589,35 @@ EMU-010: "The touch daemon costs the emulator about 30 percent of its throughput
     - "lewisxhe/SensorLib src/touch/TouchDrvCST92xx.cpp getTouchPoints(): the buffer[6] != 0xAB reject, the 0x7F mask on buffer[5], the per-finger decode, and `if (event == 0x06)`"
     - "on the watch: a block 00 02 1c 93 00 01 ab 00 00 00 3c 05 ab 00 00 with event 0x00 and nothing touching, and live presses returning 0x06"
   verification: "Verified on hardware 2026-11-10: with the event check absent the probe counted a phantom point while nothing was touching; with it present the count was zero. Presses then produced event 0x06 blocks that decoded to a smooth path, and the kernel input driver emitted BTN_TOUCH 1 and 0 correctly with ABS_X/ABS_Y advancing between them."
+
+- record_id: KRN-008
+  kind: KERNEL
+  topic_id: KRN
+  status: VERIFIED
+  verified_date: 2026-11-10
+  title: "The kernel's interrupt descriptor table is 33 entries and the board exhausts it, so later drivers cannot map a GPIO interrupt at all"
+  statement: "With CONFIG_SPARSE_IRQ unavailable on xtensa, arch/xtensa/include/asm/irq.h sizes the descriptor table as NR_IRQS = XCHAL_NUM_INTERRUPTS + PLATFORM_NR_IRQS + 1. XCHAL_NUM_INTERRUPTS is 32 on this core and PLATFORM_NR_IRQS is 0, so the table holds 33. That is enough for peripherals hanging directly off the CPU's interrupt lines, and not enough for a SoC whose GPIO controller is itself an interrupt controller mapping one Linux IRQ per GPIO line a driver requests, with a virtual domain (the AXP2101's) on top. Measured on this board: lines 1 and 7 mapped (the RTC and the PMU, which probed while slots were free) while every later request returned -ENXIO."
+  consequence: "The failure is silent and thoroughly misleading. irq_create_mapping() returns ENOSPC, gpiod_to_irq() turns that into -ENXIO, and a driver that treats its interrupt as optional falls back to polling and works -- so the visible symptom is 'this board's GPIO interrupts do not work' rather than 'the table is full'. It is also line-independent, which is the clue worth remembering: probing seven different lines gave irq 7 and 8 for the two already mapped and -ENXIO for the other five, so the discriminator was prior use, not the line. Both of the interrupts that do exist have zero counts in /proc/interrupts, because mapping a line is not enough -- the parent has to fire, and their parents never do on this board. The fix is a larger table: 128 extra descriptors, about 18 KB of image, in patches/kernel/irq/final/irq.h. CONFIG_PLATFORM_NR_IRQS cannot be used because it is a hidden symbol and olddefconfig recomputes it back to 0."
+  sources:
+    - "arch/xtensa/include/asm/irq.h: NR_IRQS = XTENSA_NR_IRQS + PLATFORM_NR_IRQS + 1, with XTENSA_NR_IRQS = XCHAL_NUM_INTERRUPTS"
+    - "arch/xtensa/Kconfig: config PLATFORM_NR_IRQS is a plain int with no prompt, so it cannot be set from a defconfig"
+    - "patches/kernel/irq/final/irq.h: EXTRA_NR_IRQS 128"
+    - "on the watch, before the fix: `line 0 -> irq -6`, `line 1 -> irq 7`, `line 6 -> irq -6`, `line 7 -> irq 8`, `line 12 -> irq -6`, `line 16 -> irq -6`, `line 17 -> irq -6`"
+  verification: "Verified on hardware 2026-11-10. Before the fix, gpiod_to_irq() on the touch controller's INT returned -ENXIO and the driver reported 'polling only'. After it, the same call returned irq 33 -- the first number past the old 33-entry limit -- the driver reported 'interrupt driven', and /proc/interrupts gained `33: esp32xx-gpio 12 cst92xx`, which then accumulated 351 interrupts across three taps while the bus stayed healthy."
+
+- record_id: TCH-009
+  kind: TOUCH
+  topic_id: TCH
+  status: VERIFIED
+  verified_date: 2026-11-10
+  title: "The CST9217 INT line is GPIO 12, and driving touch from it cuts idle bus traffic about 8x"
+  statement: "TP_INT is GPIO 12 on this board, active low, pulsed when the controller has a report. LilyGo configures it as INPUT_PULLUP and attaches a FALLING-edge handler. The pull-up is part of the contract: the controller drives the line low and releases it, so without the pull the line floats and the edge either never arrives or arrives continuously. In the kernel driver the line is requested with `int-gpios` and turned into an interrupt with gpiod_to_irq() rather than through an `interrupts` property, which is the idiom for input devices and also lets the pin's electrical configuration be set explicitly."
+  consequence: "The interrupt is used to wake the driver, and polling is kept at two rates rather than removed: 20 ms while a finger is down, so a drag keeps up with the controller's ~66 ms reports, and 250 ms when idle as a safety net. That structure is deliberate. Making the interrupt the only wake-up would mean a wrong polarity or a lost pull-up silently loses touch entirely, whereas a slow poll degrades to latency. Measured effect: idle interrupts settle at about 2 per second, against the ~50 reads per second that the previous unconditional 20 ms poll produced."
+  sources:
+    - "Xinyuan-LilyGO/LilyGoLib src/LilyGoWatchUltra.cpp initTouch(): pinMode(TP_INT, INPUT_PULLUP); attachInterrupt(TP_INT, ..., FALLING)"
+    - "patches/kernel/touch/final/cst92xx.c: cst92xx_irq(), the idle/active periods, and cst92xx_service() shared by both paths"
+    - "KRN-008 for why the interrupt could not be mapped until the descriptor table was enlarged"
+  verification: "Verified on hardware 2026-11-10: IRQ 33 registered against cst92xx, 331 interrupts accumulated during three taps, and a captured event stream showed three presses and three releases with smooth coordinate tracks. Idle rate measured at 20 interrupts over 10 seconds. The bus, RTC, PMU, panel, WiFi and BLE keyboard all remained healthy throughout."
 
 - record_id: LCD-008
   kind: DISPLAY
