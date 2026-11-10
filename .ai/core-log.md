@@ -1,3 +1,33 @@
+## 42 COMMIT Unreleased 2026-11-10T16:26:05-07:00
+
+#### Coming From:
+
+Unreleased 614c633
+
+#### Purpose:
+
+Capture a full 16 MiB backup of the first state in which every subsystem on the I2C bus has been verified, taken from a cold boot.
+
+#### Outcome:
+
+`~/twatch-backup/working-2026-11-10-1621.bin` is the current recoverable state, 16 MiB read at 628.6 kbit/s in 213.5 seconds, sha256 `464b04138ada0baaec2822dbd6aa708194d76d7a3bf2b21d003aa2c2050dfa2f`. It replaces `working-2026-11-10-1533.bin`, which was three cycles stale: it predated the 5 s idle poll, the RTC and PMU interrupt verification, and the haptic driver. Nothing about those cycles was risky, but a saved image that no longer matches what ships stops being a useful fallback, and this session has already spent an afternoon on a backup that silently contained the wrong kernel. The watch was rebooted first and every subsystem re-verified before the read, so this is a cold-boot image: touch interrupt driven with `idle 5000 ms, active 20 ms, release 250 ms`, `drv2605` bound and reporting `DRV2605 ready, ERM motor`, PMU capacity 100 with `usb_online` 1, `rtc0` at 23:21:05, and fb0 at 320x400. The image was verified four ways rather than by the script's own OK line. The stored `.sha256` matches an independent `sha256sum`; the 2860624-byte kernel extracted from `0x140000` is byte-identical to the built `xipImage` (`862d0a6c…`); the image carries all five markers -- `hynitron,cst92xx`, `ti,drv2605` with `DRV2605 ready, %s motor`, the interrupt-path string `idle %u ms, active %d ms, release %d ms, %s`, and the I2C recovery string `int_raw=%08x sr=%08x busy=%u`; and the running watch reports `7.2.4-forkbank-gf134bd8126fa-dirty`, the same build string the image carries. The image grew from 2860408 to 2860624 bytes against the previous cycle, and that 216-byte delta is itself a check that the haptic driver is in the build rather than only in the source -- a small delta was worth confirming precisely because it looked too small for a new driver, and `drv2605_tap` was found as a global symbol in `System.map` before the flash was trusted. The backup's trailing hard reset rebooted the watch, which was confirmed healthy afterwards: `drv2605` re-probed, `cst92xx` re-registered on IRQ 33, and `rtc0` read 23:25:45. The core-syntax audit passed: `.ai/core.md` and `.ai/core-syntax.md` were re-read, the complete `.ai/` diff was inspected, `.ai/core.md` was not modified, and this entry was validated against the template with six sections in canonical order, sequential numbering from 41, an ISO-8601 timestamp carrying the America/Phoenix offset, prose-only Outcome and Next Steps, and Status values within the allowed set.
+
+#### Next Steps:
+
+The I2C bus is now closed: every device on it either has a working driver or a proven reason not to, and this image is the first that captures all of that at once. The largest remaining unknown is the second SPI bus, and it is unstarted ground rather than a gap to be filled. BRD-004 records that the bus on SCK 35 / MOSI 34 / MISO 33 has never been proven to transfer a byte; the NFC probe never received a reply, with MISO clamped low by something external; `CONFIG_MMC` is absent so the SD card could not mount even if the bus worked; and the earlier loopback attempt that would have settled it was itself blocked by a pad-driving bug. The honest next step is therefore to prove the bus in isolation -- a loopback, or one readable register from one device -- before wiring SD, LoRa and NFC drivers to it, because three drivers built on an unvalidated bus turn one unknown into four. The smaller open item remains the absent-address `-ETIMEDOUT` versus `-ENXIO` defect in `i2cdetect`, which affects no working path. The deferred items are unchanged and none should be started without asking: BLE media keys, the Rii K06 touchpad and Logitech keyboard, firmware-side BLE bond persistence, wake-from-sleep, and moving the Tamagotchi emulator to core 0.
+
+#### Files Modified:
+
+- None.
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: PASS
+
+---
+
 ## 41 COMMIT Unreleased 2026-11-10T16:15:16-07:00
 
 #### Coming From:

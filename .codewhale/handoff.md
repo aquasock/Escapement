@@ -1,10 +1,10 @@
-# Handoff — Escapement, 2026-11-10T16:16
+# Handoff — Escapement, 2026-11-10T16:26
 
 Linux 7.2.4 on a T-Watch Ultra (ESP32-S3). Real Linux on the watch's own Xtensa
 cores, not emulated. This file is orientation; verify before acting on it.
 
 Canonical detail lives in `.ai/core-reference.md` (76 records, fourteen topics).
-Project history lives in `.ai/core-log.md` (41 entries; newest first — 41, 40, 39, 38, 37, 36, 35, 34, 33, 32,
+Project history lives in `.ai/core-log.md` (42 entries; newest first — 42, 41, 40, 39, 38, 37, 36, 35, 34, 33,
 31, 30, 29, 28, 27, 26, 25, 24, 23, 22, 21, 20, 19, 18, 17, then 1 through 16).
 Do not re-derive what those hold.
 
@@ -18,10 +18,10 @@ persistence, any wake-from-sleep path, and moving the emulator to core 0.
 
 ## Reconstruct (in this order)
 
-1. `git log --oneline -8` — `main` was at `913f9e3`, clean and fully pushed,
+1. `git log --oneline -8` — `main` was at `614c633`, clean and fully pushed,
    before the commit carrying this file.
 2. `.ai/core.md` (policy), then `.ai/core-reference.md` (hardware facts — open
-   the record, not the index line), then `.ai/core-log.md` entries 41, 40, 39.
+   the record, not the index line), then `.ai/core-log.md` entries 42, 41, 40.
 3. `git -C build/esp-hosted/esp_hosted_ng branch --show-current` — expect
    `ble-bond-wip`, five local-only commits.
 
@@ -174,55 +174,48 @@ time and clean probe semantics and nothing else. Fix it in the touch cycle.
 
 ## Backups — read the directory, do not trust this file
 
-**`working-2026-11-10-1533.bin` restores a working watch but not the shipped
-idle period.** Taken 2026-11-10 15:36, 16 MiB, sha256 `d1b87c30…`. It is the
-first backup with interrupt-driven touch, but it predates the 5 s idle poll
-added later the same session, so restoring it gives a 250 ms idle fallback
-instead of 5000 ms. Both work; neither loses touch. **Take a fresh backup**
-(`./scripts/watch-backup.sh`, 16 MiB, ~4 min) so the image matches what ships.
-
-What 1533 contains: interrupt-driven touch and the enlarged interrupt table,
-taken **after a reboot** so it is a cold-boot state.
+**`working-2026-11-10-1621.bin` is the current, complete state.** Taken
+2026-11-10 16:24, 16 MiB, sha256 `464b0413…`, **after a reboot** so it is a
+cold-boot state. It is the first image with every verified subsystem: touch
+interrupt-driven at a 5 s idle poll, haptics in the kernel, the enlarged
+interrupt table, and the I2C recovery fix.
 
 Verified rather than trusted:
 
 - the stored `.sha256` matches an independent `sha256sum` of the file;
-- the 2,860,368-byte kernel extracted at `0x140000` is byte-identical to the
-  built `xipImage` (`dd3f424d…`);
-- the image carries `hynitron,cst92xx`, the interrupt-path format string
-  `idle %u ms, active %d ms, release %d ms, %s`, and the I2C recovery format
-  string `%s: int_raw=%08x sr=%08x busy=%u` — so the touch driver, the
-  interrupt work and the earlier bus fix are all in it;
-- the running watch reports `7.2.4-forkbank-g5c05e1d68be7-dirty`, the same
+- the 2,860,624-byte kernel extracted at `0x140000` is byte-identical to the
+  built `xipImage` (`862d0a6c…`);
+- the image carries every marker: `hynitron,cst92xx`, `ti,drv2605` and
+  `DRV2605 ready, %s motor`, the interrupt-path string
+  `idle %u ms, active %d ms, release %d ms, %s`, and the I2C recovery string
+  `int_raw=%08x sr=%08x busy=%u`;
+- the running watch reports `7.2.4-forkbank-gf134bd8126fa-dirty`, the same
   build string the image carries.
 
-The verification that was done on 1444, worth repeating on the next one:
-
-- the stored `.sha256` matches an independent `sha256sum` of the file;
-- the 2,841,808-byte kernel extracted at offset `0x140000` is byte-identical to
-the built `xipImage` (`d47e2cc3…`), so the right kernel is in the right slot;
-- the image carries the `hynitron,cst92xx` compatible and the recovery format
-  string `%s: int_raw=%08x sr=%08x busy=%u` plus the `ARB_LOST` literal, so
-  both the touch driver and the I2C fix are in it;
-- it was taken **after a reboot**, so it is a cold-boot state rather than a
-  warm one.
+Verify a new backup the same four ways. Two checks are worth naming because
+they caught real surprises: the **image size delta** is evidence a config or
+table change actually landed (2860624 vs 2860408 was the haptic driver), and a
+**grep for a format string does not match a fully-formatted message** — the
+recovery line has no literal `NACK:` because `%s` supplies it at the call site.
 
 ```
-~/twatch-backup/working-2026-11-10-1533.bin   d1b87c30  CURRENT — hardware I2C,
-                                                        touch, INTERRUPT DRIVEN
-~/twatch-backup/working-2026-11-10-1444.bin   1a2637f5  hardware I2C, touch by
-                                                        polling only
-~/twatch-backup/working-2026-11-10-1353.bin   ee2133e0  hardware I2C, multi-byte
-                                                        fixed, NO touch
-~/twatch-backup/working-2026-11-10-1251.bin   04cfee94  hardware I2C, no touch,
-                                                        chatty boot, pre-fix
+~/twatch-backup/working-2026-11-10-1621.bin   464b0413  CURRENT — touch
+                                                        interrupt-driven, haptics,
+                                                        enlarged IRQ table
+~/twatch-backup/working-2026-11-10-1533.bin   d1b87c30  interrupt-driven touch,
+                                                        250 ms idle, no haptics
+~/twatch-backup/working-2026-11-10-1444.bin   1a2637f5  touch by polling only
+~/twatch-backup/working-2026-11-10-1353.bin   ee2133e0  multi-byte fixed, NO touch
+~/twatch-backup/working-2026-11-10-1251.bin   04cfee94  no touch, chatty boot
 ~/twatch-backup/working-2026-11-10-1053.bin   b0f31a2d  i2c-gpio — full function
                                                         incl. old touch daemon
 ~/twatch-backup/working-2026-11-10-0940.bin   fd7e5bf9  i2c-gpio, 40 MHz
 ~/twatch-backup/twatch-factory-16MB.bin       471c9a21  stock
 ```
 
-**1533 is the one to restore.** 1444 is the immediately previous state (touch
+**1621 is the one to restore.** 1053 remains the fallback if the hardware-I2C
+path is ever suspected: it is the bit-banged build with the old userspace touch
+daemon, fully functional for its time. Restore command:
 but polling only) and is worth keeping for one more cycle as the A/B for the
 interrupt work. 1053 remains the fallback if the hardware-I2C path is ever
 suspected: it is the bit-banged build with the old userspace touch daemon, fully
