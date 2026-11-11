@@ -1,3 +1,38 @@
+## 72 COMMIT Unreleased 2026-11-12T01:05:00-07:00
+
+#### Coming From:
+
+Unreleased 9c5b2f3
+
+#### Purpose:
+
+Record maximised app windows as the fork's baseline shape, accepted on the glass, and the correction of a false alarm that preceded it.
+
+#### Outcome:
+
+The fork at 315236e on branch `t-watch-ultra` carries upstream's `apps/bluetooth.c` unmodified and opens every app maximised instead, behind a build flag. The reasoning is that on a 40x26 panel an app asking for a desktop-sized window has most of its content below row 26 and off the glass -- the Bluetooth window's own `WIN_H` is 34 -- while a maximised window gets the desk area and needs no layout change at all: the frame and title bar stay, so it is still movable, resizable and closable, and the taskbar is untouched. `TD_OPEN_MAXIMIZED` is 0 by default so a board with room keeps the overlapping-window feel, and the port turns it on from `project_include.cmake`. Dialogs, tools and one new category are exempt: `TD_WIN_MODAL` because a message box two-thirds down the screen is still a message box rather than a page, `TD_WIN_NO_FOCUS` because tools such as the on-screen keyboard are placed by their own code, and `TD_WIN_OWN_SIZE` because a window whose size IS its meaning -- the display identifier popover, which paints a number in a 14x5 box beside the display it names -- would be destroyed by filling the screen. Both new constants are additive public API and are recorded in `api/tinydesk.api`, which `api_stable` requires and `STABILITY.md` permits in a minor version. The flag is applied before `clamp_rect`, so `restore_rect` still holds the caller's rect and an un-maximised window returns to where it asked to be. The full-screen reflow of `apps/bluetooth.c` was reverted first (b3f34a8) and its test edit with it, which the host suite confirmed carried nothing else: with both files restored from upstream the suite was 37 of 37. Three things about this cycle belong in the record rather than being quietly corrected. The reflow was replaced because maximised windows solve the same problem with a few lines in shared code instead of a relayout of a shared app, and a patch that fixes a defect on a narrow screen is easier to justify upstream than one that restyles a window. The taskbar cannot carry per-window buttons at 40 columns -- it is already full with `[Start]`, the user, the network tray and the clock, so the button loop breaks before placing the first one -- and switching between open apps is F6 or Alt+Tab, which is upstream's own mechanism; that answers the operator's concern about not being able to run two apps at once, since maximised windows stack and closing one reveals the next. And a false alarm is worth naming: after a flash was interrupted mid-write the device sat in esptool's stub, so every read returned zero bytes, and that was briefly reported as a broken build when the cause was the interrupted flash and the chip's state. The operator disproved it by touching the screen, which worked. Nothing had been lost -- the working changes were in a stash and were restored -- and the lesson is that "no output" is evidence about the link, not about the image.
+
+#### Next Steps:
+
+The remaining port-level overrides are still untested against the current tree: `TD_SIZE_POLL_MS=0` and `TD_ACK_TIMEOUT_MS=0`, both suspected of compensating for faults now fixed elsewhere, each a one-line revert. The apps still need going through one at a time to check they read well maximised on 40x26 -- maximising gives them the room, but whether each one's own layout uses it well has only been checked for the desktop and the Bluetooth window. The three capacitive bars under the glass still act on stretches of taskbar rather than three fixed cells, with recorded edges that divide the strip into two equal zones plus a one-pixel third, so the vendor map settles the geometry before any code. The Mouse and Keyboard Bluetooth slots pair one device each and share the Combo slot's working path but have not been tried. When the fork is offered upstream, the shared-code changes now number six files and the maximised-window policy is among the most generally useful of them, since it is off by default and costs a board nothing unless it wants it. The Linux side stays parked; its last code commit is 8645a82 and everything after it in this repository is the project log.
+
+#### Files Modified:
+
+- src/wm.c
+- include/tinydesk/td_wm.h
+- include/tinydesk/td_config.h
+- api/tinydesk.api
+- apps/displays.c
+- ports/twatchultra/main/project_include.cmake
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: PASS
+
+---
+
 ## 71 COMMIT Unreleased 2026-11-12T00:30:00-07:00
 
 #### Coming From:
