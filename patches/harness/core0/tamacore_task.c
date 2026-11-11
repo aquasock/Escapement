@@ -134,9 +134,16 @@ static inline void diag_phase(uint32_t phase)
 	esp_cache_msync((void *)diag, 32, ESP_CACHE_MSYNC_FLAG_INVALIDATE);
 }
 
+/*
+ * Publish ONLY core 0's two lines. Touching the third would write core 0's
+ * stale cache over core 1's heartbeat -- see the struct comment in shmproto.h.
+ * The size must be a whole number of 32-byte lines or esp_cache_msync rejects
+ * the call and returns an error nothing here checks.
+ */
 static inline void diag_publish(void)
 {
-	esp_cache_msync((void *)diag, sizeof(*diag), ESP_CACHE_MSYNC_FLAG_INVALIDATE);
+	esp_cache_msync((void *)diag, SHM_DIAG_OWN_BYTES,
+			ESP_CACHE_MSYNC_FLAG_INVALIDATE);
 }
 
 static inline void ctl_publish(void)

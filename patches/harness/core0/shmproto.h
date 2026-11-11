@@ -93,6 +93,15 @@
  */
 #define SHM_PAINT_ROWS      16
 
+/* What core 1 is in the middle of. Same purpose, same survives-a-reset trick. */
+enum shm_c1_phase {
+	SHM_C1_IDLE = 0,
+	SHM_C1_READ = 1,        /* pread from the window */
+	SHM_C1_PWRITE = 2,      /* writing rows to /dev/fb0 */
+	SHM_C1_EEPROM = 3,      /* persisting the save image */
+	SHM_C1_WAIT = 4,        /* sleeping between polls */
+};
+
 /* What core 0 is in the middle of. Left behind by a reset. */
 enum shm_phase {
 	SHM_PHASE_IDLE = 0,
@@ -101,10 +110,22 @@ enum shm_phase {
 	SHM_PHASE_INVALIDATE = 3,
 };
 
+/*
+ * Two writers, so two cache lines, and the separation is not cosmetic.
+ *
+ * Core 0 has a D-cache and core 1 does not. When core 0 flushes its line it
+ * writes back whatever ITS cache holds; if core 1's fields shared that line,
+ * every flush would silently restore core 0's stale copy over core 1's fresh
+ * heartbeat. The one-writer-per-line rule is what makes that impossible.
+ *
+ * Line 0 + line 1 (64 bytes): core 0 only.
+ * Line 2 (32 bytes):          core 1 only.
+ */
 struct shm_diag {
+	/* line 0 -- core 0 */
 	volatile uint32_t magic;
 	volatile uint32_t version;
-	volatile uint32_t phase;        /* survives a reset: where it died */
+	volatile uint32_t phase;        /* survives a reset: where core 0 died */
 	volatile uint32_t frames;
 
 	volatile uint32_t draw_us;      /* last frame, each phase */
@@ -112,14 +133,29 @@ struct shm_diag {
 	volatile uint32_t inv_us;
 	volatile uint32_t gap_us;       /* since the previous publish */
 
+	/* line 1 -- core 0 */
 	volatile uint32_t draw_max;     /* worst since boot */
 	volatile uint32_t wb_max;
 	volatile uint32_t inv_max;
 	volatile uint32_t gap_max;
 	volatile uint32_t total_max;    /* whole publish, worst */
 	volatile uint32_t chunk_max;    /* longest SINGLE esp_cache_msync */
-	volatile uint32_t reserved[2];
+	volatile uint32_t reserved0[2];
+
+	/* line 2 -- core 1 */
+	volatile uint32_t c1_beat;      /* ++ every loop iteration */
+	volatile uint32_t c1_phase;     /* SHM_C1_* below: where core 1 died */
+	volatile uint32_t c1_blit_max;  /* longest single pwrite, us */
+	volatile uint32_t c1_last_us;   /* duration of the last pwrite, us */
+	volatile uint32_t c1_frames;    /* frames this side has blitted */
+	volatile uint32_t reserved1[3];
 };
+
+_Static_assert(sizeof(struct shm_diag) == 96,
+	       "diagnostics must be exactly three cache lines");
+#define SHM_DIAG_C1_OFF     64u    /* byte offset of core 1's line */
+#define SHM_DIAG_OWN_BYTES  64u    /* how much core 0 publishes */
+
 
 /*
  * Where the frame sits inside the watch's 320x400 framebuffer, and how big the

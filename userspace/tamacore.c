@@ -156,6 +156,43 @@ static void fbcon_attach(int idx)
 	close(fd);
 }
 
+/*
+ * Core 1's heartbeat into the shared diagnostics.
+ *
+ * Written with pwrite because /proc/esp-shared is a plain window; the kernel
+ * driver write-protects only the two frame slots, so these offsets are legal.
+ *
+ * The reason this exists: when the pet hatched the screen froze and Linux
+ * stopped answering, but core 0's own record said phase=IDLE -- core 0 was
+ * healthy and idle, so the death was on this side. Without a heartbeat here
+ * there is no way to tell "died in the pwrite" from "died somewhere else on
+ * core 1", because a frozen board cannot be asked anything.
+ */
+#define DIAG_BASE       (0x70000UL)
+#define DIAG_C1_BEAT    (DIAG_BASE + 64)
+#define DIAG_C1_PHASE   (DIAG_BASE + 68)
+#define DIAG_C1_MAX     (DIAG_BASE + 72)
+#define DIAG_C1_LAST    (DIAG_BASE + 76)
+#define DIAG_C1_FRAMES  (DIAG_BASE + 80)
+
+static uint32_t c1_beat;
+static uint32_t c1_frames;
+static uint32_t c1_max_us;
+
+static void c1_mark(unsigned int phase)
+{
+	uint32_t v = phase;
+
+	(void)!pwrite(g_shared, &v, sizeof(v), (off_t)DIAG_C1_PHASE);
+}
+
+static void c1_tick(void)
+{
+	uint32_t v = ++c1_beat;
+
+	(void)!pwrite(g_shared, &v, sizeof(v), (off_t)DIAG_C1_BEAT);
+}
+
 static int shared_write(unsigned long off, const void *buf, size_t len)
 {
 	ssize_t n = pwrite(g_shared, buf, len, (off_t)off);
@@ -537,6 +574,14 @@ int main(int argc, char **argv)
 	 * need it -- it writes and exits -- but doing it unconditionally keeps
 	 * the two paths identical, which is worth more than the microseconds.
 	 */
+	/* Clear this side's diagnostic line, so a record from a previous run
+	 * cannot be mistaken for this one. */
+	{
+		uint8_t zero[32] = { 0 };
+
+		shared_write(DIAG_BASE + 64, zero, sizeof(zero));
+	}
+
 	vtcon_index = fbcon_detach();
 	if (vtcon_index < 0 && !quiet)
 		note("could not unbind fbcon; the console may show through");
@@ -761,19 +806,45 @@ int main(int argc, char **argv)
 		if (ctl.frame_seq != last_seq) {
 			unsigned long off = ctl.frame_idx ? SHM_FRAME1_OFF
 							  : SHM_FRAME0_OFF;
+			uint64_t t0, t1;
+			uint32_t d;
 
+			/*
+			 * Mark the phase BEFORE the work and make it durable by
+			 * using pwrite, which bypasses any local caching. If the
+			 * board freezes inside the blit, this is what survives.
+			 */
+			t0 = now_us();
+			c1_mark(SHM_C1_PWRITE);
 			if (panel_blit(off, (int)ctl.dirty_lo, (int)ctl.dirty_hi) < 0 && !quiet)
 				fprintf(stderr, "tamacore: blit: %s\n",
 					strerror(errno));
+			t1 = now_us();
+			c1_mark(SHM_C1_IDLE);
+
+			d = (uint32_t)(t1 - t0);
+			c1_frames++;
+			(void)!pwrite(g_shared, &d, sizeof(d), (off_t)DIAG_C1_LAST);
+			(void)!pwrite(g_shared, &c1_frames, sizeof(c1_frames),
+				      (off_t)DIAG_C1_FRAMES);
+			if (d > c1_max_us) {
+				c1_max_us = d;
+				(void)!pwrite(g_shared, &c1_max_us, sizeof(c1_max_us),
+					      (off_t)DIAG_C1_MAX);
+			}
+
 			frames++;
 			last_seq = ctl.frame_seq;
 		}
 
 		if (ctl.eeprom_seq != last_eeprom) {
+			c1_mark(SHM_C1_EEPROM);
 			persist_eeprom();
+			c1_mark(SHM_C1_IDLE);
 			last_eeprom = ctl.eeprom_seq;
 		}
 
+		c1_tick();
 		usleep(POLL_US);
 	}
 
