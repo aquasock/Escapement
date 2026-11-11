@@ -12,6 +12,7 @@ userspace/blekbd
 userspace/blekbd.strip
 userspace/tprobe
 userspace/fbbench
+userspace/tamafb-1x
 userspace/panel-test
 
 # Runtime session state. .codewhale/handoff.md is tracked deliberately, so the

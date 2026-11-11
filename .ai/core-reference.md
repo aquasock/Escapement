@@ -150,6 +150,8 @@ Topic IDs are the `record_id` prefix. An entry reserves a name; it does not clai
 | Should the emulator's ROM live in flash or PSRAM? | EMU | EMU-009 |
 | Why is the emulator slower with the touch buttons running? | EMU | EMU-010 |
 | How fast does the emulator actually run the real ROM? | EMU | EMU-011 |
+| What resolution is the Tamagotchi LCD really, and does rendering it 1:1 help? | EMU | EMU-013 |
+| Why does the status menu run at half speed when play is fine? | EMU | EMU-014 |
 | Why did the emulator speed up when the touch daemon was retired? | EMU | EMU-012 |
 | Why does a 512 KB allocation work once and then fail? | KERNEL | KRN-004 |
 | Why not put the hardware behind the RTOS on core 0? | KERNEL | KRN-005 |
@@ -1382,6 +1384,38 @@ EMU-010: "The touch daemon costs the emulator about 30 percent of its throughput
     - "KRN-004 for why the 512 KB PSRAM block is a one-shot allocation per boot and why later runs fall back to flash"
     - "EMU-002 for the stall that is still open, and EMU-009 for the corebench PSRAM figure this deliberately does not overwrite"
   verification: "Measured on hardware 2026-11-10 with the touch daemon retired, so no polling competes with the run. Bench: PSRAM 511711 and 513765 on two separate boots, flash 409532 and 407079 on one boot, both arms retiring an identical 692707 instructions. Display sweep at 2/4/8/16 fps held 1.00-1.01x. Speed ramp at 100/150/200 percent held 1.01/1.50/2.01x with 120 frames drawn at each. A 20 s, 10 fps run logged zero stalls."
+
+
+- record_id: EMU-013
+  kind: EMU
+  topic_id: EMU
+  status: VERIFIED
+  verified_date: 2026-11-10
+  title: "The guest LCD is really 49x49 dots; rendering it 1:1 instead of at a 5 px dot pitch removes the panel from the emulator's cost entirely"
+  statement: "The harness renders the V3 dot-matrix artwork at a 5 px dot on a 6 px pitch, which yields a 292x300 LCD so the pet is readable at arm's length. The hardware's real information resolution is 49x49 -- the artwork's dot grid, recovered by dividing the 6 px pitch out of the generated map. Rendering at 1:1, one pixel per dot, changed the per-frame cost from render 2.5 ms and panel 5.7 ms to render 0.6 ms and panel 0.5 ms, took stalls in a 20 s idle run from 29 to 0, and took the panel's share of frame time from 32 percent to about 2 percent. Bands sent per dirty frame fell from 6 of 10 to 1-2 of 10, because a 49x49 LCD only occupies two bands of 40 rows."
+  consequence: "The panel is no longer part of the emulator's cost problem and should not be optimised further. This also explains a design point that had been open: band masking only helps if the dirty area is small, so shrinking the rendered image and the masking reinforce each other rather than being separate wins. The trade is legibility -- 49x49 is small on a 320x400 glass -- and it is the same artwork at an integer multiple of the dot pitch if a larger size is wanted later: 2x is 98x98, 3x is 147x147, 4x is 196x196. One bug was found on the way, and it predates this change: tamafb.c derives its framebuffer geometry from the segment size (`FB_W = SEG_W + 32`, `FB_H = SEG_H + 48`) unless overridden, which is 324x348 for the 5 px map and 81x97 for the 1:1 map, neither of which is the watch's 320x400 fb0. The file's own comment says those defaults exist to be overridden for exactly this reason and the watch build never passed them, so every band was written with a row stride 320 pixels narrower than the driver's 640-byte stride. At the 5 px scale the error was 4 px horizontal and 52 px vertical and read as a slightly off-centre picture; at 49 px it was a full-width smear roughly 48 rows tall. The operator caught it on the glass. Fixed by passing -DFB_W=320 -DFB_H=400 through scripts/build-tamafb.sh."
+  sources:
+    - "TamaHarness/portable/gen_segmap.py: SEG_DOT=5, SEG_GAP=1 default, PITCH_UNITS = 25.1, and the fitting table that names 292x300 as the largest pixel-exact size"
+    - "TamaHarness/portable/segmap.c: 5366 runs, of which 4860 are exactly 5 px wide -- the 5-on-6 pitch this divides out"
+    - "patches/harness/segmap-1x/: the 1:1 map, SEG_W and SEG_H both 49"
+    - "scripts/build-tamafb.sh: the build that passes the real framebuffer geometry, which reproduces the deployed binary byte for byte"
+    - "on the watch: ./tamafb-1x, telemetry showing panel 8-37 ms/s and render 0.6 ms per frame"
+  verification: "Verified on hardware 2026-11-10. The 1:1 build reports `fb: 320x400, 16 bpp, line 640`, drew correctly on the glass after the framebuffer-geometry fix, and in a 20 s run with no interaction logged zero stalls against 29 for the 5 px build. Telemetry over a 22 s run measured panel 8-37 ms per second, repaint 1-4 frames per second, 1-7 bands per repaint."
+
+- record_id: EMU-014
+  kind: EMU
+  topic_id: EMU
+  status: VERIFIED
+  verified_date: 2026-11-10
+  title: "The status menu runs at 0.52x because it needs about 520k instructions/s against a 513k ceiling, not because of the display"
+  statement: "With the panel reduced to about 2 percent of frame time, a clean 22 s run on an otherwise idle watch measured speed 1.00-1.01x during ordinary play and 0.52-0.79x while the operator used the status menu. The distinguishing number is not frame time but cycles per instruction: emu wall time per second went from 137-150 ms during play to 800-945 ms during the menus while panel time stayed at 8-37 ms, and the run averaged 25 emulated cycles per instruction over 2913709 instructions and 73466045 cycles."
+  consequence: "This closes the search. The interpreter is saturated, not the display: at 4M cycles/s the status menu needs roughly 520k instructions/s and the measured headless ceiling is 513k, so it cannot keep up, while ordinary play needs only about 160k because the pet spends most steps asleep and a sleep step is cheap. It also explains why the slowdown feels disproportionate to what the guest is doing -- the guest is doing arithmetic, cycles per instruction collapse towards 1, and instruction demand rises fourfold against a fixed ceiling. The only lever left is the interpreter's cost per emulated instruction, which EMU-005/006 put at about 1181 native cycles against the 30-80 a tuned 6502 core needs, with 97 percent of it in the interpreter's own instruction stream rather than in memory access. It is a userspace change with no firmware risk. One measurement trap belongs with these numbers: ns_emu is wall time around splb32_run_cycles(), so anything else running on the watch -- including the operator's own diagnostic commands -- is billed to 'emu'. The same build logged 64 stalls while the watch was being driven from a shell and 2 stalls in a 22 s run left alone, so a stall count taken during instrumented work describes the instrument, not the emulator."
+  sources:
+    - "on the watch: ./tamafb-1x 22 20 0 0 1, telemetry lines `tel  8.4s speed 1.01x emu 137ms panel 18ms` through the transition to `tel 20.8s speed 0.52x emu 945ms panel 16ms`"
+    - "EMU-011 for the 513765 instructions/s ceiling measured headless on the same ROM"
+    - "EMU-005 and EMU-006 for the per-instruction cost and where it lives"
+    - "TamaHarness/portable/tamafb.c: ns_emu is wall time around splb32_run_cycles()"
+  verification: "Measured on hardware 2026-11-10 on a freshly booted watch with no other work running: 2 stalls in 22 s, speed 1.01x during play rising to 0.52x sustained in the status menu, panel unchanged at 8-37 ms/s throughout. The operator independently confirmed the pattern -- slowdowns whenever interacting with game menus, not when the screen is static."
 
 - record_id: EMU-012
   kind: EMU

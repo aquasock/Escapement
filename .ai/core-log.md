@@ -1,3 +1,43 @@
+## 46 COMMIT Unreleased 2026-11-10T17:54:48-07:00
+
+#### Coming From:
+
+Unreleased 3f6b19c
+
+#### Purpose:
+
+Render the guest LCD at its true resolution to take the panel out of the emulator's frame cost, after the operator suggested the pet is really only a few dozen pixels rather than the 292x300 the harness was painting.
+
+#### Outcome:
+
+The suggestion was right and the panel is finished. The harness renders the V3 dot-matrix artwork at a 5 px dot on a 6 px pitch, which produces a 292x300 LCD so the pet is readable at arm's length; the hardware's real information resolution is **49x49**, recovered by dividing that pitch out of the generated map. At 1:1 the per-frame cost fell from render 2.5 ms and panel 5.7 ms to render 0.6 ms and panel 0.5 ms, stalls in a 20 s idle run went from 29 to 0, and the panel's share of frame time went from 32 percent to about 2 percent. Bands sent per dirty frame fell from 6 of 10 to 1-2 of 10, because a 49x49 LCD occupies two bands of 40 rows. That last point is why the win is larger than the pixel ratio suggests: band masking only pays when the dirty area is small, so a smaller image and the masking reinforce each other. The trade is legibility -- the pet is small on a 320x400 glass -- and it is the same artwork at any integer multiple of the dot pitch (2x is 98x98, 3x is 147x147) if a larger size is wanted later.
+
+One long-standing bug surfaced on the way, and the operator caught it on the glass. `tamafb.c` derives its framebuffer geometry from the segment size unless it is overridden: `FB_W = SEG_W + 32` and `FB_H = SEG_H + 48`, which is 324x348 for the 5 px map and 81x97 for the 1:1 map, neither of which is the watch's 320x400 fb0. The file's own comment says those defaults exist precisely to be overridden for a board like this one, and the watch build had never passed them. Every band was therefore written with a row stride 320 pixels narrower than the driver's 640-byte stride. At the 5 px scale the error was 4 px horizontal and 52 px vertical and read as a slightly off-centre picture that nobody questioned; at 49 px it was a full-width smear about 48 rows tall. Fixed by passing the real geometry, and the first attempt was wrong in a second way worth noting: `round(x0/6)` makes dots whose x0 is a multiple of 6 collapse to zero width, so every dot is now emitted as exactly one pixel wide at its pitch column.
+
+The more important result is what the clean measurement showed once the noise was removed. A 22 s run on a freshly booted watch with nothing else running gave speed 1.00-1.01x during ordinary play and **0.52-0.79x sustained while the operator used the status menu**, with panel time flat at 8-37 ms/s throughout. The obstacle is not frame time but cycles per instruction: emu wall time per second rose from 137-150 ms to 800-945 ms while the panel share stayed tiny, and the run averaged 25 emulated cycles per instruction across 2913709 instructions. At 4M cycles/s the status menu therefore needs about 520k instructions/s against a measured headless ceiling of 513k, so it cannot keep up, while ordinary play needs only about 160k because the pet spends most steps asleep and a sleep step is cheap. That is why the slowdown feels disproportionate to what the guest is doing, and why the operator's instinct -- slowdowns whenever interacting with game menus, never when the screen is static -- was the correct diagnosis. The only lever left is interpreter cost per emulated instruction, which EMU-005 and EMU-006 put at about 1181 native cycles against the 30-80 a tuned core needs, 97 percent of it in the interpreter's own instruction stream. That is userspace work with no firmware risk.
+
+A measurement trap is recorded with these numbers because it cost two cycles. `ns_emu` is wall time around `splb32_run_cycles()`, so anything else running on the watch -- including this session's own diagnostic commands -- is billed to `emu`. The same build logged 64 stalls while the watch was being driven from a shell and 2 stalls in a 22 s run left alone. The operator identified that before the log did, having noticed the game went laggy exactly while commands were being issued. Provenance was also fixed: `patches/harness/segmap-1x/` now carries the 1:1 map and `scripts/build-tamafb.sh` builds the binary from it, reproducing the deployed file byte for byte, because the emulator front end lives in `~/GIT/TamaHarness/portable` which is not a git repository and the binary would otherwise have no reproducible source. The core-syntax audit passed: `.ai/core.md` and `.ai/core-syntax.md` were re-read, the complete `.ai/` diff was inspected, `.ai/core.md` was not modified, all YAML blocks in the reference parse and all 82 records carry the ten required fields with unique ids, and this entry was validated against the template with six sections in canonical order, sequential numbering from 45, an ISO-8601 timestamp carrying the America/Phoenix offset, prose-only Outcome and Next Steps, and Status values within the allowed set.
+
+#### Next Steps:
+
+The interpreter is now the only thing between this and full speed, and the target is quantified: the status menu needs about 520k instructions/s and the ceiling is 513k, so roughly a 2x improvement in instructions per second would make it comfortable at 1.00x and 4x would leave headroom. EMU-005's estimate of 3-8x being available from a better interpreter makes that plausible rather than certain. EMU-006 already says where to look: 1.622 interpreter steps per emulated instruction, 72.6 percent of bus accesses to ROM, and memory only 2.6 percent of the cost, so the work is in the interpreter's own instruction stream and specifically in the 6796-instruction switch that reloads guest register fields per access. The change EMU-005 recommends -- keeping guest registers, flags and PC in host variables across a decoded block instead of reloading them per access -- is the right first move and is userspace-only. A full 16 MiB backup should also be taken, since `working-2026-11-10-1703.bin` predates the chunk-loop change and this cycle, though neither affects the kernel: the deployed emulator is in `/home` and is a userspace file. The deferred items are unchanged and none should be started without asking: BLE media keys, the Rii K06 touchpad and Logitech keyboard, firmware-side BLE bond persistence, wake-from-sleep, and moving the Tamagotchi emulator to core 0.
+
+#### Files Modified:
+
+- patches/harness/segmap-1x/segmap.c
+- patches/harness/segmap-1x/segmap.h
+- scripts/build-tamafb.sh
+- .gitignore
+- .ai/core-reference.md
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: PASS
+
+---
+
 ## 45 COMMIT Unreleased 2026-11-10T17:30:23-07:00
 
 #### Coming From:

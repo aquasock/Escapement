@@ -1,10 +1,10 @@
-# Handoff — Escapement, 2026-11-10T17:31
+# Handoff — Escapement, 2026-11-10T17:55
 
 Linux 7.2.4 on a T-Watch Ultra (ESP32-S3). Real Linux on the watch's own Xtensa
 cores, not emulated. This file is orientation; verify before acting on it.
 
-Canonical detail lives in `.ai/core-reference.md` (80 records, fourteen topics).
-Project history lives in `.ai/core-log.md` (45 entries; newest first — 45, 44, 43, 42, 41, 40, 39, 38, 37, 36, 35, 34, 33, 32,
+Canonical detail lives in `.ai/core-reference.md` (82 records, fourteen topics).
+Project history lives in `.ai/core-log.md` (46 entries; newest first — 46, 45, 44, 43, 42, 41, 40, 39, 38, 37, 36, 35, 34, 33, 32,
 31, 30, 29, 28, 27, 26, 25, 24, 23, 22, 21, 20, 19, 18, 17, then 1 through 16).
 Do not re-derive what those hold.
 
@@ -18,14 +18,14 @@ persistence, any wake-from-sleep path, and moving the emulator to core 0.
 
 ## Reconstruct (in this order)
 
-1. `git log --oneline -8` — `main` was at `c1ff9d7`, clean and fully pushed,
+1. `git log --oneline -8` — `main` was at `3f6b19c`, clean and fully pushed,
    before the commit carrying this file.
 2. `.ai/core.md` (policy), then `.ai/core-reference.md` (hardware facts — open
-   the record, not the index line), then `.ai/core-log.md` entries 45, 44, 43.
+   the record, not the index line), then `.ai/core-log.md` entries 46, 45, 44.
 3. `git -C build/esp-hosted/esp_hosted_ng branch --show-current` — expect
    `ble-bond-wip`, five local-only commits.
 
-## State verified on hardware 2026-11-10 16:16
+## State verified on hardware 2026-11-10 17:54
 
 ```
 PMU        capacity 100 / Full / usb online 1; both PEK edges fire (PMU-004)
@@ -34,6 +34,7 @@ panel      co5300 bound, fb0 320x400 @16 bpp
 TOUCH      cst92xx-touch input2, CST9220 410x502, IRQ 33, interrupt driven
            idle poll 5000 ms, active 20 ms, release 250 ms
 HAPTIC     drv2605 bound at 0x5a, ERM; click on every press (HAP-001)
+EMULATOR   tamafb-1x at 1:1 (49x49): play 1.00x, status menu 0.52x
 BLE kbd    running            WiFi  flaky — see the BLE trap below
 ```
 
@@ -211,6 +212,20 @@ left (LCD-013).
 
 Measure panel cost with `userspace/fbbench.c` and nothing else. `dd` to
 `/dev/fb0` measures fork+exec — a dd that touches nothing costs 430–440 ms here.
+
+**The panel is finished. The interpreter is the bottleneck.** Render the guest
+LCD at 1:1 (49x49, `patches/harness/segmap-1x/`, built by
+`scripts/build-tamafb.sh`) and the panel drops to ~2% of frame time, 0 stalls
+idle. Measured: play 1.00x, **status menu 0.52x sustained** — ~520k instr/s
+needed against a 513k ceiling (EMU-013, EMU-014).
+
+`tamafb.c` needs `-DFB_W=320 -DFB_H=400`; its defaults are `SEG_W+32 by
+SEG_H+48` and writing bands with the wrong stride puts a full-width smear on the
+glass. The build script passes them.
+
+**`ns_emu` is wall time**, so any other process on the watch — including your own
+diagnostics — is billed to "emu". 64 stalls while driving it from a shell, 2 when
+left alone. Measure idle or the number describes the instrument.
 
 **Stalls are the open thread** (next up by operator request). 29 in an otherwise
 faster emulator, 14 on `dirty 0xFC`, longest early ones 286 and 211 ms wall with
