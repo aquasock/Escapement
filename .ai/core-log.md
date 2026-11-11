@@ -1,3 +1,33 @@
+## 61 COMMIT Unreleased 2026-11-11T11:18:00-07:00
+
+#### Coming From:
+
+Unreleased fe6fd1e
+
+#### Purpose:
+
+Record the full-paint test switch as a documented setting rather than an untracked local edit, and note that enabling it was observed to destabilise the board, so the Linux work is left in its verified state before the project changes direction.
+
+#### Outcome:
+
+The switch exists and defaults off. `SHM_FULL_PAINT` in `tamacore_task.c` bypasses the dirty path entirely: with it at 1 every publish redraws and flushes the full LCD area regardless of how little changed, which is the honest worst case and the baseline any further display work should be judged against; with it at 0 behaviour is exactly as entry 60 left it and the shadow copy is still maintained, so toggling needs no other change. It is committed defaulting to 0 because turning it on was not free. A run with full paint enabled reset the board with reason 5, `ESP_RST_INT_WDT`, at least once. That is consistent with the increased frame cost driving the interrupt watchdog, but it was not characterised -- the run was abandoned when the operator decided to change direction -- so the comment records the observation and explicitly does not claim a mechanism, only that the setting has been seen to destabilise the board and that the default is therefore the verified-good path. The firmware was rebuilt and flashed after setting the default back to 0, so the source and the image on the watch agree, and the board was confirmed booting and stable at 38 s uptime on kernel #16. **This entry closes the Linux line of work, deliberately and not as a failure.** The operator's reason, recorded because it is the evidence any future decision should rest on: the board fights the OS on four separate counts and every one is a property of Linux on this SoC rather than a defect in anything built here. The kernel is XIP and fetches its instructions through the same shared cache that core 0 disables during a flash operation, so a flash write could kill core 1 outright (entries 52 to 54). Internal SRAM is directly addressable but no region of it is allocated to Linux, so the kernel has nowhere to run while that cache is off (SOC-004). NOMMU forces a patched fork stack and contiguous load segments. And core 0's idle task starves whenever the emulator falls behind the wall clock, which the task watchdog punishes with a reset (entry 57). Each of those cost a cycle or more to find and each is inherent to the arrangement rather than fixable by more work in the same direction. The plan is a fork and port of TinyDesk to the T-Watch Ultra: a desktop port contributed upstream to that project's author, then a console build in the shape of the current Linux front end for the Tama work. The reference material for that migration was gathered during this cycle and is recorded in Next Steps rather than thrown away. The core-syntax audit passed: `.ai/core.md` and `.ai/core-syntax.md` were re-read, the complete `.ai/` diff was inspected, `.ai/core.md` was not modified, and this entry was validated against the template with six sections in canonical order, sequential numbering from 60, an ISO-8601 timestamp carrying the America/Phoenix offset, prose-only Outcome and Next Steps, and Status values within the allowed set.
+
+#### Next Steps:
+
+The TinyDesk work starts from upstream `main` at v0.4.0, commit fce4c5a, not from the local checkout in `../tinydesk-work`, which sits on a `nanoesp32-node` branch well behind it. Two facts found while scoping are worth carrying forward because they contradict the obvious assumption. The operator's nanoesp32 port IS merged upstream, but as a desktop port only: it has no `main_console.c`, no `vt.c` and no `ili9340.c`, so the console mode is on the branch and not in main. And the template to copy is `ports/crowpanel7`, not nanoesp32: it is an ESP32-S3 with 8 MB PSRAM, an 800x480 LCD and a GT911 touchscreen, and it is the only upstream port that has both a display and a touch panel, which is what the watch has. Its shape is `display.c` at 1085 lines painting cell grids, `touch.c` at 223 translating the controller to SGR mouse sequences, `link_crowpanel.c` at 278, four bitmap fonts, and the usual CMakeLists, sdkconfig.defaults, board.example.conf, partitions.csv and extram.lf. The two contracts a new port implements are small: `include/tinydesk/td_vterm.h` defines a four-byte cell of char plus two colour bytes with a dirty flag, which a display port paints; and the touch contract is a single callback taking SGR mouse bytes, `bool touch_init(void (*input)(const char *, int))`. Three things differ from crowpanel7 and all three are already solved in this repository: PSRAM is QUAD where crowpanel7 sets octal, so the new port must set QUAD or it stops at boot (patches/0001-watch-quad-psram.patch, SOC-002); the panel is a CO5300 QSPI AMOLED rather than an RGB parallel LCD, and `patches/kernel/display/final/co5300.c` has the framing, window addressing and byte order; and the touch controller is a CST9217 rather than a GT911, with the unlock handshake and report block in `patches/kernel/touch/final/cst92xx.c`. Flash is 16 MB against crowpanel7's 4 MB, so the partitions have room. At the 8x16 font a 320x400 panel is 40x25 cells. The sequence agreed with the operator is the desktop port first, as the contribution to give upstream, then a console build in the shape of the current Linux front end for the Tama work. Nothing about the Tama emulator has been ported and no Tama code belongs in the upstream contribution.
+
+#### Files Modified:
+
+- patches/harness/core0/tamacore_task.c
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: N/A
+
+---
+
 ## 60 COMMIT Unreleased 2026-11-11T10:51:00-07:00
 
 #### Coming From:

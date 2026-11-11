@@ -69,6 +69,32 @@
  */
 #define YIELD_INTERVAL_US   100000
 
+/*
+ * TEST SWITCH: paint the whole frame every time, ignoring what changed.
+ *
+ * Set to 1 to disable dirty tracking entirely. Every publish then redraws and
+ * flushes the full LCD area regardless of how little moved.
+ *
+ * This exists to answer a question the dirty path cannot: what does the
+ * emulator cost when the display is not being optimised at all? With it at 0
+ * an idle pet repaints nothing and a sleeping one changes no bytes, so the
+ * measured frame cost is the cost of the WORK, not the cost of the display.
+ * Turning it on makes every frame pay the full draw and full flush, which is
+ * the honest worst case and the baseline any further display work should be
+ * judged against.
+ *
+ * The shadow copy is still kept, so toggling needs no other change.
+ *
+ * DEFAULT OFF, because turning it on was measured and is not free: with full
+ * paint on, the board reset with reason 5 (ESP_RST_INT_WDT) during a run, at
+ * least once. That is consistent with the frame cost going up until the
+ * interrupt watchdog fired, but it was not characterised -- the run was
+ * abandoned when the project changed direction -- so this is not a claim about
+ * the mechanism, only a record that the setting has been seen to destabilise
+ * the board and that the default is therefore the verified-good path.
+ */
+#define SHM_FULL_PAINT      0
+
 /* Two seconds of guest time in one call, before the first frame. This is how
  * the userspace front end starts (tamafb.c), and without it the first core-0
  * build came up blank: the paced loop alone never let the ROM finish booting. */
@@ -780,7 +806,7 @@ static void tamacore_session(uint32_t served, uint32_t *served_out)
 					int lo1 = SHM_FRAME_H, hi1 = 0;
 					int lo2 = SHM_FRAME_H, hi2 = 0;
 
-					if (dpram_shadow_valid) {
+					if (!SHM_FULL_PAINT && dpram_shadow_valid) {
 						for (b = 0; b < 0x200; b++) {
 							uint8_t changed = (uint8_t)(dp[b] ^ dpram_shadow[b]);
 							uint16_t k;
