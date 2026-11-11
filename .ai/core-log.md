@@ -1,3 +1,35 @@
+## 73 COMMIT Unreleased 2026-11-12T01:40:00-07:00
+
+#### Coming From:
+
+Unreleased 7776aef
+
+#### Purpose:
+
+Record the first app reflowed for the 40x26 grid, and the accepted state of the Bluetooth and Terminal apps.
+
+#### Outcome:
+
+`apps/bluetooth.c` now lays each of its three slots out in three rows instead of four, at 2afeb88 on branch `t-watch-ultra`, and the operator accepted both it and the Terminal app on the glass. The four rows were not four things worth saying: the pairing state had a line to itself and then a blank one, so the state and the device name share a line now and "idle, not paired" reads as well inline as it did on two lines. The detail line moved to column 1, because it is a continuation rather than a value and the ten columns it gains are the difference between "connected: keyboard and mouse" fitting and being truncated to "connected: keyboard a"; with no last event to show, that row carries the paired address instead of staying blank. The Close button is gone -- the title bar's `[x]` closes the window and the initial focus is the first slot's Pair button, so Enter and the arrow keys still work -- which gave back another row for the device list. Four strings were longer than the 37 usable columns and were shortened rather than left to truncate: the scan prompt lost "near the board", the nothing-found line lost its clause about pairing mode, and the found-count line lost "(or double-click)", which the list's own Enter handling makes moot. The net effect on the scan view is the point of the exercise: it previously began at row 19 with its device list at 21 and its buttons below the bottom of a 25-row window, so it could not be reached at all, and it now fits -- header at 15, count at 16, five device rows at 17 to 21, buttons at 23 and status at 24. `test_bluetooth`'s coordinates follow the new stride, which is the third time that test has needed updating as the layout moved; the pattern is that it clicks fixed positions, so any layout change breaks it, and that is worth knowing before the next app is reflowed. Verified on the glass: the slot list with all three button groups fitting and the closing brackets intact, and a live scan listing five devices with every line inside the frame. The host suite is 37 of 37. The port README now states that apps open maximised and that F6 is the switcher, since neither was written down anywhere a reader of the port would find it.
+
+#### Next Steps:
+
+The remaining apps each need the same treatment, and Terminal has been checked and passed with no change needed -- it fills a maximised window, which is what it is for. The ones worth looking at next are the ones with their own layout arithmetic rather than a list or a form: Files, Editor, Settings and System Monitor all place rows by hand and were drawn for a taller window. Before that, the two port-level overrides are still untested against the current tree -- `TD_SIZE_POLL_MS=0` and `TD_ACK_TIMEOUT_MS=0`, each a one-line revert -- and the three capacitive bars under the glass still act on stretches of taskbar rather than three fixed cells, with recorded edges that divide the strip into two equal zones plus a one-pixel third, so the vendor map settles that geometry before any code. The Mouse and Keyboard Bluetooth slots pair one device each and share the Combo slot's working path but have not been tried. The Linux side stays parked; its last code commit is 8645a82 and everything after it in this repository is the project log.
+
+#### Files Modified:
+
+- apps/bluetooth.c
+- tests/test_bluetooth.c
+- ports/twatchultra/README.md
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: PASS
+
+---
+
 ## 72 COMMIT Unreleased 2026-11-12T01:05:00-07:00
 
 #### Coming From:
