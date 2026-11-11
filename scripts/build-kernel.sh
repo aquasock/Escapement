@@ -232,6 +232,37 @@ grep -q 'config TOUCHSCREEN_CST92XX' "$kconfig_tp" \
 grep -q 'cst92xx.o' "$makefile_tp" \
 	|| die "cst92xx.o did not land in $makefile_tp"
 
+# The PSRAM megabyte both cores share. Read-only, and the coherency experiment
+# the core-0 design depends on (docs/cores.md). Carried whole and appended the
+# same way as the drivers above, for the same reasons.
+cp "$here"/patches/kernel/shared/final/esp_shared.c "$K/drivers/misc/esp_shared.c"
+
+kconfig_ms="$K/drivers/misc/Kconfig"
+makefile_ms="$K/drivers/misc/Makefile"
+
+if ! grep -q 'config ESP_SHARED' "$kconfig_ms"; then
+	cat >> "$kconfig_ms" <<'EOF'
+
+config ESP_SHARED
+	tristate "ESP32-S3 PSRAM window shared with core 0"
+	depends on XTENSA
+	help
+	  Exposes the top megabyte of PSRAM read-only at /proc/esp-shared.
+	  The region is outside this kernel's memory node but mapped in the
+	  MMU table both cores share, so core 0 can write a frame there and
+	  core 1 can read it without a second mapping. See docs/cores.md.
+EOF
+fi
+
+if ! grep -q 'esp_shared.o' "$makefile_ms"; then
+	printf 'obj-$(CONFIG_ESP_SHARED)\t\t+= esp_shared.o\n' >> "$makefile_ms"
+fi
+
+grep -q 'config ESP_SHARED' "$kconfig_ms" \
+	|| die "ESP_SHARED Kconfig entry did not land in $kconfig_ms"
+grep -q 'esp_shared.o' "$makefile_ms" \
+	|| die "esp_shared.o did not land in $makefile_ms"
+
 kconfig_i2c="$K/drivers/i2c/busses/Kconfig"
 makefile_i2c="$K/drivers/i2c/busses/Makefile"
 

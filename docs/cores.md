@@ -188,6 +188,43 @@ this and the design: **cache coherency**. Core 0 has a data cache and core 1 has
 none, so a firmware write needs `esp_cache_msync()` before core 1 will see it.
 That is testable through the window with no heap allocation at all.
 
+### Coherency is answered: core 0's writes arrive on core 1
+
+Tested on hardware 2026-11-10. Core 0 runs a task that writes a header and an
+incrementing counter into the window every 100 ms and calls
+`esp_cache_msync(..., ESP_CACHE_MSYNC_FLAG_INVALIDATE)`. Core 1 reads the same
+addresses through `/proc/esp-shared`. The counter advanced across every sample
+(`458 → 477 → 495 → 514 → 533`), with the header intact:
+
+```
+magic 0x53484d57 "SHMW"   self 0x3df00000   mmu 0x8070
+```
+
+`0x8070` is `MMU_ACCESS_SPIRAM | page 0x70`, which is the entry value
+`init_linux_mmap()` leaves behind — so the writer's own gate confirms the map it
+started against.
+
+The second half of the result is the more useful one. With the reader's cache
+invalidate turned **off**, the counter still advanced. Core 1 does not serve
+stale lines from that window, which matches the port's claim that it runs with
+no data cache. So the blitter needs no cache maintenance of its own; core 0's
+`esp_cache_msync()` is the only requirement, and that is cheap enough to do per
+frame.
+
+What this does **not** prove: that a full frame survives at frame rate, only
+that the mechanism is sound and one-way traffic is coherent. The first real
+test is the emulator writing pixels from core 0 and the panel showing them.
+
+Two failure modes from the earlier attempts are now understood and avoided, and
+both are worth remembering:
+
+- **Never log through the log pipe around the handoff.** `ble_hid.c` records it
+  wedging the board at this exact stage. The probe publishes into the window
+  instead, which is why it needs no logging at all.
+- **Never allocate PSRAM.** The firmware has no PSRAM heap
+  (`CONFIG_SPIRAM_USE_MEMMAP=y`), so `heap_caps` returns NULL and a probe that
+  checks for NULL silently does nothing.
+
 ---
 
 ## Summary
