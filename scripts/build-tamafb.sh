@@ -30,7 +30,7 @@ cd "$here"
 
 TC=build/toolchain/crosstool-NG/builds/xtensa-esp32s3-linux-uclibcfdpic
 CC=$TC/bin/xtensa-esp32s3-linux-uclibcfdpic-gcc
-H=${HARNESS:-$HOME/GIT/TamaHarness/portable}
+H=${HARNESS:-/run/media/vash/GIT/TamaHarness/portable}
 OUT=${1:-userspace/tamafb-1x}
 
 die() { printf 'escapement: %s\n' "$*" >&2; exit 1; }
@@ -48,11 +48,18 @@ export XTENSA_GNU_CONFIG=$here/build/toolchain/xtensa-dynconfig/esp32s3.so
 # No -DEMBED_ROM: the deployed binary reads /home/rom.bin, which keeps it at
 # 255 KB instead of 779 KB (the ROM is a 512 KB blob that must be one
 # contiguous allocation, and it is loaded at runtime anyway).
+# splb32.c comes from THIS repo, not from the harness tree. The interpreter is
+# under active optimisation and TamaHarness is not a git repository, so taking
+# it from there would mean every change is unversioned and unrevertible. The
+# vendored copy in patches/harness/splb32/ is the one that builds, and the only
+# thing still read from $HARNESS is the front end and its peripherals.
 "$CC" -O2 -Wall -Wextra -static \
     -DFB_W=320 -DFB_H=400 \
     -I"$here/patches/harness/segmap-1x" \
+    -I"$here/patches/harness/splb32" -I"$H" \
     -o "$OUT" \
-    "$H/splb32.c" "$H/ht24lc08.c" "$H/con_v3_ir.c" "$H/splb32_sound.c" \
+    "$here/patches/harness/splb32/splb32.c" \
+    "$H/ht24lc08.c" "$H/con_v3_ir.c" "$H/splb32_sound.c" \
     "$H/tamafb.c" "$here/patches/harness/segmap-1x/segmap.c"
 
 ls -l "$OUT"
