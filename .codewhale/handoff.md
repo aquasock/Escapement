@@ -85,11 +85,25 @@ Reading the reset reason took three attempts because `ctl_init_own()` cleared
 line 3, which holds it. If you add boot-scoped fields, make sure the clears are
 scoped around them.
 
+## Running it
+
+`tamacore` is an ordinary program. `./scripts/install-tamacore.sh` deploys it to
+`/home/tamacore` (0755) and installs `/etc/profile.d/home-path.sh`, which puts
+`/home` on `PATH`; then `tamacore` works by name from any login shell. Ctrl-C
+stops it, `tamacore 60` runs a minute, `-t` self-tests the buttons, `-b N` times
+the blit.
+
+**No autostart, by user decision.** There is no `/etc/init.d` entry and the
+installer asserts none exists -- an rcS hook would hand the emulator `/dev/fb0`
+and the emulated machine from power-on. `run-tama.sh` / `S51tamafb` still launch
+the OLD userspace `tamafb-1x`; do not confuse the two.
+
+`/etc` is jffs2 and survives a kernel-only flash, but a FULL image flash rewrites
+it, so re-run `./scripts/install-tamacore.sh` after one.
+
 ## Still open
 
 - Two `tamacore` instances race for the window; no mutual exclusion.
-- `run-tama.sh` / `S51tamafb` still start the old userspace `tamafb-1x`. Nothing
-  starts `tamacore` at boot yet.
 - With the emulator up, `/home/tama.sav` is only written when the guest actually
   changes its EEPROM, so after a fresh boot expect `rom:` diagnostics to differ
   from before.
