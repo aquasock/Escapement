@@ -9,7 +9,14 @@
 / {
 	memory@0 {
 		device_type = "memory";
-		reg = <0x3d800000 0x00800000>;
+		/*
+		 * 7 MB of the 8 MB chip. The firmware deliberately leaves the top
+		 * 1 MB (0x3df00000..0x3e000000) mapped in the MMU but out of this
+		 * node, so the kernel never allocates from it and the firmware can
+		 * use the same addresses from core 0. See init_linux_mmap() in
+		 * esp-hosted's linux_ll_esp32s3.c.
+		 */
+		reg = <0x3d800000 0x00700000>;
 	};
 
 	/*

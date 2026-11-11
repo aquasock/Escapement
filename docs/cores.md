@@ -157,6 +157,37 @@ constraint, and an unpushable firmware tree. The distinction worth keeping:
 **computation may cross the boundary; I/O should not**, because computation can
 be batched into a shared buffer while I/O needs a round trip per transaction.
 
+### The shared window exists: 7 MB for Linux, 1 MB for both cores
+
+As of 2026-11-10 the memory half of that design is in place and costs nothing.
+The MMU table is one global table shared by both cores, so there is no need for
+a second mapping, an `ioremap`, or `/dev/mem`: carve a hole out of Linux's
+memory node and both cores reach the same bytes at the same address.
+
+- **Linux gets 7 MB** — the DTS `memory@0` node is `0x3d800000 + 0x700000`, so
+the kernel never allocates above `0x3df00000`.
+- **The top 1 MB** (`0x3df00000..0x3e000000`) stays mapped but out of the node.
+  `init_linux_mmap()` in esp-hosted's `linux_ll_esp32s3.c` maps MMU entries
+  `0x1f0..0x1ff` onto PSRAM pages `0x70..0x7f`; with the old 8 MB map those same
+  entries were already mapped, so the region was always reachable — it just
+  belonged to Linux. Changing the node is what makes it free.
+- **Verified on hardware**: `Memory: 6536K/7168K available`, `Total pages:
+  1792` (was 2048), `MemTotal` in `/proc/meminfo` down by exactly 1024 kB.
+  Nothing else moved: `space_for_vectors` still `0x40380000`.
+
+The cost is a tighter heap, and it is worth stating plainly: the emulator's
+512 KB ROM copy into PSRAM now succeeds only on the **first** launch after a
+boot. A second launch in the same boot finds no contiguous block and falls back
+to the flash window — `rom: 512 KB PSRAM allocation refused ... 33.8% slower`.
+That is KRN-001's contiguity rule, not a new fault, but 1 MB less heap makes it
+bite consistently. Both the ROM and the frame buffer move into the window once
+the emulator runs on core 0.
+
+The remaining unknown is unchanged and is now the only thing standing between
+this and the design: **cache coherency**. Core 0 has a data cache and core 1 has
+none, so a firmware write needs `esp_cache_msync()` before core 1 will see it.
+That is testable through the window with no heap allocation at all.
+
 ---
 
 ## Summary

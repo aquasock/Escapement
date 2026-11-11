@@ -1,0 +1,107 @@
+From: Escapement
+Subject: [PATCH] linux_ll: map 7 MB for Linux and leave the top 1 MB shared
+
+The firmware keeps this project's own copy of esp-hosted, and that tree is
+never pushed (its origin is jcmvbkbc/esp-hosted, upstream). This patch carries
+the memory-split change so it survives a wiped build directory.
+
+What it does. The MMU table on the S3 is a single global table shared by both
+cores, so a carve-out needs no second mapping, no ioremap and no /dev/mem. The
+new CONFIG_LINUX_PSRAM_7M maps MMU entries 0x180..0x1ef onto PSRAM pages
+0..0x6f, which is Linux's 7 MB at 0x3d800000..0x3df00000, and leaves entries
+0x1f0..0x1ff mapped to pages 0x70..0x7f. The top 1 MB is therefore reachable
+from both cores at 0x3df00000 while the DTS memory node keeps Linux out of it.
+
+The 8M branch is unchanged; only the entry range boundary and named constants
+differ, so the two maps cannot drift apart silently.
+
+Apply from build/esp-hosted (the git root is one level above esp_hosted_ng):
+
+    cd build/esp-hosted && git apply ../../patches/harness/core0/0001-*.patch
+
+Then set the boot option and rebuild the app:
+
+    # network_adapter/sdkconfig: CONFIG_LINUX_PSRAM_7M=y
+    #                            # CONFIG_LINUX_PSRAM_8M is not set
+    ninja -C esp_hosted_ng/esp/esp_driver/network_adapter/build
+
+The kernel side of the same change is the memory@0 node in
+patches/kernel/display/final/esp32s3-devkit-c1.dts, which is 0x700000 there.
+Both halves must be flashed together: firmware with an 8 MB map and a 7 MB
+memory node wastes 1 MB, and firmware with a 7 MB map and an 8 MB node hands
+Linux memory nothing has mapped.
+
+diff --git a/esp_hosted_ng/esp/esp_driver/network_adapter/main/Kconfig.projbuild b/esp_hosted_ng/esp/esp_driver/network_adapter/main/Kconfig.projbuild
+index 6c41ae0..18ca0d0 100644
+--- a/esp_hosted_ng/esp/esp_driver/network_adapter/main/Kconfig.projbuild
++++ b/esp_hosted_ng/esp/esp_driver/network_adapter/main/Kconfig.projbuild
+@@ -17,6 +17,13 @@ menu "Linux Bootloader Configuration"
+ 	    config LINUX_PSRAM_8M
+ 		bool "8M"
+ 
++	    config LINUX_PSRAM_7M
++		bool "7M, leaving the top 1M mapped as a shared window"
++		help
++		  Linux gets 7 MB at 0x3d800000; the top 1 MB of PSRAM stays
++		  mapped at 0x3df00000 but is left out of the kernel's memory
++		  node, so both cores can share it without a second mapping.
++
+ 	    config LINUX_PSRAM_16M
+ 		bool "16M"
+ 	endchoice
+diff --git a/esp_hosted_ng/esp/esp_driver/network_adapter/main/linux_ll_esp32s3.c b/esp_hosted_ng/esp/esp_driver/network_adapter/main/linux_ll_esp32s3.c
+index 09905e8..621354f 100644
+--- a/esp_hosted_ng/esp/esp_driver/network_adapter/main/linux_ll_esp32s3.c
++++ b/esp_hosted_ng/esp/esp_driver/network_adapter/main/linux_ll_esp32s3.c
+@@ -32,13 +32,49 @@ void init_linux_mmap(void)
+ 	printf("MMU: kernel e0x14=0x%04x rootfs e0x54=0x%04x\n",
+ 	       (unsigned)dst[0x14], (unsigned)dst[0x54]);
+ 
++/*
++	 * MMU entry layout on the S3 (soc/ext_mem_defs.h): bit 14 marks an entry
++	 * invalid, bit 15 selects PSRAM as the target, and the low bits are the
++	 * 64 KB page number. Entry i lives at virtual 0x3c000000 + i*0x10000, so
++	 * 0x180 is 0x3d800000 and 0x1f0 is 0x3df00000.
++	 *
++	 * Entries 0x100..0x180 are the firmware's own PSRAM window and are
++	 * invalidated on purpose: once Linux is running, a firmware write into
++	 * ordinary PSRAM would land in memory the kernel is using.
++	 */
++#define MMU_ENTRY_INVALID  0x4000u
++#define MMU_ENTRY_SPIRAM   0x8000u
++
+ #ifdef CONFIG_LINUX_PSRAM_8M
+ 	for (i = 0x100; i < 0x180; ++i) {
+-		dst[i] = 0x4000;
++		dst[i] = MMU_ENTRY_INVALID;
+ 	}
+ 	for (i = 0x180; i < 0x200; ++i) {
+-		dst[i] = 0x8000 + (i & 0x7f);
++		dst[i] = MMU_ENTRY_SPIRAM + (i & 0x7f);
++	}
++#endif
++
++#ifdef CONFIG_LINUX_PSRAM_7M
++	/*
++	 * 7 MB for Linux, 1 MB deliberately left outside its memory node.
++	 *
++	 * The kernel's DTS declares 0x3d800000 + 0x700000, so it never
++	 * allocates above 0x3df00000. The top 16 pages stay mapped anyway,
++	 * which is the point: both cores then reach the same 1 MB at
++	 * 0x3df00000 with no second mapping, no ioremap and no /dev/mem.
++	 * That region is where a core-0 emulator can hand frames to core 1.
++	 */
++	for (i = 0x100; i < 0x180; ++i) {
++		dst[i] = MMU_ENTRY_INVALID;
++	}
++	for (i = 0x180; i < 0x1f0; ++i) {
++		dst[i] = MMU_ENTRY_SPIRAM + (i - 0x180);
++	}
++	for (i = 0x1f0; i < 0x200; ++i) {
++		dst[i] = MMU_ENTRY_SPIRAM + (i - 0x180);
+ 	}
++	printf("MMU: Linux RAM 0x3d800000..0x3df00000 (7 MB), "
++	       "shared window 0x3df00000..0x3e000000 (1 MB)\n");
+ #endif
+ #ifdef CONFIG_LINUX_PSRAM_16M
+ 	/* linearly map PSRAM to the range +16M..+32M */
