@@ -1,10 +1,10 @@
-# Handoff — Escapement, 2026-11-10T18:24
+# Handoff — Escapement, 2026-11-10T18:30
 
 Linux 7.2.4 on a T-Watch Ultra (ESP32-S3). Real Linux on the watch's own Xtensa
 cores, not emulated. This file is orientation; verify before acting on it.
 
-Canonical detail lives in `.ai/core-reference.md` (83 records, fourteen topics).
-Project history lives in `.ai/core-log.md` (48 entries; newest first — 48, 47, 46, 45, 44, 43, 42, 41, 40, 39, 38, 37, 36, 35, 34, 33, 32,
+Canonical detail lives in `.ai/core-reference.md` (84 records, fourteen topics).
+Project history lives in `.ai/core-log.md` (49 entries; newest first — 49, 48, 47, 46, 45, 44, 43, 42, 41, 40, 39, 38, 37, 36, 35, 34, 33, 32,
 31, 30, 29, 28, 27, 26, 25, 24, 23, 22, 21, 20, 19, 18, 17, then 1 through 16).
 Do not re-derive what those hold.
 
@@ -18,10 +18,10 @@ persistence, any wake-from-sleep path, and moving the emulator to core 0.
 
 ## Reconstruct (in this order)
 
-1. `git log --oneline -8` — `main` was at `19efd13`, clean and fully pushed,
+1. `git log --oneline -8` — `main` was at `cc5a7de`, clean and fully pushed,
    before the commit carrying this file.
 2. `.ai/core.md` (policy), then `.ai/core-reference.md` (hardware facts — open
-   the record, not the index line), then `.ai/core-log.md` entries 48, 47, 46.
+   the record, not the index line), then `.ai/core-log.md` entries 49, 48, 47.
 3. `git -C build/esp-hosted/esp_hosted_ng branch --show-current` — expect
    `ble-bond-wip`, five local-only commits.
 
@@ -245,9 +245,23 @@ register allocator can't drop struct accesses), removing 2 accesses of 116
 **Interpreter is vendored and safe to edit**: `patches/harness/splb32/`, built by
 `scripts/build-tamafb.sh`. TamaHarness itself has NO .git — never edit there.
 
-**Next: register cache** (a/x/y/sp/pc/flags in host locals). Target ~half the
-accesses -> ~230 cycles -> ~1.03M instr/s, the 2x the menus need. Judge against
-**516,887 instr/s** headless and the status menu on glass.
+**Micro-optimisation is capped at ~1.4x; only core 0 has the 4-7x** (EMU-016).
+Priced and EXCLUDED by measurement — do not retry:
+```
+coverage counter removed   +0.8%
+-O3 instead of -O2         -0.5%
+timers_clock compiled out  +7.7%   (breaks the guest; a ceiling)
+```
+~63 host operations per emulated instruction, which is normal for a switch
+interpreter. A register cache might reach ~45 = ~1.4x — short of the 2x the
+menus need, so menus would go 0.52x -> ~0.7x, not 1.00x.
+
+Why micro-optimisation is capped: **every host instruction costs ~7.3 cycles**
+because core 1 has no I-cache and executes from PSRAM. Working on the
+interpreter cannot change that. **EMU-004's core-0 design is the 4-7x** (core 0
+has cache + internal SRAM), still deferred, with its three constraints.
+
+Baseline to beat if anything is attempted: **517,948 instr/s** headless.
 
 **Stalls are the open thread** (next up by operator request). 29 in an otherwise
 faster emulator, 14 on `dirty 0xFC`, longest early ones 286 and 211 ms wall with

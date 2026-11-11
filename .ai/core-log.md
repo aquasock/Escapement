@@ -1,3 +1,33 @@
+## 49 COMMIT Unreleased 2026-11-10T18:30:39-07:00
+
+#### Coming From:
+
+Unreleased cc5a7de
+
+#### Purpose:
+
+Price the remaining suspects in the interpreter before rewriting it, so the rewrite is aimed at something real.
+
+#### Outcome:
+
+The rewrite was not done, and the measurements are the reason: the interpreter is already at normal efficiency for its design, so micro-optimisation cannot deliver what the status menu needs. Three suspects were priced and all three are small. Removing the per-instruction coverage counter gave +0.8 percent. Compiling at `-O3` instead of `-O2` gave -0.5 percent, and 10 KB more code. Skipping the `timers_clock` call entirely -- a throwaway build that breaks the guest and is therefore a ceiling rather than a shipping option -- gave +7.7 percent, 517948 to 557764 instructions per second. What is left is `step_core` and `exec_op_sem`, and the arithmetic says there is not much there to take: at 463 native cycles per emulated instruction and EMU-007's measured 7.3 cycles per host operation, the interpreter executes roughly **63 host operations per emulated instruction**, which is the normal range for a switch-based 6502 interpreter rather than a bloated one. This is the third correction to the optimisation plan in one session and it inverts the recommendation. EMU-005's "3-8x available" was derived from 1181 cycles per emulated instruction -- the corebench figure, not this workload -- and at 464 cycles and ~63 host operations there is no 2x sitting in the interpreter. A register cache removing most host memory traffic might reach ~45 host operations, about **1.4x**, which would take the menus from 0.52x to roughly 0.7x rather than 1.00x. The reason micro-optimisation is capped is architectural and was already recorded in EMU-004 from the other direction: every host instruction costs about 7.3 cycles because core 1 has no I-cache and executes from PSRAM, and no change to the interpreter alters what a host instruction costs. The 4-7x is on core 0, which has cache and reachable internal SRAM, and that means running the emulation there and leaving core 1 to blit - a different kind of change from anything attempted here, still deferred by user decision, with its three recorded constraints: core 0 owns the WiFi link the console depends on and starving it trips the FreeRTOS watchdog, a flash write from core 0 after Linux is up aborts, and the firmware tree must never be pushed. Nothing was left in the tree or on the watch from the experiments: the probe build was removed from both, and `tamafb-1x` remains the deployed emulator. The core-syntax audit passed: `.ai/core.md` and `.ai/core-syntax.md` were re-read, the complete `.ai/` diff was inspected, `.ai/core.md` was not modified, all YAML blocks in the reference parse and all 84 records carry the ten required fields with unique ids, and this entry was validated against the template with six sections in canonical order, sequential numbering from 48, an ISO-8601 timestamp carrying the America/Phoenix offset, prose-only Outcome and Next Steps, and Status values within the allowed set.
+
+#### Next Steps:
+
+There are two honest paths and they should be chosen deliberately rather than drifted into. The first is to accept the emulator as it is: it plays at 1.00x, the panel costs 2 percent of frame time, the menus run at 0.52x, and every cheap lever has been measured and excluded. That is a complete and working state. The second is EMU-004's core-0 design, which is the only thing with the right magnitude - 4-7x from cache and internal SRAM - and which needs a display buffer shared between cores and a thin blitter left on core 1. It carries the three constraints recorded in EMU-004 and it is deferred by user decision, so it needs an explicit decision to start rather than an inference. A register cache is not worth a cycle on its own: 1.4x does not reach the 2x the menus need and would be paid for with a rewrite of a 970-case switch. If a host-instruction counter is ever wanted to close the last gap in the model, it belongs with the core-0 work rather than before it. The deferred items are unchanged and none should be started without asking: BLE media keys, the Rii K06 touchpad and Logitech keyboard, firmware-side BLE bond persistence, wake-from-sleep, and moving the Tamagotchi emulator to core 0.
+
+#### Files Modified:
+
+- .ai/core-reference.md
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: PASS
+
+---
+
 ## 48 COMMIT Unreleased 2026-11-10T18:23:33-07:00
 
 #### Coming From:

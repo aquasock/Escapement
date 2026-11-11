@@ -153,6 +153,7 @@ Topic IDs are the `record_id` prefix. An entry reserves a name; it does not clai
 | What resolution is the Tamagotchi LCD really, and does rendering it 1:1 help? | EMU | EMU-013 |
 | Why does the status menu run at half speed when play is fine? | EMU | EMU-014 |
 | Where do the 464 cycles per emulated instruction actually go? | EMU | EMU-015 |
+| Is there 2x left in the interpreter, or is 0.52x near the floor? | EMU | EMU-016 |
 | Why did the emulator speed up when the touch daemon was retired? | EMU | EMU-012 |
 | Why does a 512 KB allocation work once and then fail? | KERNEL | KRN-004 |
 | Why not put the hardware behind the RTOS on core 0? | KERNEL | KRN-005 |
@@ -1433,6 +1434,22 @@ EMU-010: "The touch daemon costs the emulator about 30 percent of its throughput
     - "userspace/memlat.c on the watch: dependent PSRAM load 51.80 ns, sequential stream 32.88 ns/byte"
     - "EMU-006 for the guest-access share this extends, and EMU-011 for the cross-benchmark trap described below"
   verification: "Measured on hardware 2026-11-10: 516887 instructions/s from tamafb's bench against a 4 MHz guest, and the instruction mix counted by disassembly of the same source. A measurement-hygiene error is recorded with this: 1181 native cycles per instruction is the corebench/flash-ROM figure (EMU-006) and 464 is the tamafb/PSRAM figure, and they are not comparable because corebench runs a synthetic loop while tamafb runs the real ROM which sleeps most steps. Both figures are right for their own workload. EMU-011 already states this rule and this cycle violated it while quoting it, which is why the rule is repeated here."
+
+
+- record_id: EMU-016
+  kind: EMU
+  topic_id: EMU
+  status: VERIFIED
+  verified_date: 2026-11-10
+  title: "The interpreter is already at normal efficiency: micro-optimisation has about 1.4x left, and only core 0 has the 4-7x"
+  statement: "Three suspects were priced by measurement and all three are small: removing the per-instruction coverage counter gave +0.8 percent, compiling at -O3 instead of -O2 gave -0.5 percent, and skipping the timers_clock call entirely -- which breaks the guest and is a ceiling, not a shipping change -- gave +7.7 percent (517948 to 557764 instructions/s). What remains is step_core and exec_op_sem. At 463 native cycles per emulated instruction and EMU-007's measured 30.5 ns (7.3 cycles) per host operation in this code, the interpreter executes roughly 63 host operations per emulated instruction, which is the normal range for a switch-based 6502 interpreter."
+  consequence: "This changes the recommendation, and it is the third correction to the optimisation plan in one session. EMU-005's '3-8x available' was derived from 1181 cycles per emulated instruction, which is the corebench figure and not this workload; at 464 cycles and ~63 host operations the design is near the practical floor for its own shape. A register cache that removes most of the host memory traffic could plausibly reach ~45 host operations, which is about 1.4x -- helpful but short of the 2x EMU-014 says the status menu needs, so the menus would improve to something like 0.7x rather than reaching 1.00x. The reason micro-optimisation is capped this way is architectural and already recorded: every host instruction costs about 7.3 cycles because core 1 has no I-cache and executes from PSRAM, and no amount of work on the interpreter changes what a host instruction costs. EMU-004 states the same conclusion from the other direction -- the fix is to run the emulation on core 0, which has cache and reachable internal SRAM, and leave core 1 to blit. That converts 7.3 cycles per host operation into roughly 1-2, which is the 4-7x, and it is a different kind of change from anything attempted here. It stays deferred by user decision, with its three recorded constraints: core 0 owns the WiFi link the console depends on and starving it trips the FreeRTOS watchdog (BLE-004), a flash write from core 0 after Linux is up aborts (JFS-001), and the firmware tree must never be pushed."
+  sources:
+    - "on the watch: tamafb bench at 517948 instr/s with timers, 557764 with the timers_clock call compiled out via a throwaway -DSPLB_NOTIMERS build"
+    - "EMU-015 for the 464-cycle figure and the 116 host memory operations, EMU-007 for 30.5 ns per host operation over 1 KB of code"
+    - "EMU-014 for the ~520k instructions/s the status menu needs, EMU-005 for the 1181-cycle basis this corrects"
+    - "EMU-004 for the core-0-design consequence and its three constraints"
+  verification: "Measured on hardware 2026-11-10 across four boots, one binary per boot because the 512 KB ROM allocation is a one-shot per boot: baseline 516887 and 517948, coverage-guarded 521199, -O3 514700, timers compiled out 557764. The throwaway build was removed from the watch and the tree afterwards. The 63-host-operations figure is derived from the measured 464 cycles and EMU-007's measured per-operation cost, not counted directly -- a host-instruction counter would settle it, and is not needed to support the conclusion, which is that the remaining suspects are small and the per-instruction cost is architectural."
 
 - record_id: EMU-012
   kind: EMU
