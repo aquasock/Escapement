@@ -1,3 +1,35 @@
+## 70 COMMIT Unreleased 2026-11-11T23:20:00-07:00
+
+#### Coming From:
+
+Unreleased 0e5149a
+
+#### Purpose:
+
+Record that the host terminal's size answer was reaching the window manager, and review the port's earlier patches against that finding.
+
+#### Outcome:
+
+The layout faults that had been treated as separate app bugs were one bug. The desktop asks its terminal for the size with `ESC[6n` and lays itself out for the answer, and two answers reached the link: the panel's, from `display.c`'s own `td_vterm` through the inject queue, and the host terminal's whenever one was attached over USB. `link_twatch.c`'s header comment stated the host's answer is dropped and `link_read` passed it straight through instead, so a `screen` session, which replies 74x34 by default, resized the whole window manager to 74 columns on a 40-column panel: windows measured themselves for 74, the panel clipped them, and text was cut mid-word with nothing to say so. That is what made the Bluetooth window and every message box look broken, and neither could be fixed properly while the grid the window manager believed in was not the grid on the glass. The filter now removes exactly `ESC[<rows>;<cols>R` from the USB side and nothing else -- the panel's answer arrives by the other path untouched, keys and mouse reports and pastes pass through unchanged, and a sequence that starts like a report but is not one is put back as literal text so no input can be swallowed. `td_msgbox` also wraps: it took each caller line at face value and measured the longest, which on a narrow screen clipped the text to "Forget the combo K06 BLE Keyboard? I", and it now re-wraps to the screen width, treating a single newline as a soft break and a blank line as a paragraph break, measuring the window from the wrapped result. Two faults were introduced and caught in that work, both worth recording because both looked reasonable: copying each source line into the `TD_TEXT_MAX` buffer before wrapping truncated anything over 48 columns, so the wrap faithfully wrapped what was left and a sentence lost its beginning; and the first filter could emit more bytes than it consumed, since an `ESC` pair expands when flushed, and that output was not bounded to the caller's buffer, so it overran `hal_mux`'s 64-byte buffer and took the screen down entirely. `test_bluetooth` asserted the old 72x34 layout -- columns 11, 23 and 31, rows 8 + 5i, scan row 30 -- and had been failing since the full-screen reflow rather than since today; its coordinates follow the computed layout now and the host suite is 37 of 37. Verified on the watch by answering the size query with 34;74R as a 74x34 terminal does: the desktop stayed 40x26 with the taskbar on row 26, and the Forget confirmation wrapped to complete sentences with its buttons on the last row. Reviewing the port's own earlier commits against this finding: the rectangle flush and the message-box wrapping are sound and stand on their own; the Bluetooth full-screen reflow is the right shape for a 40x26 panel but its commit message blames fixed constants for clipping that the size bug was causing; and `TD_SIZE_POLL_MS=0` is now doubtful, because its stated reason was a single dirty cursor cell while the poll may have been genuinely harmful only while two size answers were fighting over the grid.
+
+#### Next Steps:
+
+Two port-level overrides may now be compensating for faults that are fixed elsewhere and should be re-tested before they are kept: `TD_SIZE_POLL_MS=0`, whose justification was a dirty cursor cell, and `TD_ACK_TIMEOUT_MS=0`, whose justification was frame pacing never turning itself off. Both are one-file experiments with an obvious revert, and neither has been run against the current tree. The apps are the remaining work and are to be reflowed one at a time for the 40x26 grid, with the caveat that any app whose layout was judged broken before this entry should be judged again now, because the grid it was laid out against was not the one on the glass. The three capacitive bars under the glass still act on stretches of taskbar rather than three fixed cells, and their recorded edges divide the strip into two equal zones plus a one-pixel third, so the vendor map is the place to settle that first. The Mouse and Keyboard slots pair one device each and share the Combo slot's working code path but have not been tried. The Linux side stays parked with its restore image intact: its last code commit is 8645a82 and everything after it in this repository is the project log, while all port code lives in the fork.
+
+#### Files Modified:
+
+- ports/twatchultra/main/link_twatch.c
+- src/widgets.c
+- tests/test_bluetooth.c
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: NOT RUN
+
+---
+
 ## 69 COMMIT Unreleased 2026-11-11T22:05:00-07:00
 
 #### Coming From:
