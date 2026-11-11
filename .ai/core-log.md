@@ -1,3 +1,33 @@
+## 60 COMMIT Unreleased 2026-11-11T10:51:00-07:00
+
+#### Coming From:
+
+Unreleased 759b222
+
+#### Purpose:
+
+Record the operator's acceptance of the corrected display, which entry 59 could not state because it was written before the board was looked at.
+
+#### Outcome:
+
+The operator reports that the display renders properly and accepts it, so the geometry correction in entry 59 is verified on the glass and the `User Test: NOT RUN` it recorded is now settled. This entry exists rather than an edit to entry 59 because a committed entry is settled history and the result arrived after the commit; the earlier entry is named here so the two are read together. What the operator confirmed is the thing the cycle set out to fix: the pet is a 32x30 dot matrix and the ten status icons render as glyphs rather than as quantised blocks, which is what the 49x49 map had been producing by rasterising them at 49 pixels and magnifying every map pixel six times. The fix is therefore confirmed at all three stages -- the two coordinate spaces emitted by `gen_map.py`, the renderer drawing matrix as dot blocks and icons as runs, and the shared contract in `shmproto.h` agreeing with the generated map under the static asserts. Two things stated as incomplete in entry 59 remain incomplete and are unaffected by this acceptance. The two-band dirty tracking is computed but not published: `lo1`/`hi1` for the top icon row and `lo2`/`hi2` for the matrix and bottom icons are tracked separately in `tamacore_task.c`, but `dirty_lo`/`dirty_hi` in `struct shm_ctl` still carry their union, so core 1 blits one range and the blit-side saving of an icon flip is not yet realised. And the draw cost after the change has not been measured against the pre-change figure: the 67.8 ms `draw_max` seen on the first samples of a fresh boot includes the initial full paint and is not comparable to the 47 ms steady-state number in entry 58, so no claim is made here about whether the smaller frame made drawing cheaper. Nothing else was changed by this cycle.
+
+#### Next Steps:
+
+The two-band blit is the next piece and is the only part of the icon optimisation still on the table, since the drawing side already resolves to per-item spans. It needs a second `(lo, hi)` pair in `struct shm_ctl` and `userspace/tamacore.c` taught to blit both ranges, which makes it a shared-structure change: both halves flashed together and `scripts/check-vectors.sh` passing first, exactly as with entries 54 and 59. Worth measuring before and after, because the benefit depends on how often the two bands are genuinely disjoint in practice -- the assumed case is a status icon toggling while the pet is idle, but the pet animates continuously, so the matrix band is usually dirty anyway and the saving may be smaller than the model suggests. A clean steady-state `draw_max` and blit measurement on the corrected geometry should come first, since that is the number any further display work would be judged against and entry 59 deliberately left it unclaimed. Beyond that the `HARNESS` build-time dependency in `patches/harness/segmap-1x/gen_map.py` is still an outside-tree reference that should be vendored or documented.
+
+#### Files Modified:
+
+None.
+
+#### Status:
+
+- Build: N/A
+- Deployment: N/A
+- User Test: PASS
+
+---
+
 ## 59 COMMIT Unreleased 2026-11-11T10:40:00-07:00
 
 #### Coming From:
