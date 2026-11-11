@@ -1,3 +1,34 @@
+## 75 COMMIT Unreleased 2026-11-12T03:15:00-07:00
+
+#### Coming From:
+
+Unreleased 61d5e9b
+
+#### Purpose:
+
+Record the Network app's reflow for the 40x26 grid, and the two app checks that passed either side of it.
+
+#### Outcome:
+
+At 5f0b79a on branch `t-watch-ultra`, `apps/network.c` picks its layout from the width of the client it was actually given. The window had asked for 68x23 with a 64-column minimum and placed buttons at columns 30, 47 and 52, so on a 40-column panel everything past column 38 was off the glass, and the four bottom buttons needed 43 columns with their captions. Wide windows (60 columns or more) are unchanged; narrow ones stack one item per row with short captions where the long ones do not fit -- "Telnet desktop" and "Display" instead of "...(port 23)" and "Displays...", and Scan/Join/Leave/Forget, which are 35 columns back to back. The Access point dialog had the same fault one level down, a 56-wide window with two 34-column text fields starting at column 11, six columns too wide once the window manager maximises it; those fields size themselves from the client now and its hint line was shortened so it no longer stops mid-sentence. Search, Editor, Terminal and Files had already been checked by the operator and passed with no change, and Files' layout was confirmed good even though the redraw fault recorded in entry 74 still affects it. Two mistakes were made inside this cycle and both were caught before delivery. The list height was computed from the client height at launch, which looked equivalent to the relative `-2` it replaced and was not: widgets keep the height they are built with, so the first resize pushed the list past the bottom of the client. `test_native_apps` found it, because it launches every app, resizes each to its minimum and checks that every focusable widget lies inside the client -- the first time in this project that guard has paid for itself, and worth remembering when the remaining apps are reflowed. The narrow button positions were also first spaced by intuition rather than arithmetic and overlapped, because a button is its caption plus four columns; the positions are computed now. A stray `fprintf` left in `td_msgbox` during the debugging in entry 74 was removed in the same commit. Verified on the glass: the Network window with its list and all four bottom buttons inside the frame, and the Access point dialog with both text fields and its Save/Cancel row, read back over the USB link. The host suite is 37 of 37.
+
+#### Next Steps:
+
+The apps still to check maximised on 40x26 are Settings, System Monitor, Task Manager, Log Viewer, Users, Startup, Store, Remote Desktop and the Software Update window, with System Monitor and Task Manager the likeliest to need work since both lay rows out by hand. Two patterns are now established and should be reused rather than reinvented: measure `td_win_client()` and branch, as the Network and Bluetooth windows do, and keep every list height relative so a resize cannot push it out of the client. The parked redraw fault from entry 74 is still parked; forcing `td_full_redraw()` with the garbage visible is the experiment that would localise it. The remaining port overrides `TD_SIZE_POLL_MS=0` and `TD_ACK_TIMEOUT_MS=0` are still untested against the current tree, and the three capacitive bars under the glass still act on stretches of taskbar rather than three fixed cells, awaiting the vendor map. The Linux side stays parked; its last code commit is 8645a82 and everything after it in this repository is the project log.
+
+#### Files Modified:
+
+- apps/network.c
+- src/widgets.c
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: PASS
+
+---
+
 ## 74 COMMIT Unreleased 2026-11-12T02:30:00-07:00
 
 #### Coming From:
