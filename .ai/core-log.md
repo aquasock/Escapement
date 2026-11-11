@@ -1,3 +1,34 @@
+## 69 COMMIT Unreleased 2026-11-11T22:05:00-07:00
+
+#### Coming From:
+
+Unreleased da7f3b4
+
+#### Purpose:
+
+Record the cause of laggy pointer motion on Bluetooth input when nothing was draining the USB port, and the correction of a measurement that had been read wrong twice.
+
+#### Outcome:
+
+The symptom was precise and the operator supplied the discriminator: with a Bluetooth combo keyboard and mouse driving the watch, dragging the pointer was laggy whenever the watch was plugged into a PC with no terminal open, while the same desktop over a `screen` session was smooth. Only the input path and the state of the host differed, so the fault was at the link, not in the desktop's diff. It was `link_write` in `ports/twatchultra/main/link_twatch.c`, which wrote the USB mirror in 256-byte chunks with a 150 ms timeout each and then returned `len` regardless of what it had actually written; two faults in one function, a stall of up to about 450 ms per frame and a false report that every frame had been delivered. The gate that was meant to prevent this made it worse: `usb_serial_jtag_is_connected()` reports only that a USB HOST is present, by watching for SOF packets, and says nothing about whether anything is reading, so the mirror ran with no reader, the driver's 1 KB transmit ring stayed full, and every frame blocked the desktop while the panel already held a correct picture. The fix separates what the two outputs are for: `display_write()` always receives the whole buffer because the panel is local and authoritative and must never lose a byte, the mirror gets a fixed 15 ms budget per frame, and a mirror that cannot finish a frame is marked stale but deliberately not repaired, since a repaint requested there would cost a full compose and a full panel repaint on every frame while nobody is watching; the first frame that does get through completely is the proof that something is reading again, and that is what triggers the catch-up. `len` is still returned, because the mirror and the panel are the same call and a short count makes the renderer drop bytes the panel needs. Two failed attempts belong in the record because both looked reasonable: honouring the renderer's documented `write_failed` contract by returning a short count booted the board to a blank screen for exactly that reason, and a zero-wait write was too strict, because a single momentarily full ring dropped the frame and the identical retry then failed for ever. Both were caught by the screen coming back empty rather than by reasoning. The measurement discipline failed twice in this cycle and is worth naming: an instrument that logged large flushes was read while the Log Viewer was open, and the Log Viewer repainting itself produced the very full-screen rectangles that were then blamed on pointer motion, so the instrument measured its own observer; and separately a "cells" figure was counted from cursor-jump sequences rather than from characters, which made a whole-screen resync look like 25 changed cells. The operator's own report -- one large refresh on the first pointer move -- is what identified the resync correctly. Once the port was quiet the desktop was measured sending 30 to 49 single cells per frame during motion, never a full repaint, which is the diff doing its job. The operator confirmed the result as working perfectly with the mirror no longer blocking.
+
+#### Next Steps:
+
+The apps are the remaining work and are to be stepped through one at a time, reflowed for the 40x26 grid the way the Bluetooth window was, since several still lay themselves out for a screen larger than this board has. The three capacitive bars under the glass still act on stretches of taskbar rather than three fixed cells, and their recorded edges divide the strip into two equal zones plus a one-pixel third, so the vendor map is the place to settle that before writing a fix. The Mouse and Keyboard slots pair one device each and share the Combo slot's working code path but have not been tried. Nothing outstanding is known about the display, touch, the USB link or Bluetooth. The Linux side stays parked at da7f3b4 with its restore image intact.
+
+#### Files Modified:
+
+- ports/twatchultra/main/link_twatch.c
+- ports/twatchultra/board.example.conf
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: PASS
+
+---
+
 ## 68 COMMIT Unreleased 2026-11-11T21:26:00-07:00
 
 #### Coming From:
