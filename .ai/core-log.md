@@ -1,3 +1,35 @@
+## 68 COMMIT Unreleased 2026-11-11T21:26:00-07:00
+
+#### Coming From:
+
+Unreleased 2d45777
+
+#### Purpose:
+
+Record that the panel renders one row taller than the measured rectangle, which is a geometry fact worth having before any later work assumes 320x400 is the hard boundary.
+
+#### Outcome:
+
+The measured unclipped rectangle for this glass is 320x400 at (45,45) -- 45 px inset on every side, which is what the 45-degree chamfers allow as a rectangle, and what the Linux driver used. That is now known to be conservative at the bottom edge. In `~/GIT/tinydesk-twatch` at 24ad3a2 on branch `t-watch-ultra`, the framebuffer is 320x416 and the desktop reports 40x26: one 16-pixel row added BELOW the measured rectangle, reaching glass row 461 where the measured bottom edge is 457. The last four pixels of that row are past the inset and are visible, because the chamfers cut the corners rather than the middle of a long edge. So the width is the hard limit and the height has slack -- which is the useful part of this record, since the reference library states the rectangle as a single fact and a later change could reasonably have taken 400 as a boundary not to cross. No code path needed altering: `DISPLAY_MAX_ROWS` and the terminal size both derive from `DISPLAY_H`, and the desktop asks the link for its size, so raising the height raised the grid. One wrong turn is worth recording too: an earlier attempt at this same experiment widened the framebuffer by one column each side instead -- 336 px and 42 columns, origin in to 37 -- and was built but never flashed, so nothing about the width was learned and no column experiment has been run. Verified on the glass: the log reads `tinydesk: desktop 40x26`, the taskbar moved down to row 26, and the Image Viewer icon that had been off the bottom filled the new row 25. The operator accepted it.
+
+#### Next Steps:
+
+The width has not been probed at all, and that is now the interesting direction: the same four pixels of slack probably exist at the left and right edges, so one extra column each side (336 px, 42 columns, origin 37) is the obvious next experiment and was built once without being flashed. The bottom row's slack is also unmeasured more precisely than "four pixels is enough", so if a later layout ever wants two more rows that is where the limit would be found. Separately: the three capacitive bars under the glass still act on stretches of taskbar rather than three fixed cells, with the recorded edges dividing the strip into two equal zones plus a one-pixel third; the Mouse and Keyboard slots pair one device each and share the working Combo slot's code path but have not been tried. The Linux side stays parked at 2d45777 with its restore image intact.
+
+#### Files Modified:
+
+- ports/twatchultra/main/display.h
+- ports/twatchultra/main/display.c
+- ports/twatchultra/README.md
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: PASS
+
+---
+
 ## 67 COMMIT Unreleased 2026-11-11T21:10:00-07:00
 
 #### Coming From:
