@@ -1,3 +1,33 @@
+## 47 COMMIT Unreleased 2026-11-10T18:01:56-07:00
+
+#### Coming From:
+
+Unreleased 0ffbddc
+
+#### Purpose:
+
+Capture a full 16 MiB backup of the state in which the emulator renders at the guest LCD's true 49x49 resolution, taken from a cold boot.
+
+#### Outcome:
+
+`~/twatch-backup/working-2026-11-10-1756.bin` is the current recoverable state, 16 MiB read at 627.0 kbit/s in 214.1 seconds, sha256 `a7fcf01083d83637161ec12877c731f86f6f6b83aaa981afa7cc808edf3b833b`. It is the first image carrying the 1:1 emulator, so it is the first that restores a watch able to play the Tamagotchi without the panel competing for the frame budget. The watch was rebooted first and every subsystem re-verified before the read, so this is a cold-boot state: touch interrupt driven at `idle 5000 ms, active 20 ms, release 250 ms`, `drv2605` bound and reporting `DRV2605 ready, ERM motor`, PMU capacity 100 with `usb_online` 1, `rtc0` at 00:56:51, fb0 at 320x400, and `/home/tamafb-1x` present at 255176 bytes. The image was verified three ways. The stored `.sha256` matches an independent `sha256sum`; the kernel extracted from `0x140000` is byte-identical to the built `xipImage` (`eb1e42ac…`); and the `/home` partition carries the jffs2 magic `85 19` at `0xcc0000`, confirming the partition is present and formatted with content. That third check replaced a check that did not work, and the failure is worth recording: a raw scan of the image for the deployed binary's hash finds nothing, because jffs2 compresses its contents. Absence from such a scan is not evidence that a file is missing, and a future session should not read it that way. The backup's trailing hard reset rebooted the watch, which was confirmed healthy afterwards: `drv2605` re-probed twice in the log, `cst92xx` re-registered on IRQ 33, and `/home/tamafb-1x` was still there. At the operator's instruction the tree was left uncommitted pending the interpreter work; this entry covers the backup only. The core-syntax audit passed: `.ai/core.md` and `.ai/core-syntax.md` were re-read, the complete `.ai/` diff was inspected, `.ai/core.md` was not modified, and this entry was validated against the template with six sections in canonical order, sequential numbering from 46, an ISO-8601 timestamp carrying the America/Phoenix offset, prose-only Outcome and Next Steps, and Status values within the allowed set.
+
+#### Next Steps:
+
+The interpreter is the next and only remaining performance problem, and this image is the restore point for that work: 1756 restores a watch whose emulator plays at 1.00x and slows to 0.52x in the status menu, so any interpreter change can be judged against a known baseline in four minutes. The target from EMU-014 is roughly a 2x improvement in instructions per second to make the menus comfortable and 4x to leave headroom, and EMU-005/006 locate the cost in the interpreter's own instruction stream at about 1181 native cycles per emulated instruction, 97 percent of it there rather than in memory access, with guest register fields reloaded per access across a 6796-instruction switch. The recommended first move -- keeping guest registers, flags and PC in host variables across a decoded block -- is userspace-only and carries no firmware risk. Nothing else about the display needs attention: the panel is 2 percent of frame time and should be left alone. The deferred items are unchanged and none should be started without asking: BLE media keys, the Rii K06 touchpad and Logitech keyboard, firmware-side BLE bond persistence, wake-from-sleep, and moving the Tamagotchi emulator to core 0.
+
+#### Files Modified:
+
+- None.
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: PASS
+
+---
+
 ## 46 COMMIT Unreleased 2026-11-10T17:54:48-07:00
 
 #### Coming From:

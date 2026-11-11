@@ -1,10 +1,10 @@
-# Handoff — Escapement, 2026-11-10T17:55
+# Handoff — Escapement, 2026-11-10T18:02
 
 Linux 7.2.4 on a T-Watch Ultra (ESP32-S3). Real Linux on the watch's own Xtensa
 cores, not emulated. This file is orientation; verify before acting on it.
 
 Canonical detail lives in `.ai/core-reference.md` (82 records, fourteen topics).
-Project history lives in `.ai/core-log.md` (46 entries; newest first — 46, 45, 44, 43, 42, 41, 40, 39, 38, 37, 36, 35, 34, 33, 32,
+Project history lives in `.ai/core-log.md` (47 entries; newest first — 47, 46, 45, 44, 43, 42, 41, 40, 39, 38, 37, 36, 35, 34, 33, 32,
 31, 30, 29, 28, 27, 26, 25, 24, 23, 22, 21, 20, 19, 18, 17, then 1 through 16).
 Do not re-derive what those hold.
 
@@ -18,10 +18,10 @@ persistence, any wake-from-sleep path, and moving the emulator to core 0.
 
 ## Reconstruct (in this order)
 
-1. `git log --oneline -8` — `main` was at `3f6b19c`, clean and fully pushed,
+1. `git log --oneline -8` — `main` was at `0ffbddc`, clean and fully pushed,
    before the commit carrying this file.
 2. `.ai/core.md` (policy), then `.ai/core-reference.md` (hardware facts — open
-   the record, not the index line), then `.ai/core-log.md` entries 46, 45, 44.
+   the record, not the index line), then `.ai/core-log.md` entries 47, 46, 45.
 3. `git -C build/esp-hosted/esp_hosted_ng branch --show-current` — expect
    `ble-bond-wip`, five local-only commits.
 
@@ -247,10 +247,17 @@ time and clean probe semantics and nothing else. Fix it in the touch cycle.
 
 ## Backups — read the directory, do not trust this file
 
-**`working-2026-11-10-1703.bin` is the newest verified image.** Taken
-2026-11-10 17:03, 16 MiB, sha256 `91ff286e…`, kernel inside byte-identical to
-the built `xipImage` (`a8c213d4…`). It predates the chunk-loop MMIO change only,
-which measured as a no-op, so restoring it costs nothing functional.
+**`working-2026-11-10-1756.bin` is the newest verified image.** Taken
+2026-11-10 18:00, 16 MiB, sha256 `a7fcf010…`, kernel inside byte-identical to
+the built `xipImage` (`eb1e42ac…`), taken **after a reboot** so it is a
+cold-boot state. The `/home` partition carries the jffs2 magic `85 19` at
+`0xcc0000`, so it holds the deployed `/home` content — including `tamafb-1x`.
+The binary itself is not greppable in the image because jffs2 is compressed;
+absence from a raw scan is not evidence of absence.
+
+`working-2026-11-10-1703.bin` (sha256 `91ff286e…`) is the previous image. It
+predates only the chunk-loop MMIO change, which measured as a no-op, and this
+cycle, which touched no kernel code.
 
 `working-2026-11-10-1621.bin` (sha256 `464b0413…`) is the previous complete
 state and the one with the longest verification trail: touch interrupt-driven at
@@ -290,7 +297,7 @@ recovery line has no literal `NACK:` because `%s` supplies it at the call site.
 ~/twatch-backup/twatch-factory-16MB.bin       471c9a21  stock
 ```
 
-**1703 is the one to restore.** 1053 remains the fallback if the hardware-I2C
+**1756 is the one to restore.** 1053 remains the fallback if the hardware-I2C
 path is ever suspected: it is the bit-banged build with the old userspace touch
 daemon, fully functional for its time. Restore command:
 
