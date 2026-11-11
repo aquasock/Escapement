@@ -1,3 +1,33 @@
+## 53 COMMIT Unreleased 2026-11-11T09:40:00-07:00
+
+#### Coming From:
+
+Unreleased 2436f59
+
+#### Purpose:
+
+Correct three reference records that wrongly claimed Linux has no reachable internal SRAM, and test the interrupt-level theory for why a flash write during emulator play still reboots the board.
+
+#### Outcome:
+
+The records were wrong and are corrected, and the interrupt-level theory is disproved. **The correction.** LCD-012, EMU-003 and EMU-004 all stated that this port has no internal SRAM the kernel can reach, and that record was used to conclude both that DMA was unimplementable and that the emulator had no escape from PSRAM latency. That is false, and the proof is already in the build: the kernel's System.map carries 42 symbols in 0x4038xxxx, including `_WindowVectors_text_start`, `_WindowOverflow4/8/12`, `_WindowUnderflow4/8/12` and `_exception_text`, and `CONFIG_VECTORS_ADDR` is 0x40380000 -- which is internal IRAM. Linux executes there every boot. The error was conflating MMU-mapped with reachable: external memory is reached through the MMU as 64 KiB pages in 0x3C000000..0x3DFFFFFF, while internal memory is directly addressed and needs no mapping at all, IRAM being 0x40370000..0x403E0000 and DRAM 0x3FC88000..0x3FD00000 per the SoC headers. What is actually true, and narrower, is that Linux owns none of internal DRAM: the System.map has no symbol in 0x3FCAxxxx, the device tree's memory node covers PSRAM only, and the firmware owns that region -- so the obstacle to putting kernel code or DMA descriptors in internal RAM is that nothing has allocated it, not that it cannot be addressed. The fix pattern already exists in `space_for_vectors`, where the firmware reserves 4 KiB of internal IRAM and the kernel is told the address. A new record, SOC-004, states all of this positively with its sources, and the three records were revised in place with revision notes naming this entry, as the reference's own rules require; SOC-004 is registered in the topic catalog, the fast lookup index and the routing table, and `last_reviewed` moved to 2026-11-11. Validation is structural: the file parses as six YAML blocks, 86 records with 86 unique ids, every record carries the ten required fields, no index line lacks a record, every routing target resolves, and all fences balance; SOC-004 itself has an index line, and the twenty records that still lack one are listed in Next Steps as a pre-existing defect rather than counted as fixed here. **The check.** The theory was that `local_irq_save()` on this core only masks interrupt levels at or below three -- it compiles to `rsil 3`, and `XCHAL_EXCM_LEVEL` is 3 with `XCHAL_NUM_INTLEVELS` 6, leaving levels 4, 5 and 6 unmasked, five interrupts living at level 4 or 5 including INT16 at 5 and INT24/25/28/30 at 4. If any of those were in use, its handler would run from flash inside the cache-off window and kill core 1 regardless of how IRAM-resident the wait loop is. The theory is dead: every interrupt the board actually raises is at level 1. `/proc/interrupts` shows the active set as IRQ 3 (acm), 4 (ipc), 5 (spi), 6 (xtensa timer), and the gpio children 7, 8 and 33, and resolving each through `xtensa_map_ext_irq` against `XCHAL_INTTYPE_MASK_EXTERN_EDGE|LEVEL` gives INT3, INT2, INT9, INT6 and INT10 -- all level 1, all masked by `rsil 3`. So no interrupt can fire in the window and the level hypothesis is excluded. One further fact fell out and it is load-bearing: `SOC_IDCACHE_PER_CORE` is defined for esp32 but not for esp32s3, so the cache is SHARED, and `spi_flash_disable_cache(cpuid)` disables it for the whole chip; the `other_cpuid` branch in `cache_utils.c` is compiled out, which is why core 1 dies rather than merely stalling. A candidate that this makes worth testing is stated as a lead and not a conclusion: the write source buffer is Linux's own, so it lives in PSRAM, and `esp_flash_write()` reads it as `cmd->data + done` in `linux_flash.c` while core 0 has the cache disabled -- if that read is what faults, the death is on core 0 rather than core 1. The core-syntax audit passed: `.ai/core.md` and `.ai/core-syntax.md` were re-read, the complete `.ai/` diff was inspected, `.ai/core.md` was not modified, and this entry was validated against the template with six sections in canonical order, sequential numbering from 52, an ISO-8601 timestamp carrying the America/Phoenix offset, prose-only Outcome and Next Steps, and Status values within the allowed set.
+
+#### Next Steps:
+
+The next experiment is to test whether the death is on core 0 rather than core 1, because that reverses where to look and the interrupt result leaves it as the strongest remaining candidate. The cheapest discriminating test is to make the firmware's IPC write path copy the incoming buffer into internal RAM before calling `esp_flash_write()`, so nothing on core 0 reads PSRAM while the cache is off; if the board then survives a write during play, the fault was core 0 reading the PSRAM source and the durable fix is that copy plus the existing chunking, which is a small change to `linux_flash.c` rather than a memory-layout rearrangement. If it still dies, core 0 is exonerated and the next place to look is the interaction between the flash window and the emulator's own PSRAM traffic, since 290 s of emulator with no writes is clean and a single 1 KiB write during play is fatal every time. Either way the instrument committed at 2436f59 is what makes the experiment readable: it records count, caller and the longest window in cycles, and it survives the reset, so a failed attempt now yields evidence instead of nothing. The reference still has twenty records without a fast lookup index line -- TCH-005 through TCH-010, KRN-007 and KRN-008, HAP-001, RTC-004, PMU-004, LCD-012 and LCD-013, and EMU-011 through EMU-017 except EMU-012 -- which is a pre-existing defect noted in the first audit of this session and left unfixed because it is mechanical work rather than analysis; SOC-004 is not among them. The 23 log entries between entry 50 and entry 51 are still unwritten.
+
+#### Files Modified:
+
+- .ai/core-reference.md
+
+#### Status:
+
+- Build: N/A
+- Deployment: N/A
+- User Test: N/A
+
+---
+
 ## 52 COMMIT Unreleased 2026-11-11T09:05:00-07:00
 
 #### Coming From:
