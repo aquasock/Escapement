@@ -629,11 +629,40 @@ thing the status menu needed and the interpreter could not deliver.
   exited before emulating anything. The handshake is now ordered around the
   guest's own `magic`: core 1 waits for it, and only then writes anything.
 
-**What is not yet verified.** The emulated display region hashed identically
-over two seconds during a run, so the pet was not visibly animating in that
-sample — either the guest was idle or the frames were not reaching the glass.
-The blitter also delivered 77 of 159 published frames in one 10 s run: the panel
-write is only 17 ms, so that is overruns from a 10 ms pacing tick against a 21 ms
-poll, not a slow transfer. Both need a look at the glass and a button press
-before this counts as done. Two `tamacore` instances will also race for the
-window; there is no mutual exclusion yet.
+**It was blank for a long time, and every symptom pointed at the renderer.**
+The frame decoded correctly — bezel, LCD, right stride — and contained nothing,
+so the obvious conclusion was that core 0 was drawing it wrong. It was not
+drawing at all. `splb32_run_cycles()` returns the machine's **absolute** cycle
+count, not the number it just added, and the pacing loop did
+`cycles_done += splb32_run_cycles(...)`. After a few iterations that counter was
+astronomically large, the "caught up with the wall clock" test was always true,
+and the guest got almost no time: ~105k opcodes retired in ten seconds, display
+RAM untouched, while the reported rate said 4 MHz — because that number was
+computed from the same bogus counter. One `+=`.
+
+With `cycles_done = splb32_run_cycles(cpu, want)` and an absolute wall-clock
+target, the guest runs at realtime and every frame lands:
+
+```
+published frames   141            16 fps target
+blitted frames     141            was 77 of 159 before the fix
+guest rate         3,998,881      against a 4,000,000 target
+worst frame late   9 ms
+```
+
+Two other bugs came out with it. The guest deadlocked on the *second* run
+because core 0 cleared the whole control block, wiping flags core 1 had already
+raised; each side now clears only its own line and the handshake is a session
+counter, so a new `tamacore` starts a fresh machine rather than waiting on a
+flag that will never move. And the EEPROM image was published to `/home/tama.sav`
+unconditionally every two seconds, so a guest that had not yet written its EEPROM
+replaced a real save with a kilobyte of zeros — it now compares against a shadow
+copy and publishes only on change.
+
+**What is not yet verified.** The physical buttons: `btn_events` in the control
+block proves core 0 applies a mask it reads, and `tamacore -t` exercises that,
+but no finger has been on the glass since the move. The menu claim wants the
+same treatment — it should now be structural rather than measured, because core
+1 blits one fixed 57x57 tile whatever the screen contains, but that is an
+argument and not yet a number. Two `tamacore` instances still race for the
+window.
