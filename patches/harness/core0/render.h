@@ -65,8 +65,19 @@ static inline void lcd_rect(const lcd_fb *fb, int x0, int y0, int x1, int y1, ui
 }
 
 /* Pixels across the dot grid: DOT pixels per dot, GAP between neighbours. */
-#define LCD_DOTS_W(dot, gap) (SEG_W * (dot) + (SEG_W - 1) * (gap))
-#define LCD_DOTS_H(dot, gap) (SEG_H * (dot) + (SEG_H - 1) * (gap))
+/*
+ * The renderer and the shared-memory contract carry the geometry separately
+ * -- shmproto.h cannot include segmap.h, and segmap.h is generated -- so the
+ * two are checked here rather than trusted. A mismatch does not fail loudly at
+ * runtime: the frame is the size shmproto.h says and the renderer would draw
+ * past it or leave a margin, both silently.
+ */
+#ifndef SHMPROTO_H
+_Static_assert(SEG_DOT == SHM_DOT, "segmap.h and shmproto.h disagree on SHM_DOT");
+_Static_assert(SEG_GAP == SHM_GAP, "segmap.h and shmproto.h disagree on SHM_GAP");
+_Static_assert(SEG_LCD_W == SHM_LCD_W, "segmap.h and shmproto.h disagree on LCD width");
+_Static_assert(SEG_LCD_H == SHM_LCD_H, "segmap.h and shmproto.h disagree on LCD height");
+#endif
 
 /*
  * Draw the LCD with its top-left corner at (ox, oy), each LCD dot as a DOT x DOT
@@ -84,49 +95,91 @@ static inline void lcd_rect(const lcd_fb *fb, int x0, int y0, int x1, int y1, ui
  * OFF is erased -- which is the half that a "draw only what is lit" renderer
  * gets wrong.
  */
+/*
+ * Draw rows [yl, yh) of the LCD, in framebuffer coordinates.
+ *
+ * Two passes, because the two things are not the same kind of object:
+ *
+ *   the matrix   32x30 dots, one bit per dot in the pet's display RAM, each
+ *                drawn as a DOT x DOT block on a (DOT+GAP) pitch. It is a dot
+ *                matrix and that is how the hardware makes it.
+ *
+ *   the icons    10 two-state glyphs, stored as full-resolution horizontal
+ *                runs in LCD pixels. They are drawn as glyphs, not as dot
+ *                blocks: rasterising them onto the dot grid is what made them
+ *                look chunky, and at native resolution they are exactly the
+ *                shapes the artwork has.
+ *
+ * This pass OWNS every pixel it covers, including the background between dots
+ * and the holes inside a glyph. Drawing only the lit parts leaves the previous
+ * frame showing through wherever something turned off, which is the bug an
+ * erase-on-OFF pass exists to prevent.
+ *
+ * A dot cell whose packed value is 0xFF00 is padding -- the grid is 32x30 and
+ * fully populated on this artwork, but the sentinel keeps a future incomplete
+ * map from reading a random dpram byte.
+ */
 static inline void lcd_draw_dots_rows(const lcd_fb *fb, const uint8_t *dpram,
                                       int ox, int oy, int dot, int gap,
                                       int yl, int yh)
 {
     const int pitch = dot + gap;
-    const int lcd_w = LCD_DOTS_W(dot, gap);
-    int i;
+    int r, c, i;
 
     if (yl < oy)
         yl = oy;
-    if (yh > oy + LCD_DOTS_H(dot, gap))
-        yh = oy + LCD_DOTS_H(dot, gap);
+    if (yh > oy + SEG_LCD_H)
+        yh = oy + SEG_LCD_H;
     if (yl >= yh)
         return;
 
-    lcd_rect(fb, ox, yl, ox + lcd_w, yh, LCD_OFF);
+    /* Background first, for the whole requested range. */
+    lcd_rect(fb, ox, yl, ox + SEG_LCD_W, yh, LCD_OFF);
 
-    for (i = 0; i < SEG_COUNT; i++) {
-        const seg_entry *e = &seg_map[i];
-        const seg_run *r;
+    /* ---- the 32x30 matrix ---- */
+    for (r = 0; r < SEG_MATRIX_H; r++) {
+        int y0 = oy + SEG_MATRIX_OY + r * pitch;
+        int y1 = y0 + dot;
 
-        if (!((dpram[e->byte] >> e->bit) & 1))
-            continue;                       /* unlit: leave the background */
+        if (y1 <= yl || y0 >= yh)
+            continue;
 
-        r = &seg_runs[e->run_start];
-        for (int k = 0; k < e->run_count; k++, r++) {
-            int y0 = oy + r->y * pitch;
+        for (c = 0; c < SEG_MATRIX_W; c++) {
+            uint16_t v = seg_matrix[r * SEG_MATRIX_W + c];
+            uint8_t b = (uint8_t)(v >> 8);
+            uint8_t n = (uint8_t)(v & 0xFF);
+            int x0, yy;
 
-            if (y0 + dot <= yl || y0 >= yh)
-                continue;                   /* this run misses the range */
+            if (b == 0xFF)
+                continue;               /* padding cell */
+            if (!((dpram[b] >> n) & 1))
+                continue;               /* unlit: background already there */
 
-            for (int dy = 0; dy < dot; dy++) {
-                int yy = y0 + dy;
-
+            x0 = ox + SEG_MATRIX_OX + c * pitch;
+            for (yy = y0; yy < y1; yy++) {
                 if (yy < yl || yy >= yh)
                     continue;
-
-                for (int x = r->x0; x < r->x1; x++) {
-                    int xx = ox + x * pitch;
-
-                    lcd_rect(fb, xx, yy, xx + dot, yy + 1, LCD_INK);
-                }
+                lcd_rect(fb, x0, yy, x0 + dot, yy + 1, LCD_INK);
             }
+        }
+    }
+
+    /* ---- the 10 status icons, as glyphs ---- */
+    for (i = 0; i < SEG_ICON_COUNT; i++) {
+        const seg_icon *ic = &seg_icons[i];
+        const seg_run *u;
+        int k;
+
+        if (!((dpram[ic->byte] >> ic->bit) & 1))
+            continue;                   /* unlit: background already there */
+
+        u = &seg_icon_runs[ic->run_start];
+        for (k = 0; k < ic->run_count; k++, u++) {
+            int yy = oy + u->y;
+
+            if (yy < yl || yy >= yh)
+                continue;
+            lcd_rect(fb, ox + u->x0, yy, ox + u->x1, yy + 1, LCD_INK);
         }
     }
 }
@@ -134,8 +187,7 @@ static inline void lcd_draw_dots_rows(const lcd_fb *fb, const uint8_t *dpram,
 static inline void lcd_draw_dots(const lcd_fb *fb, const uint8_t *dpram,
                                  int ox, int oy, int dot, int gap)
 {
-    lcd_draw_dots_rows(fb, dpram, ox, oy, dot, gap,
-                       oy, oy + LCD_DOTS_H(dot, gap));
+    lcd_draw_dots_rows(fb, dpram, ox, oy, dot, gap, oy, oy + SEG_LCD_H);
 }
 
 /* True-hardware look: dot blocks touching, no grid. */

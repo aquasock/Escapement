@@ -249,27 +249,35 @@ _Static_assert(sizeof(struct shm_diag) == 96,
  * static asserts below are there to catch.
  */
 /*
- * Each real LCD dot is a SHM_DOT x SHM_DOT block of pixels, separated by
- * SHM_GAP pixels. 5 and 1 is the harness's original look: the dot matrix is
- * visible as a grid, which is what makes the pet readable across a room.
+ * The V3 display is a 32x30 dot matrix plus 10 status icons. Those are two
+ * different kinds of object and are rendered differently (see render.h): the
+ * matrix is drawn as SHM_DOT x SHM_DOT blocks on a +(SHM_GAP) pitch, and the
+ * icons are drawn as full-resolution glyphs.
  *
- * At 5/1 an LCD of 49x49 dots is 293x293 pixels -- 49 dots of 5 px plus 48 gaps
- * of 1 px, because the grid ends with a dot rather than a margin. That fits the
- * 320-pixel width with 27 px to spare, which is where the side of the surround
- * comes from.
+ * The whole LCD is therefore NOT dots*SHM_DOT: the icon rows extend past the
+ * matrix on both sides and above and below it. SEG_LCD_W/H in segmap.h is the
+ * authoritative size, and these two numbers must match it. They matched 49x49
+ * before, which was the whole artwork box divided by the dot pitch -- the
+ * matrix was only 32x30 of that, and the icons were being quantised onto the
+ * same grid, which is why they came out chunky.
  *
- * SET BOTH TO THE SAME VALUE for the true-hardware look (gap 0), and the image
- * shrinks accordingly. The blitter measures its bandwidth from SHM_FRAME_BYTES,
- * so nothing downstream has to know which was chosen.
+ * SET SHM_DOT AND SHM_GAP TO MATCH segmap.h. A mismatch does not fail loudly:
+ * the frame is the size these macros say, and the renderer would draw past it
+ * or leave a margin. Both are silent.
  */
 #define SHM_DOT             5
 #define SHM_GAP             1
-#define SHM_LCD_DOTS_W      49
-#define SHM_LCD_DOTS_H      49
-#define SHM_LCD_W           (SHM_LCD_DOTS_W * SHM_DOT + \
-			     (SHM_LCD_DOTS_W - 1) * SHM_GAP)
-#define SHM_LCD_H           (SHM_LCD_DOTS_H * SHM_DOT + \
-			     (SHM_LCD_DOTS_H - 1) * SHM_GAP)
+#define SHM_LCD_DOTS_W      32      /* matrix columns, NOT the LCD width */
+#define SHM_LCD_DOTS_H      30      /* matrix rows,    NOT the LCD height */
+/*
+ * The LCD is the artwork at the chosen dot pitch: 1219.7 x 1254.6 units at
+ * 6/25.1 px per unit is 292x300, and that is what segmap.h reports as
+ * SEG_LCD_W/H. Kept as literals rather than derived here because this header
+ * cannot include segmap.h (different trees), so the pairing is checked by a
+ * static assert in render.h instead.
+ */
+#define SHM_LCD_W           292
+#define SHM_LCD_H           300
 #define SHM_FB_W            320
 #define SHM_FB_H            400
 #define SHM_FRAME_PAD       4           /* LCD surround, in pixels */

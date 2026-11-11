@@ -262,95 +262,136 @@ static void ctl_init_own(void)
  * of every segment that reads it, plus the dot height. This is what lets a frame
  * repaint only what moved instead of all 301 rows.
  */
-static uint16_t byte_row_lo[0x200];
-static uint16_t byte_row_hi[0x200];
-
-/*
- * Per-SEGMENT row spans, and segments grouped by their dpram byte.
- *
- * The per-byte table above is a min/max over every segment sharing that byte,
- * which is wrong the moment a byte holds segments at opposite ends of the
- * screen. The ten status icons do exactly that: bytes 0, 1, 5 and 6 each carry
- * one icon from the top row and one from the bottom row, so flipping a single
- * status icon dirtied everything between them -- very nearly the whole frame,
- * for a two-state ON/OFF glyph.
- *
- * 970 segments share 512 bytes, so multi-segment bytes are the norm and this
- * is not an icon-only problem; the icons are just where it is most visible.
- *
- * So the diff is resolved per segment: a changed byte is XORed with its shadow
- * to get the set of changed bits, and only the segments whose bit actually
- * changed contribute their span. An icon flip then dirties that icon's rows.
- */
-static uint16_t seg_row_lo[SEG_COUNT];
-static uint16_t seg_row_hi[SEG_COUNT];
-static uint16_t byte_first[0x200];   /* index into byte_segs */
-static uint16_t byte_nseg[0x200];    /* how many segments share this byte */
-static uint16_t byte_segs[SEG_COUNT];
-
-/* Display RAM as it was when the frame buffer was last known correct. */
 static uint8_t dpram_shadow[0x200];
 static int dpram_shadow_valid;
 
+/*
+ * Dirty-row tables, per DRAWABLE ITEM rather than per byte.
+ *
+ * The V3 display is a 32x30 dot matrix plus 10 status icons, and the two are
+ * drawn differently (see render.h). What they share is the display RAM: 960
+ * matrix cells and 10 icons live in 512 bytes, so several items share a byte
+ * and a byte changing does not say which of them moved.
+ *
+ * The icons make that visible. Bytes 0, 1, 5 and 6 each carry one icon from the
+ * top row and one from the bottom row, so a per-byte span dirtying "everything
+ * between" repaints very nearly the whole frame to flip one ON/OFF glyph.
+ *
+ * So a changed byte is XORed with its shadow and each item whose bit actually
+ * changed contributes its own row span. Items are reached through a per-byte
+ * index built once per session: for each byte, the list of items using it.
+ *
+ * TWO BANDS. The top icon row, the matrix and the bottom icon row are three
+ * disjoint bands stacked vertically, and the common case is that one of them
+ * changes. A single lo/hi pair would still span from the top icons to the
+ * bottom ones, so up to two bands are published: band 1 is the top icon row,
+ * band 2 is everything else. An icon flip in either row then costs that row.
+ */
+/*
+ * An entry encodes (kind, index, bit):
+ *
+ *   bit 15     0 = matrix cell, 1 = icon
+ *   bits 14:8  index: matrix ROW (0..29), or icon number (0..9)
+ *   bits  7:0  the dpram bit that lights it
+ *
+ * Matrix entries are keyed by ROW rather than by cell because a row's span is
+ * the same for every cell in it, so duplicates within a row are harmless -- the
+ * min/max is idempotent. Icons are keyed by icon number because each has its
+ * own span.
+ */
+#define ITEM_ICON_FLAG  0x8000u
+#define ITEM_ENC(is_icon, idx, bit) \
+	((uint16_t)(((is_icon) ? ITEM_ICON_FLAG : 0u) | (((idx) & 0x7F) << 8) | ((bit) & 0xFF)))
+#define ITEM_IS_ICON(e) (((e) & ITEM_ICON_FLAG) != 0)
+#define ITEM_IDX(e)     (((e) >> 8) & 0x7F)
+#define ITEM_BIT(e)     ((e) & 0xFF)
+
+#define ITEM_MAX (SEG_MATRIX_W * SEG_MATRIX_H + SEG_ICON_COUNT)
+
+static uint16_t byte_first[0x200];
+static uint16_t byte_nitem[0x200];
+static uint16_t byte_items[ITEM_MAX];
+static uint16_t item_row_lo[SEG_MATRIX_H + SEG_ICON_COUNT];
+static uint16_t item_row_hi[SEG_MATRIX_H + SEG_ICON_COUNT];
+
+static uint16_t item_first_row(uint16_t e)
+{
+	return ITEM_IS_ICON(e) ? (uint16_t)(SEG_MATRIX_H + ITEM_IDX(e))
+			       : (uint16_t)ITEM_IDX(e);
+}
+
 static void build_byte_rows(void)
 {
-	int i;
+	const int pitch = SHM_DOT + SHM_GAP;
+	int i, r, c;
+	uint16_t acc;
 
-	for (i = 0; i < 0x200; i++) {
-		byte_row_lo[i] = SHM_FRAME_H;      /* empty */
-		byte_row_hi[i] = 0;
+	for (r = 0; r < SEG_MATRIX_H; r++) {
+		int y0 = SHM_FRAME_PAD + SEG_MATRIX_OY + r * pitch;
+
+		item_row_lo[r] = (uint16_t)y0;
+		item_row_hi[r] = (uint16_t)(y0 + SHM_DOT);
 	}
 
-	for (i = 0; i < SEG_COUNT; i++) {
-		const seg_entry *e = &seg_map[i];
-		const seg_run *r = &seg_runs[e->run_start];
+	for (i = 0; i < SEG_ICON_COUNT; i++) {
+		const seg_icon *ic = &seg_icons[i];
+		uint16_t lo = SHM_FRAME_H, hi = 0;
 		int k;
 
-		seg_row_lo[i] = SHM_FRAME_H;
-		seg_row_hi[i] = 0;
+		for (k = 0; k < ic->run_count; k++) {
+			uint16_t yy = seg_icon_runs[ic->run_start + k].y;
 
-		for (k = 0; k < e->run_count; k++, r++) {
-			int y0 = SHM_FRAME_PAD + r->y * (SHM_DOT + SHM_GAP);
-			int y1 = y0 + SHM_DOT;
-
-			if (y0 < byte_row_lo[e->byte])
-				byte_row_lo[e->byte] = (uint16_t)y0;
-			if (y1 > byte_row_hi[e->byte])
-				byte_row_hi[e->byte] = (uint16_t)y1;
-
-			if (y0 < seg_row_lo[i])
-				seg_row_lo[i] = (uint16_t)y0;
-			if (y1 > seg_row_hi[i])
-				seg_row_hi[i] = (uint16_t)y1;
+			if (yy < lo)
+				lo = yy;
+			if ((uint16_t)(yy + 1) > hi)
+				hi = (uint16_t)(yy + 1);
 		}
+		item_row_lo[SEG_MATRIX_H + i] = (uint16_t)(SHM_FRAME_PAD + lo);
+		item_row_hi[SEG_MATRIX_H + i] = (uint16_t)(SHM_FRAME_PAD + hi);
 	}
 
-	/* Group segments by byte, so a changed byte finds its segments directly
-	 * instead of scanning all 970. Counting sort, built once per session. */
 	for (i = 0; i < 0x200; i++)
-		byte_nseg[i] = 0;
-	for (i = 0; i < SEG_COUNT; i++)
-		byte_nseg[seg_map[i].byte]++;
+		byte_nitem[i] = 0;
+	for (i = 0; i < ITEM_MAX; i++)
+		byte_items[i] = 0;
 
-	{
-		uint16_t acc = 0;
+	/* Count, then place. Two passes so byte_items is exactly sized. */
+	for (r = 0; r < SEG_MATRIX_H; r++)
+		for (c = 0; c < SEG_MATRIX_W; c++) {
+			uint8_t b = (uint8_t)(seg_matrix[r * SEG_MATRIX_W + c] >> 8);
 
-		for (i = 0; i < 0x200; i++) {
-			byte_first[i] = acc;
-			acc = (uint16_t)(acc + byte_nseg[i]);
+			if (b != 0xFF)
+				byte_nitem[b]++;
 		}
+	for (i = 0; i < SEG_ICON_COUNT; i++)
+		byte_nitem[seg_icons[i].byte]++;
+
+	acc = 0;
+	for (i = 0; i < 0x200; i++) {
+		byte_first[i] = acc;
+		acc = (uint16_t)(acc + byte_nitem[i]);
 	}
 	{
-		/* static, not on the stack: this task runs on 4 KiB and the table
-		 * is 1 KiB. Function is called once per session. */
-		static uint16_t fill[0x200];
+		static uint16_t fill[0x200];   /* static: 1 KiB on a 4 KiB stack */
 
 		for (i = 0; i < 0x200; i++)
 			fill[i] = byte_first[i];
-		for (i = 0; i < SEG_COUNT; i++)
-			byte_segs[fill[seg_map[i].byte]++] = (uint16_t)i;
+
+		for (r = 0; r < SEG_MATRIX_H; r++)
+			for (c = 0; c < SEG_MATRIX_W; c++) {
+				uint16_t v = seg_matrix[r * SEG_MATRIX_W + c];
+				uint8_t b = (uint8_t)(v >> 8);
+
+				if (b == 0xFF)
+					continue;
+				byte_items[fill[b]++] = ITEM_ENC(0, r, v & 0xFF);
+			}
+		for (i = 0; i < SEG_ICON_COUNT; i++)
+			byte_items[fill[seg_icons[i].byte]++] =
+				ITEM_ENC(1, i, seg_icons[i].bit);
 	}
 }
+
 
 /*
  * Draw rows [yl, yh). `full` paints the bezel too, which is only needed when
@@ -736,6 +777,8 @@ static void tamacore_session(uint32_t served, uint32_t *served_out)
 				 */
 				{
 					int b, lo = SHM_FRAME_H, hi = 0;
+					int lo1 = SHM_FRAME_H, hi1 = 0;
+					int lo2 = SHM_FRAME_H, hi2 = 0;
 
 					if (dpram_shadow_valid) {
 						for (b = 0; b < 0x200; b++) {
@@ -746,25 +789,39 @@ static void tamacore_session(uint32_t served, uint32_t *served_out)
 								continue;
 
 							/*
-							 * Resolve to the segments whose bit
-							 * actually changed. Using the byte's
-							 * whole span here is what made a
-							 * single status-icon flip repaint the
-							 * screen: the top and bottom icon
-							 * rows share bytes 0, 1, 5 and 6.
+							 * Only the items whose bit actually
+							 * changed contribute. The top icon
+							 * row, the matrix and the bottom icon
+							 * row are three stacked bands, and
+							 * the usual case is that one of them
+							 * moved -- so they are tracked as two
+							 * bands. Band 1 is the top icon row
+							 * (anything above the matrix); band 2
+							 * is the matrix and the bottom icons.
 							 */
-							for (k = 0; k < byte_nseg[b]; k++) {
-								uint16_t si = byte_segs[byte_first[b] + k];
-								const seg_entry *se = &seg_map[si];
+							for (k = 0; k < byte_nitem[b]; k++) {
+								uint16_t e = byte_items[byte_first[b] + k];
+								uint16_t ii;
 
-								if (!(changed & (1u << se->bit)))
+								if (!(changed & (1u << ITEM_BIT(e))))
 									continue;
-								if (seg_row_lo[si] < lo)
-									lo = seg_row_lo[si];
-								if (seg_row_hi[si] > hi)
-									hi = seg_row_hi[si];
+
+								ii = item_first_row(e);
+								if (item_row_lo[ii] < (uint16_t)SEG_MATRIX_OY) {
+									if (item_row_lo[ii] < lo1)
+										lo1 = item_row_lo[ii];
+									if (item_row_hi[ii] > hi1)
+										hi1 = item_row_hi[ii];
+								} else {
+									if (item_row_lo[ii] < lo2)
+										lo2 = item_row_lo[ii];
+									if (item_row_hi[ii] > hi2)
+										hi2 = item_row_hi[ii];
+								}
 							}
 						}
+						lo = lo1 < lo2 ? lo1 : lo2;
+						hi = hi1 > hi2 ? hi1 : hi2;
 						if (hi <= lo) {
 							/* Nothing moved. */
 							diag_phase(SHM_PHASE_IDLE);
@@ -773,6 +830,8 @@ static void tamacore_session(uint32_t served, uint32_t *served_out)
 					} else {
 						lo = 0;
 						hi = SHM_FRAME_H;
+						lo1 = lo2 = 0;
+						hi1 = hi2 = SHM_FRAME_H;
 					}
 
 					/*
