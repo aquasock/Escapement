@@ -152,6 +152,7 @@ Topic IDs are the `record_id` prefix. An entry reserves a name; it does not clai
 | How fast does the emulator actually run the real ROM? | EMU | EMU-011 |
 | What resolution is the Tamagotchi LCD really, and does rendering it 1:1 help? | EMU | EMU-013 |
 | Why does the status menu run at half speed when play is fine? | EMU | EMU-014 |
+| Where do the 464 cycles per emulated instruction actually go? | EMU | EMU-015 |
 | Why did the emulator speed up when the touch daemon was retired? | EMU | EMU-012 |
 | Why does a 512 KB allocation work once and then fail? | KERNEL | KRN-004 |
 | Why not put the hardware behind the RTOS on core 0? | KERNEL | KRN-005 |
@@ -1416,6 +1417,22 @@ EMU-010: "The touch daemon costs the emulator about 30 percent of its throughput
     - "EMU-005 and EMU-006 for the per-instruction cost and where it lives"
     - "TamaHarness/portable/tamafb.c: ns_emu is wall time around splb32_run_cycles()"
   verification: "Measured on hardware 2026-11-10 on a freshly booted watch with no other work running: 2 stalls in 22 s, speed 1.01x during play rising to 0.52x sustained in the status menu, panel unchanged at 8-37 ms/s throughout. The operator independently confirmed the pattern -- slowdowns whenever interacting with game menus, not when the screen is static."
+
+
+- record_id: EMU-015
+  kind: EMU
+  topic_id: EMU
+  status: VERIFIED
+  verified_date: 2026-11-10
+  title: "An emulated instruction executes 116 host memory operations, and that is where the 464 cycles go"
+  statement: "Disassembling splb32_run_cycles, which is step_core inlined into the run loop, gives 258 host instructions per emulated instruction containing 86 loads and 30 stores -- 116 host memory operations. On the tamafb build with the ROM in PSRAM the emulator sustains 516887 instructions/s at 240 MHz, which is 464 native cycles per emulated instruction. 116 operations at roughly 4 cycles each accounts for that 464 almost exactly."
+  consequence: "This corrects the model EMU-006 established, and the error was in what got counted rather than in the arithmetic. EMU-006's 'memory is only 2.6 percent of the cost' is true of GUEST bus accesses -- 2.408 per instruction at 53 ns is about 128 ns of 4922 -- but it does not count host accesses to the cpu struct, and those are 116 per instruction. So memory traffic is the dominant cost after all, at a transaction cost of about 4 cycles rather than the 12.4 of a dependent load or the 43 an earlier record claimed. The distinction matters for what to do next: the bus pipelines back-to-back transactions well, so dependent latency is not the limit and access COUNT is. Two cheap experiments that appeared to argue against memory are explained by this and should not be read as evidence against it. Removing a per-instruction PSRAM read-modify-write saved 3.8 cycles, 1.9 per access, because 2 accesses of 116 is under 2 percent; the benchmark's own run-to-run spread is about 0.6 percent, so that measurement was noise-adjacent and the conclusion drawn from it at the time was wrong. Compiling at -O3 instead of -O2 changed nothing because a better register allocator cannot remove accesses the source performs on a struct it cannot keep in registers across a 970-way switch. The lever is therefore a register cache that keeps a, x, y, sp, pc and the flags in host locals across a run, which should remove the large majority of the 116."
+  sources:
+    - "patches/harness/splb32/splb32.c: step_core and splb32_run_cycles"
+    - "objdump of splb32.o: 258 instructions, 86 loads, 30 stores inside splb32_run_cycles"
+    - "userspace/memlat.c on the watch: dependent PSRAM load 51.80 ns, sequential stream 32.88 ns/byte"
+    - "EMU-006 for the guest-access share this extends, and EMU-011 for the cross-benchmark trap described below"
+  verification: "Measured on hardware 2026-11-10: 516887 instructions/s from tamafb's bench against a 4 MHz guest, and the instruction mix counted by disassembly of the same source. A measurement-hygiene error is recorded with this: 1181 native cycles per instruction is the corebench/flash-ROM figure (EMU-006) and 464 is the tamafb/PSRAM figure, and they are not comparable because corebench runs a synthetic loop while tamafb runs the real ROM which sleeps most steps. Both figures are right for their own workload. EMU-011 already states this rule and this cycle violated it while quoting it, which is why the rule is repeated here."
 
 - record_id: EMU-012
   kind: EMU

@@ -1,3 +1,36 @@
+## 48 COMMIT Unreleased 2026-11-10T18:23:33-07:00
+
+#### Coming From:
+
+Unreleased 19efd13
+
+#### Purpose:
+
+Establish where the emulator's time actually goes before rewriting the interpreter, and put the interpreter under version control so that rewrite is reversible.
+
+#### Outcome:
+
+The safety net is in and the cost model is corrected, and no rewrite was attempted -- deliberately, because the model had to be right first. `patches/harness/splb32/` now carries the interpreter and `scripts/build-tamafb.sh` builds from there instead of from `~/GIT/TamaHarness`, which has no `.git` at all; the vendored build reproduces the deployed binary's hash family exactly. That was the precondition for touching a 1337-line file whose failure modes are silent miscounted cycles rather than crashes. The only source change was putting the `opcode_hits` coverage counter behind `-DSPLB32_COVERAGE`: it was a PSRAM read-modify-write on every emulated instruction for a counter whose accessor is called from nowhere. It measured 516887 to 521199 instr/s, +0.8%, and the comment in the source says plainly that this is not a lever -- it was kept because it is free. Then the measurement work, which produced a correction worth more than the optimisation would have. Disassembling `splb32_run_cycles` shows **258 host instructions containing 86 loads and 30 stores — 116 host memory operations per emulated instruction**, and at 516887 instructions/s the real cost is 464 native cycles, so 116 operations at roughly 4 cycles each accounts for it exactly. That contradicts the model EMU-006 established, and the error was in what got counted: EMU-006's "memory is only 2.6 percent of the cost" is correct for GUEST bus accesses (2.408 per instruction) but never counted host accesses to the cpu struct. Memory traffic is the dominant cost after all, at about 4 cycles per transaction -- not the 12.4 of a dependent load, and not the 43 an older record claimed -- which means the bus pipelines well and **access count is the limit, not latency**. Two experiments that had appeared to argue against memory are explained by the same arithmetic and are now recorded as not being evidence: removing the coverage counter saved 3.8 cycles because 2 accesses of 116 is under 2 percent, and the benchmark's own run-to-run spread is about 0.6 percent, so that result was noise-adjacent and the conclusion drawn from it at the time was wrong; and `-O3` changed nothing because a better register allocator cannot remove accesses the source makes on a struct it cannot hold in registers across a 970-way switch. One further measurement-hygiene error is recorded against this cycle: 1181 native cycles per instruction is the corebench/flash-ROM figure and 464 is the tamafb/PSRAM figure, and they are not comparable because corebench runs a synthetic loop while tamafb runs the real ROM which sleeps most steps. **EMU-011 already states that rule and this cycle violated it while quoting it.** The core-syntax audit passed: `.ai/core.md` and `.ai/core-syntax.md` were re-read, the complete `.ai/` diff was inspected, `.ai/core.md` was not modified, all YAML blocks in the reference parse and all 83 records carry the ten required fields with unique ids, and this entry was validated against the template with six sections in canonical order, sequential numbering from 47, an ISO-8601 timestamp carrying the America/Phoenix offset, prose-only Outcome and Next Steps, and Status values within the allowed set.
+
+#### Next Steps:
+
+The register cache is the next change and its target is now specific rather than estimated: remove the large majority of the 116 host memory operations per emulated instruction by keeping `a`, `x`, `y`, `sp`, `pc` and the flags in host locals across a run, writing them back only when the guest actually touches memory or a handler needs the full struct. Two things make that worth doing carefully rather than quickly. The failure mode is silent miscounted cycles, not a crash, so every step needs the headless bench against 516887 instr/s and the status-menu check on hardware; and the figure to beat is the 464 cycles per instruction, not EMU-006's 1181, which belongs to a different benchmark. If the rewrite reaches roughly half the accesses it should land near 230 cycles and about 1.03M instructions/s, which is the 2x EMU-014 says the menus need. If it does not reach that, the honest conclusion is that 0.52x in menus is close to this chip's floor and the answer is to accept it or to move the emulator to core 0, which stays deferred. The deferred items are unchanged and none should be started without asking: BLE media keys, the Rii K06 touchpad and Logitech keyboard, firmware-side BLE bond persistence, wake-from-sleep, and moving the Tamagotchi emulator to core 0.
+
+#### Files Modified:
+
+- patches/harness/splb32/splb32.c
+- patches/harness/splb32/splb32.h
+- scripts/build-tamafb.sh
+- .ai/core-reference.md
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: PASS
+
+---
+
 ## 47 COMMIT Unreleased 2026-11-10T18:01:56-07:00
 
 #### Coming From:

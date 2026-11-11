@@ -1,10 +1,10 @@
-# Handoff — Escapement, 2026-11-10T18:02
+# Handoff — Escapement, 2026-11-10T18:24
 
 Linux 7.2.4 on a T-Watch Ultra (ESP32-S3). Real Linux on the watch's own Xtensa
 cores, not emulated. This file is orientation; verify before acting on it.
 
-Canonical detail lives in `.ai/core-reference.md` (82 records, fourteen topics).
-Project history lives in `.ai/core-log.md` (47 entries; newest first — 47, 46, 45, 44, 43, 42, 41, 40, 39, 38, 37, 36, 35, 34, 33, 32,
+Canonical detail lives in `.ai/core-reference.md` (83 records, fourteen topics).
+Project history lives in `.ai/core-log.md` (48 entries; newest first — 48, 47, 46, 45, 44, 43, 42, 41, 40, 39, 38, 37, 36, 35, 34, 33, 32,
 31, 30, 29, 28, 27, 26, 25, 24, 23, 22, 21, 20, 19, 18, 17, then 1 through 16).
 Do not re-derive what those hold.
 
@@ -18,10 +18,10 @@ persistence, any wake-from-sleep path, and moving the emulator to core 0.
 
 ## Reconstruct (in this order)
 
-1. `git log --oneline -8` — `main` was at `0ffbddc`, clean and fully pushed,
+1. `git log --oneline -8` — `main` was at `19efd13`, clean and fully pushed,
    before the commit carrying this file.
 2. `.ai/core.md` (policy), then `.ai/core-reference.md` (hardware facts — open
-   the record, not the index line), then `.ai/core-log.md` entries 47, 46, 45.
+   the record, not the index line), then `.ai/core-log.md` entries 48, 47, 46.
 3. `git -C build/esp-hosted/esp_hosted_ng branch --show-current` — expect
    `ble-bond-wip`, five local-only commits.
 
@@ -226,6 +226,28 @@ glass. The build script passes them.
 **`ns_emu` is wall time**, so any other process on the watch — including your own
 diagnostics — is billed to "emu". 64 stalls while driving it from a shell, 2 when
 left alone. Measure idle or the number describes the instrument.
+
+**The interpreter's cost model, corrected.** `splb32_run_cycles` executes **116
+host memory ops per emulated instruction** (86 loads, 30 stores, by objdump) and
+the real cost is **464 cycles** — 116 x ~4 cycles, so the bus pipelines well and
+**access count is the limit, not latency**.
+
+Two figures elsewhere in the reference do NOT apply here:
+- **1181 cycles/instr is corebench/flash ROM**, not tamafb. Different workload,
+  different number, both correct. EMU-011 states the rule; this session broke it.
+- **EMU-006's "memory is 2.6%"** counted GUEST accesses only and missed the 116
+  host accesses. Memory is the dominant cost after all.
+
+Do not re-run these, they are settled negatives: `-O3` (nothing, a better
+register allocator can't drop struct accesses), removing 2 accesses of 116
+(noise, ~1.9 cyc each). See EMU-015.
+
+**Interpreter is vendored and safe to edit**: `patches/harness/splb32/`, built by
+`scripts/build-tamafb.sh`. TamaHarness itself has NO .git — never edit there.
+
+**Next: register cache** (a/x/y/sp/pc/flags in host locals). Target ~half the
+accesses -> ~230 cycles -> ~1.03M instr/s, the 2x the menus need. Judge against
+**516,887 instr/s** headless and the status menu on glass.
 
 **Stalls are the open thread** (next up by operator request). 29 in an otherwise
 faster emulator, 14 on `dirty 0xFC`, longest early ones 286 and 211 ms wall with
