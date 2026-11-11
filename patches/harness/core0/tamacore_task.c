@@ -125,16 +125,20 @@ static inline void ctl_publish(void)
 static void ctl_init_own(void)
 {
 	/*
-	 * Take ownership of the whole block first, both sides' lines included.
+	 * Clear OUR lines only -- 0, 2 and 3 -- never line 1, which is core 1's.
 	 *
-	 * That is safe because the handshake is ordered around it: core 1 waits
-	 * for `magic` before it touches anything here, so at this moment the
-	 * block is nobody else's. And it is necessary, because PSRAM survives a
-	 * reset -- stale ready flags and a stale `quit` from the previous boot
-	 * once convinced the guest it had already been told to stop, and it
-	 * exited before emulating anything.
+	 * PSRAM is not zeroed at power-on, so a stale `frames` counter and a
+	 * stale button mask both read as live values and this has to clear
+	 * something. But clearing the whole block is a race: core 1 can raise
+	 * rom_ready between core 0 reading it and core 0 wiping it, and then
+	 * both sides wait forever. That is exactly what happened -- stage stuck
+	 * at WAIT_ROM, no frames, an emulator that looked dead.
+	 *
+	 * Each side initialising its own line is the rule everywhere else in
+	 * this structure, and the handshake below makes it sufficient.
 	 */
-	memset((void *)ctl, 0, sizeof(*ctl));
+	memset((void *)ctl, 0, 32);          /* line 0 */
+	memset((void *)((uint8_t *)ctl + 64), 0, 64);   /* lines 2 and 3 */
 
 	ctl->magic = SHM_MAGIC;
 	ctl->version = SHM_VERSION;
@@ -188,8 +192,10 @@ static void apply_buttons(splb32 *cpu, uint32_t mask, uint32_t *applied)
 		int now = (mask & bit[i]) != 0;
 		int was = (*applied & bit[i]) != 0;
 
-		if (now != was)
+		if (now != was) {
 			splb32_pin(cpu, 0, bit[i], now ? 1 : -1);
+			ctl->btn_events = ctl->btn_events + 1;
+		}
 	}
 
 	*applied = mask;
@@ -232,7 +238,7 @@ static void publish_eeprom(splb32 *cpu)
  * stale control block and reported the previous run's numbers. Restarting is
  * also what makes iterating on this possible without a flash each time.
  */
-static void tamacore_session(void)
+static void tamacore_session(uint32_t served, uint32_t *served_out)
 {
 	splb32 *cpu = NULL;
 	uint64_t cycles_done = 0;
@@ -253,17 +259,20 @@ static void tamacore_session(void)
 	ctl->stage = SHM_STAGE_WAIT_ROM;
 	ctl_publish();
 
-	/* Wait for core 1 to put the ROM and the save image in place. Both are
-	 * announced separately and in that order, so this cannot see half of
-	 * either. */
+	/* Wait for core 1 to announce a new session with the ROM and the save
+	 * image in place. Both flags are set before `session` moves, so seeing a
+	 * new session implies both are real. */
 	for (;;) {
 		ctl_read_peer_line();
-		if (ctl->rom_ready && ctl->eeprom_ready)
+		if (ctl->rom_ready && ctl->eeprom_ready &&
+		    ctl->session != served)
 			break;
 		if (ctl->quit)
 			goto out;
 		vTaskDelay(pdMS_TO_TICKS(20));
 	}
+
+	*served_out = ctl->session;
 
 	if (rom_image[0] != 0xA5 || rom_image[1] != 0x5F ||
 	    rom_image[2] != 0x10 || rom_image[3] != 0x49) {
@@ -446,20 +455,21 @@ out:
 
 static void tamacore_task(void *arg)
 {
+	uint32_t served = 0;
+
 	(void)arg;
 
+	/*
+	 * One session per core 1 run, numbered rather than flagged.
+	 *
+	 * Remembering which session was already served is what lets this restart
+	 * cleanly: a new tamacore on core 1 bumps the counter, and core 0 starts
+	 * a fresh machine. No flag has to be dropped and re-raised, so there is
+	 * no window in which both sides can be waiting on each other.
+	 */
 	for (;;) {
-		tamacore_session();
-
-		/* Do not treat the flags still standing from the session that
-		 * just ended as a new handshake. Wait for core 1 to drop them,
-		 * which it does when it starts again. */
-		for (;;) {
-			ctl_read_peer_line();
-			if (!ctl->rom_ready && !ctl->eeprom_ready)
-				break;
-			vTaskDelay(pdMS_TO_TICKS(50));
-		}
+		tamacore_session(served, &served);
+		vTaskDelay(pdMS_TO_TICKS(50));
 	}
 }
 

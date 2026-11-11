@@ -284,6 +284,47 @@ static int set_field(unsigned long off, uint32_t value)
 	return shared_write(off, &value, sizeof(value));
 }
 
+/*
+ * Frame checksum, over whatever core 0 last published.
+ *
+ * Used by -t to answer one question: did pressing a button change what the
+ * guest is drawing? That is the only end-to-end evidence that the button path
+ * works -- the control field moving proves nothing on its own, because a field
+ * nobody reads moves just as readily as one that is read.
+ */
+static uint32_t frame_sum(uint32_t *idx_out)
+{
+	uint8_t buf[SHM_FRAME_BYTES];
+	uint32_t idx, sum = 2166136261u;
+	unsigned long i;
+
+	if (shared_read(SHM_CTL_OFF + 68, &idx, sizeof(idx)) != 0)
+		idx = 0;
+	if (shared_read(idx ? SHM_FRAME1_OFF : SHM_FRAME0_OFF, buf, sizeof(buf)) != 0)
+		return 0;
+
+	for (i = 0; i < sizeof(buf); i++)
+		sum = (sum ^ buf[i]) * 16777619u;
+
+	if (idx_out)
+		*idx_out = idx;
+	return sum;
+}
+
+/* Reads core 0's applied-pin counter (line 3 of the control block). */
+static uint32_t ctl_btn_events(void)
+{
+	uint32_t v = 0;
+
+	shared_read(SHM_CTL_OFF + 108, &v, sizeof(v));
+	return v;
+}
+
+static void set_buttons(uint32_t mask)
+{
+	shared_write(SHM_CTL_OFF + 44, &mask, sizeof(mask));
+}
+
 int main(int argc, char **argv)
 {
 	struct shm_ctl ctl = { 0 };
@@ -291,7 +332,7 @@ int main(int argc, char **argv)
 	uint32_t mask = 0, sent_mask = 0;
 	uint32_t last_seq = 0, last_eeprom = 0;
 	unsigned long frames = 0;
-	int quiet = 0, bench = 0, i;
+	int quiet = 0, bench = 0, selftest = 0, i;
 	double seconds = 0.0;
 	time_t started;
 
@@ -300,6 +341,8 @@ int main(int argc, char **argv)
 			quiet = 1;
 		else if (strcmp(argv[i], "-b") == 0 && i + 1 < argc)
 			bench = atoi(argv[++i]);
+		else if (strcmp(argv[i], "-t") == 0)
+			selftest = 1;
 		else if (argv[i][0] != '-')
 			seconds = atof(argv[i]);
 	}
@@ -407,16 +450,103 @@ int main(int argc, char **argv)
 	if (seed_rom() < 0)
 		return 1;
 
-	if (set_field((unsigned long)offsetof(struct shm_ctl, eeprom_ready), 1) ||
-	    set_field((unsigned long)offsetof(struct shm_ctl, rom_ready), 1)) {
-		note("could not raise the ready flags");
-		return 1;
+	/*
+	 * Raise the flags, then bump `session`. The counter is what tells core 0
+	 * this is a new run rather than the previous one still standing -- it
+	 * remembers the last session it served and starts a fresh machine for
+	 * any other number. Signalling with a counter rather than by dropping
+	 * and re-raising a flag removes the window in which both sides can be
+	 * waiting on each other.
+	 */
+	{
+		uint32_t session = 0;
+
+		shared_read(SHM_CTL_OFF + (unsigned long)offsetof(struct shm_ctl, session),
+			    &session, sizeof(session));
+
+		if (set_field((unsigned long)offsetof(struct shm_ctl, eeprom_ready), 1) ||
+		    set_field((unsigned long)offsetof(struct shm_ctl, rom_ready), 1) ||
+		    set_field((unsigned long)offsetof(struct shm_ctl, session),
+			      session + 1)) {
+			note("could not raise the ready flags");
+			return 1;
+		}
 	}
 
 	if (!quiet)
 		printf("tamacore: rom and save image handed over; waiting for core 0\n");
 
 	started = time(NULL);
+
+	/*
+	 * -t: press the middle button and check that the picture changes.
+	 *
+	 * Waits for core 0 to be RUNNING first, because pressing into a machine
+	 * that has not started says nothing. Three samples are taken: before, a
+	 * moment after the press, and after the release, so "changed" cannot be
+	 * satisfied by the frame counter moving on its own.
+	 */
+	if (selftest) {
+		uint32_t before, during, after, pl, pd, pa;
+		uint32_t events_before, events_after;
+		int rc;
+		int waited;
+
+		for (waited = 0; waited < 400; waited++) {
+			uint32_t st;
+
+			if (shared_read(SHM_CTL_OFF + 8, &st, sizeof(st)) == 0 &&
+			    st == SHM_STAGE_RUNNING)
+				break;
+			usleep(25000);
+		}
+		if (waited >= 400) {
+			printf("tamacore: selftest: core 0 never reached RUNNING\n");
+			return 1;
+		}
+
+		usleep(1500000);                /* let it finish booting */
+		before = frame_sum(&pl);
+		events_before = ctl_btn_events();
+		set_buttons(SHM_BTN_MIDDLE);
+		usleep(400000);
+		set_buttons(0);
+		usleep(1500000);
+		during = frame_sum(&pd);
+		events_after = ctl_btn_events();
+		usleep(1500000);
+		after = frame_sum(&pa);
+
+		printf("tamacore: selftest: frame %08x -> %08x -> %08x "
+		       "(idx %u/%u/%u)\n",
+		       before, during, after, pl, pd, pa);
+		printf("tamacore: selftest: pin changes applied by core 0: "
+		       "%u -> %u\n", events_before, events_after);
+
+		/*
+		 * Two separate claims, and only one of them is a pass/fail.
+		 *
+		 * The pin counter is decisive: core 0 read the mask out of the
+		 * window and drove the emulated inputs, which is the whole
+		 * cross-core button path. The picture changing is reported but
+		 * is NOT treated as proof, because this guest animates on its
+		 * own -- an earlier version of this test passed on a pet that
+		 * was merely blinking.
+		 */
+		if (events_after > events_before) {
+			printf("tamacore: selftest: PASS -- core 0 applied the "
+			       "press (picture %s)\n",
+			       before != after ? "also changed" : "did not change");
+			rc = 0;
+		} else {
+			printf("tamacore: selftest: FAIL -- core 0 never applied "
+			       "the press\n");
+			rc = 1;
+		}
+
+		set_field((unsigned long)offsetof(struct shm_ctl, quit), 1);
+		return rc;
+	}
 
 	for (;;) {
 		uint32_t stage;

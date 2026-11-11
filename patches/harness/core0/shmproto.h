@@ -22,6 +22,16 @@
  * Rule that keeps this simple: each field has one writer. The two sides never
  * read-modify-write the same word, so nothing here needs a lock.
  *
+ * The handshake, and why it carries a session number. Core 1 copies the ROM in,
+ * raises rom_ready and eeprom_ready, and bumps `session`. Core 0 waits for both
+ * flags and for a session it has not already served.
+ *
+ * Without the session counter this deadlocked: core 0 clears its own lines at
+ * the start of every run, and an earlier version cleared the whole block --
+ * wiping flags core 1 had already raised. Both sides then waited forever, with
+ * stage stuck at WAIT_ROM and no frames. The counter removes the ordering
+ * question entirely instead of adding another flag to get wrong.
+ *
  * Coherency: core 0 has a D-cache and core 1 has none, so core 0 calls
  * esp_cache_msync() after publishing and core 1 needs nothing. That was
  * measured rather than assumed -- see docs/cores.md.
@@ -128,7 +138,8 @@ struct shm_ctl {
 	volatile uint32_t eeprom_dirty; /* core 1 has newer EEPROM bytes */
 	volatile uint32_t buttons;
 	volatile uint32_t quit;
-	volatile uint32_t reserved1[3];
+	volatile uint32_t session;      /* bumped once per core 1 start */
+	volatile uint32_t reserved1[2];
 
 	/* line 2: core 0 writes, core 1 reads */
 	volatile uint32_t frame_seq;
@@ -144,7 +155,8 @@ struct shm_ctl {
 	volatile uint32_t guest_pc;     /* where the guest is executing */
 	volatile uint32_t dpram_lit;    /* nonzero bytes in display RAM */
 	volatile uint32_t instrs_lo;    /* opcodes retired, low 32 bits */
-	volatile uint32_t reserved3[5];
+	volatile uint32_t btn_events;   /* pin changes applied from `buttons` */
+	volatile uint32_t reserved3[4];
 };
 
 #endif /* SHMPROTO_H */
