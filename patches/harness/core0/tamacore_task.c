@@ -47,9 +47,14 @@
 #define TAMACORE_FPS        16u
 #define FRAME_CYCLES        (SPLB32_CLOCK_HZ / TAMACORE_FPS)
 
-/* 4 ms of guest time per sub-step. Small enough that a short tap still lands
- * between two of them, so a press cannot be born and die inside one step. */
-#define STEP_CYCLES         (SPLB32_CLOCK_HZ / 250u)
+/* Largest slice of guest time run between yields: 20 ms. Small enough that a
+ * button press and a frame deadline are never missed by more than that. */
+#define SLICE_CYCLES        (SPLB32_CLOCK_HZ / 50u)
+
+/* Two seconds of guest time in one call, before the first frame. This is how
+ * the userspace front end starts (tamafb.c), and without it the first core-0
+ * build came up blank: the paced loop alone never let the ROM finish booting. */
+#define BOOT_CYCLES         (SPLB32_CLOCK_HZ * 2u)
 
 #define EEPROM_PUBLISH_US   2000000                      /* 2 s */
 
@@ -295,8 +300,32 @@ static void tamacore_session(void)
 	ctl->stage = SHM_STAGE_RUNNING;
 	ctl_publish();
 
-	t0_us = esp_timer_get_time();
-	last_eeprom_us = t0_us;
+	/*
+	 * Pacing, rewritten after the first paced version starved the guest.
+	 *
+	 * The old loop computed a wall-clock deadline in microseconds and either
+	 * ran a 4 ms slice or slept a whole 10 ms tick, so the guest advanced in
+	 * bursts that did not add up to real time and never finished booting:
+	 * ~105k opcodes retired in ten seconds, display RAM untouched. The boot
+	 * burst below now happens first and fills the screen, and the steady state
+	 * is one tick of guest time per tick of wall time.
+	 *
+	 * One step per vTaskDelay(1) is the whole trick. It cannot starve the
+	 * core-0 idle task -- which the task watchdog watches, and which a busy
+	 * loop would have tripped -- and the guest's clock and the wall clock
+	 * advance together at 100 Hz.
+	 */
+	cycles_done = splb32_run_cycles(cpu, BOOT_CYCLES);   /* absolute */
+	last_eeprom_us = esp_timer_get_time();
+
+	/* Pretend the burst already took its two seconds of wall time, so the
+	 * measured rate is the guest's real rate rather than an artefact of
+	 * starting the clock after the burst. */
+	t0_us = esp_timer_get_time() -
+		(int64_t)(cycles_done * 1000000ull / SPLB32_CLOCK_HZ);
+	last_hz_us = 0;
+	last_hz_cycles = cycles_done;
+	next_frame_cycle = cycles_done + FRAME_CYCLES;
 
 	for (;;) {
 		int64_t now_us;
@@ -308,60 +337,68 @@ static void tamacore_session(void)
 
 		buttons = ctl->buttons;
 
+		/*
+		 * Absolute pacing: how many guest cycles *should* have elapsed by
+		 * now, and run up to that. Self-correcting, so tick jitter cannot
+		 * accumulate.
+		 *
+		 * splb32_run_cycles() returns the machine's absolute cycle count,
+		 * not the number it just added. The first version wrote
+		 * `cycles_done += splb32_run_cycles(...)`, which inflated the
+		 * counter toward 2^64, made the "caught up" test always true, and
+		 * starved the guest to ~105k opcodes in ten seconds while reporting
+		 * a healthy 4 MHz. That single += is why the screen stayed blank.
+		 */
 		now_us = esp_timer_get_time() - t0_us;
 		target = (uint64_t)SPLB32_CLOCK_HZ * (uint64_t)now_us / 1000000u;
 
-		if (cycles_done + STEP_CYCLES > target) {
-			/* Caught up: yield. The tick is 10 ms, so the guest
-			 * runs in short bursts between delays and the absolute
-			 * deadline above keeps the average exact. */
-			vTaskDelay(1);
+		if (cycles_done >= target) {
+			vTaskDelay(1);          /* ahead of the wall clock: yield */
 			continue;
 		}
 
-		cycles_done += splb32_run_cycles(cpu, STEP_CYCLES);
+		{
+			uint64_t want = target - cycles_done;
+
+			if (want > SLICE_CYCLES)
+				want = SLICE_CYCLES;
+
+			cycles_done = splb32_run_cycles(cpu, want);
+		}
+
 		apply_buttons(cpu, buttons, &applied);
 
-		/* Publish on guest time, not wall time: the frame rate then
-		 * follows the machine, and a starved guest shows up as jitter
-		 * rather than as a lie. */
-		while (cycles_done >= next_frame_cycle) {
+		/* Publish on guest time, not wall time: the frame rate follows the
+		 * machine, so a starved guest shows up as jitter rather than as a
+		 * number that looks fine. */
+		if (cycles_done >= next_frame_cycle) {
+			const uint8_t *dp = splb32_dpram(cpu);
+			splb32_state st;
+			uint32_t lit = 0;
 			int64_t deadline_us;
 			int64_t late_ms;
+			int n;
 
-			draw_frame(frame[idx], splb32_dpram(cpu));
+			draw_frame(frame[idx], dp);
 			esp_cache_msync(frame[idx], SHM_FRAME_STRIDE,
 					ESP_CACHE_MSYNC_FLAG_INVALIDATE);
 
+			for (n = 0; n < 0x200; n++)
+				if (dp[n])
+					lit++;
+
+			splb32_snapshot(cpu, &st);
+
+			ctl->guest_pc = st.pc;
+			ctl->instrs_lo = st.instrs;
+			ctl->dpram_lit = lit;
 			ctl->frame_idx = idx;
 			ctl->frames = ctl->frames + 1;
 			ctl->guest_cycles = (uint32_t)cycles_done;
-			{
-				/* Diagnostics: is the guest executing, and does
-				 * it ever write display RAM? A blank LCD with a
-				 * moving PC means it is spinning, not drawing. */
-				const uint8_t *dp = splb32_dpram(cpu);
-				uint32_t lit = 0;
-				int n;
-
-				for (n = 0; n < 0x200; n++)
-					if (dp[n])
-						lit++;
-
-				{
-					splb32_state st;
-
-					splb32_snapshot(cpu, &st);
-					ctl->guest_pc = st.pc;
-					ctl->instrs_lo = st.instrs;
-				}
-				ctl->dpram_lit = lit;
-			}
-			ctl->frame_seq = ctl->frame_seq + 1;  /* last: readers gate on it */
 
 			deadline_us = (int64_t)(next_frame_cycle * 1000000ull /
 						SPLB32_CLOCK_HZ);
-			late_ms = ((esp_timer_get_time() - t0_us) - deadline_us) / 1000;
+			late_ms = (now_us - deadline_us) / 1000;
 			if (late_ms > (int64_t)ctl->jitter_ms)
 				ctl->jitter_ms = (uint32_t)late_ms;
 
@@ -370,26 +407,27 @@ static void tamacore_session(void)
 
 				ctl->guest_hz = (uint32_t)(d * 1000000ull /
 							   (uint64_t)(now_us - last_hz_us));
+				last_hz_us = now_us;
+				last_hz_cycles = cycles_done;
 			}
 
+			ctl->frame_seq = ctl->frame_seq + 1;  /* last: readers gate on it */
 			ctl_publish();
 
 			idx ^= 1;
-			next_frame_cycle += FRAME_CYCLES;
+
+			/* If the guest fell more than a frame behind, skip the frames
+			 * it missed rather than publishing a backlog. */
+			do {
+				next_frame_cycle += FRAME_CYCLES;
+			} while (next_frame_cycle <= cycles_done);
 		}
 
-		if (now_us > last_hz_us) {
-			last_hz_us = now_us;
-			last_hz_cycles = cycles_done;
-		}
-
-		/* Republish the save image every couple of seconds. 1 KB is
-		 * nothing, and doing it unconditionally means neither side has
-		 * to ask the other's permission to persist. */
 		if (esp_timer_get_time() - last_eeprom_us > EEPROM_PUBLISH_US) {
 			publish_eeprom(cpu);
 			last_eeprom_us = esp_timer_get_time();
 		}
+
 	}
 
 out:
