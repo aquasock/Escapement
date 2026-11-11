@@ -1,4 +1,4 @@
-# Handoff — Escapement, 2026-11-10T21:35
+# Handoff — Escapement, 2026-11-10T22:00
 
 Linux 7.2.4 on a T-Watch Ultra (ESP32-S3). Real Linux on the watch's own Xtensa
 cores, not emulated. This file is orientation; verify before acting on it.
@@ -56,26 +56,50 @@ strip blit      17.0-17.4 ms per 320x57 write
   wiping core 1's flags. Each side now clears only its own line and the handshake
   is a session counter (`session` in line 1).
 
-## Not verified — what is left
+## Verified on the glass, 2026-11-10 22:00
 
-1. **Physical buttons.** `btn_events` proves core 0 applies a mask it reads, and
-   `tamacore -t` exercises the path, but no finger has been on the glass since
-   the move. Press the bars and watch the pet.
-2. **Menus at speed.** Should now be structural — core 1 blits one fixed 57x57
-   tile whatever is on screen — but it is an argument, not a measurement.
-3. **No mutual exclusion.** Two `tamacore` instances still race for the window.
+```
+buttons      tamacore -t: pin changes applied by core 0: 0 -> 2, PASS
+menus        operator: status is good (was 0.52x)
+frames       1416 published, 1416 blitted, ~15.6 fps
+guest rate   3,998,834 cycles/s against a 4,000,000 target
+jitter       8 ms worst frame
+stability    90 s loaded: 0 reboots (BOOTS 17->17, UPTIME 55->146)
+             256 s idle:    0 reboots, 1328 kB free, 972 kB available
+```
 
-## Next actions, in order
+## The reboots, and what they were not
 
-1. Press the bars. If nothing happens, check `buttons` at offset 44 and
-   `btn_events` at offset 108 in `/proc/esp-shared` -- if the mask moves but the
-   counter does not, the guest is not reading line 1; if the counter moves but
-   the pet ignores it, the emulated pin mapping is wrong.
-2. Then the status menu, to confirm the 0.52x is gone.
+Not memory: NOMMU Linux has no OOM killer, and idle memory was healthy. Not the
+USB console either — a reboot happened during a 180 s window with no host
+traffic.
 
-Note: `scripts/watch-exec.py` sends `^C` on every call, which kills a foreground
-`tamacore` on the console. For a long manual test, run it in the foreground of a
-`watch-exec` call and leave that call running.
+They stopped when the **phantom session** was fixed. `served` began at 0 while
+`session` was already 1 from a previous boot, so core 0 started a guest with no
+`tamacore` running and nobody to serve. `served` now starts at whatever session
+is published. The one reset reason that survived being read said
+`ESP_RST_INT_WDT` (5); the precise mechanism is not proven, and it has not been
+reproduced deliberately.
+
+Reading the reset reason took three attempts because `ctl_init_own()` cleared
+line 3, which holds it. If you add boot-scoped fields, make sure the clears are
+scoped around them.
+
+## Still open
+
+- Two `tamacore` instances race for the window; no mutual exclusion.
+- `run-tama.sh` / `S51tamafb` still start the old userspace `tamafb-1x`. Nothing
+  starts `tamacore` at boot yet.
+- With the emulator up, `/home/tama.sav` is only written when the guest actually
+  changes its EEPROM, so after a fresh boot expect `rom:` diagnostics to differ
+  from before.
+
+## Deploying
+
+`./scripts/watch-deploy.sh tamacore` prefers telnet, which is flaky when BLE
+interferes; `./scripts/watch-deploy.sh --usb tamacore` always works. Check the
+size after deploying — a failed telnet deploy leaves the OLD binary in /home
+while reporting nothing useful, which cost real time this session.
 
 ## Reconstruct
 
