@@ -169,6 +169,8 @@ static void fbcon_attach(int idx)
  * core 1", because a frozen board cannot be asked anything.
  */
 #define DIAG_BASE       (0x70000UL)
+#define DIAG_PREV_BASE  (0x70100UL)
+
 #define DIAG_C1_BEAT    (DIAG_BASE + 64)
 #define DIAG_C1_PHASE   (DIAG_BASE + 68)
 #define DIAG_C1_MAX     (DIAG_BASE + 72)
@@ -505,7 +507,7 @@ int main(int argc, char **argv)
 {
 	struct shm_ctl ctl = { 0 };
 	uint32_t mask = 0, sent_mask = 0;
-	uint32_t last_seq = 0, last_eeprom = 0;
+	uint32_t last_seq = 0;
 	unsigned long frames = 0;
 	int quiet = 0, bench = 0, selftest = 0, i;
 	double seconds = 0.0;
@@ -837,18 +839,43 @@ int main(int argc, char **argv)
 			last_seq = ctl.frame_seq;
 		}
 
-		if (ctl.eeprom_seq != last_eeprom) {
-			c1_mark(SHM_C1_EEPROM);
-			persist_eeprom();
-			c1_mark(SHM_C1_IDLE);
-			last_eeprom = ctl.eeprom_seq;
-		}
+		/*
+		 * Deliberately NOT persisting the save while the pet is running.
+		 *
+		 * A flash write is the one thing that cannot happen while Linux is
+		 * executing. Core 0's flash path turns the external-memory cache
+		 * off for the whole chip, and this kernel runs from PSRAM with no
+		 * cache of its own -- so any code core 1 executes during that
+		 * window dies, and the interrupt watchdog then resets the board.
+		 *
+		 * A flash write on its own is survivable, because core 1 is parked
+		 * waiting for the response and executes nothing. A running emulator
+		 * on its own is fine, because there is no flash traffic. Together
+		 * they are fatal, and that is exactly what hatching a pet did: the
+		 * save changed, so this loop wrote it, while core 0 was publishing
+		 * frames and core 1 was blitting them.
+		 *
+		 * So the save is written once, on exit, when the machine is
+		 * paused. See the note at the end of main(). The cost is real and
+		 * worth stating: progress since launch is lost if the watch dies
+		 * or the battery is pulled.
+		 */
 
 		c1_tick();
 		usleep(POLL_US);
 	}
 
+	/*
+	 * The one place the save is written: after the loop ends, so the
+	 * emulator is no longer blitting and core 0 has stopped publishing.
+	 * See the long note in the main loop for why a mid-play write is not
+	 * safe on this board.
+	 */
 	set_field((unsigned long)offsetof(struct shm_ctl, quit), 1);
+	c1_mark(SHM_C1_EEPROM);
+	persist_eeprom();
+	c1_mark(SHM_C1_IDLE);
+
 	fbcon_attach(vtcon_index);
 
 	if (!quiet) {

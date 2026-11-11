@@ -480,18 +480,17 @@ static void tamacore_session(uint32_t served, uint32_t *served_out)
 	 * reason. `phase` is deliberately NOT cleared: it is the record of where
 	 * the previous boot died, and it outlives the reset.
 	 */
-	diag->frames = 0;
-	diag->draw_us = 0;
-	diag->wb_us = 0;
-	diag->inv_us = 0;
-	diag->gap_us = 0;
-	diag->draw_max = 0;
-	diag->wb_max = 0;
-	diag->inv_max = 0;
-	diag->gap_max = 0;
-	diag->total_max = 0;
-	diag->chunk_max = 0;
-	diag_publish();
+	/*
+	 * NOT cleared here, on purpose. They are cleared once per boot in
+	 * ctl_boot_once(), after being snapshotted into SHM_DIAG_PREV_OFF.
+	 * Clearing them at the start of every SESSION -- which is what this code
+	 * used to do -- means a crash during a session leaves a record that the
+	 * next session immediately overwrites, so the evidence is gone by the
+	 * time anyone looks. That cost most of a cycle.
+	 */
+	ctl->dirty_lo = 0;
+	ctl->dirty_hi = SHM_FRAME_H;
+	ctl_publish();
 
 	/* The frame buffer is not known-good until the first full paint, and the
 	 * byte->row table is built once per session rather than per frame. */
@@ -842,6 +841,42 @@ static void ctl_boot_once(void)
 	 * is deliberately NOT cleared: it is the record of where the last boot
 	 * died, and clearing it would erase the evidence before it is read.
 	 */
+	/*
+	 * Snapshot the record, THEN clear it for this boot.
+	 *
+	 * The maxima have to be cleared -- they are maxima, and PSRAM is not
+	 * zeroed at power-on, so an uncleared field holds 0x55555555 and no real
+	 * value can ever beat it. But clearing in place throws away the state the
+	 * previous boot died in, which is the whole point of the record. Twice
+	 * this session a reboot wiped its own evidence before it could be read.
+	 *
+	 * So the old contents are copied to SHM_DIAG_PREV_OFF first, and that
+	 * copy is what to read after a crash.
+	 */
+	{
+		struct shm_diag *prev =
+			(struct shm_diag *)(SHM_BASE + SHM_DIAG_PREV_OFF);
+		const uint32_t *src = (const uint32_t *)diag;
+		uint32_t *dst = (uint32_t *)prev;
+		int i;
+
+		for (i = 0; i < (int)(sizeof(*diag) / sizeof(uint32_t)); i++)
+			dst[i] = src[i];
+
+		esp_cache_msync((void *)prev, sizeof(*prev),
+				ESP_CACHE_MSYNC_FLAG_INVALIDATE);
+	}
+
+	{
+		const uint32_t *src = (const uint32_t *)diag;
+		uint32_t *dst = (uint32_t *)diag;
+		int i;
+
+		for (i = 0; i < (int)(sizeof(*diag) / sizeof(uint32_t)); i++)
+			dst[i] = 0;
+		(void)src;
+	}
+
 	diag->magic = SHM_DIAG_MAGIC;
 	diag->version = SHM_DIAG_VERSION;
 	diag_publish();

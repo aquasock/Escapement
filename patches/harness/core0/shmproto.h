@@ -61,6 +61,16 @@
  * clears.
  */
 #define SHM_DIAG_OFF        0x70000u
+/*
+ * A copy of the diagnostics as they were at the START of this boot, i.e. the
+ * state the previous boot died in.
+ *
+ * Zeroing the maxima for the new boot is necessary -- they are maxima, and
+ * PSRAM is not cleared at power-on -- but doing it in place destroys exactly
+ * the evidence a crash leaves behind. That happened twice this session before
+ * the copy existed. The record is snapshotted here first, then cleared.
+ */
+#define SHM_DIAG_PREV_OFF   (SHM_DIAG_OFF + 0x100u)
 #define SHM_DIAG_MAGIC      0x44494147u     /* 'DIAG' */
 #define SHM_DIAG_VERSION    1u
 
@@ -140,7 +150,14 @@ struct shm_diag {
 	volatile uint32_t gap_max;
 	volatile uint32_t total_max;    /* whole publish, worst */
 	volatile uint32_t chunk_max;    /* longest SINGLE esp_cache_msync */
-	volatile uint32_t reserved0[2];
+
+	/*
+	 * Flash work, recorded by the firmware's IPC handler because a flash
+	 * operation is the other thing on this board that runs with interrupts
+	 * off. Written by core 0, in core 0's line.
+	 */
+	volatile uint32_t flash_max_us;   /* longest single esp_flash_* call */
+	volatile uint32_t flash_last;     /* last op: code<<24 | size>>12 */
 
 	/* line 2 -- core 1 */
 	volatile uint32_t c1_beat;      /* ++ every loop iteration */
