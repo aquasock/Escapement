@@ -41,11 +41,28 @@
 #define SHM_BASE	0x3df00000UL
 #define SHM_SIZE	0x00100000UL
 #define SHM_FRAME0	0x00001000UL
-#define SHM_FRAME1	0x00002000UL
-#define SHM_EEPROM	0x00003000UL
+#define SHM_FRAME1	0x00003000UL
+#define SHM_EEPROM	0x00005000UL
 #define SHM_ROM		0x00080000UL
 
-_Static_assert(SHM_FRAME1 == SHM_FRAME0 + 0x1000, "frames must be one page apart");
+/*
+ * A frame is 57x57 RGB565, which is 6498 bytes -- not a page.
+ *
+ * The first layout put the frames one page apart, which made every write to
+ * frame B run 2402 bytes past its slot and land on the EEPROM image. That
+ * showed up as the save region reading back 18 c6 18 c6: pixel data. These
+ * asserts check the arithmetic against the frame size rather than against a
+ * guess, and the same numbers are asserted in shmproto.h.
+ */
+#define SHM_FRAME_BYTES	6498UL
+#define SHM_FRAME_STRIDE	6528UL		/* padded to the 32-byte line */
+
+_Static_assert(SHM_FRAME1 - SHM_FRAME0 >= SHM_FRAME_STRIDE,
+	       "a frame does not fit in its slot");
+_Static_assert(SHM_EEPROM - SHM_FRAME1 >= SHM_FRAME_STRIDE,
+	       "the EEPROM image overlaps frame B");
+_Static_assert(SHM_EEPROM + 1024UL <= SHM_ROM,
+	       "the EEPROM image overlaps the ROM");
 _Static_assert(SHM_BASE + SHM_ROM + 0x80000UL == SHM_BASE + SHM_SIZE,
 	       "ROM must end at the window end");
 
@@ -96,9 +113,9 @@ static bool writable(unsigned long off, unsigned long count)
 {
 	unsigned long end = off + count;        /* first byte past the write */
 
-	if (end > SHM_FRAME0 && off < SHM_FRAME0 + 0x1000)
+	if (end > SHM_FRAME0 && off < SHM_FRAME0 + SHM_FRAME_STRIDE)
 		return false;
-	if (end > SHM_FRAME1 && off < SHM_FRAME1 + 0x1000)
+	if (end > SHM_FRAME1 && off < SHM_FRAME1 + SHM_FRAME_STRIDE)
 		return false;
 	return true;
 }
@@ -151,7 +168,7 @@ static int __init esp_shared_init(void)
 	pr_info("esp_shared: 0x%08lx..0x%08lx exposed at /proc/esp-shared "
 		"(frames 0x%lx..0x%lx write-protected, ROM at 0x%lx)\n",
 		SHM_BASE, SHM_BASE + SHM_SIZE,
-		SHM_FRAME0, SHM_FRAME1 + 0x1000, SHM_ROM);
+		SHM_FRAME0, SHM_FRAME1 + SHM_FRAME_STRIDE, SHM_ROM);
 	return 0;
 }
 

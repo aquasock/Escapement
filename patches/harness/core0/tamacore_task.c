@@ -157,8 +157,16 @@ static void draw_frame(uint16_t *px, const uint8_t *dpram)
 	lcd_fb fb = { px, SHM_FRAME_W, SHM_FRAME_H };
 	int i;
 
+	/*
+	 * Bezel first, in a colour distinct from the LCD background. Filling
+	 * this with SHM_LCD_OFF made the surround and the LCD the same shade,
+	 * so a blank screen and a screen full of pixels looked alike -- and
+	 * because core 1 blits a full-width strip, the surround appeared as a
+	 * flat band across the whole framebuffer. Black surrounds match the
+	 * console background, so only the LCD itself is visible.
+	 */
 	for (i = 0; i < SHM_FRAME_W * SHM_FRAME_H; i++)
-		px[i] = SHM_LCD_OFF;
+		px[i] = SHM_BEZEL;
 
 	lcd_draw(&fb, dpram, SHM_FRAME_PAD, SHM_FRAME_PAD);
 }
@@ -182,6 +190,16 @@ static void apply_buttons(splb32 *cpu, uint32_t mask, uint32_t *applied)
 	*applied = mask;
 }
 
+/*
+ * Publish the save image, but only when the guest has actually changed it.
+ *
+ * The first version wrote it unconditionally every two seconds. On a guest that
+ * was not writing its EEPROM yet, that replaced a real /home/tama.sav with 1 KB
+ * of zeros — destroying the save, and doing it silently. A shadow copy of what
+ * was seeded is enough to tell the difference.
+ */
+static uint8_t eeprom_shadow[1024];
+
 static void publish_eeprom(splb32 *cpu)
 {
 	uint8_t buf[1024];
@@ -189,6 +207,10 @@ static void publish_eeprom(splb32 *cpu)
 	if (splb32_eeprom_save(cpu, buf) != 0)
 		return;
 
+	if (memcmp(buf, eeprom_shadow, sizeof(buf)) == 0)
+		return;                 /* unchanged: leave the file alone */
+
+	memcpy(eeprom_shadow, buf, sizeof(buf));
 	memcpy(eeprom_image, buf, sizeof(buf));
 	esp_cache_msync(eeprom_image, sizeof(buf), ESP_CACHE_MSYNC_FLAG_INVALIDATE);
 	ctl->eeprom_seq = ctl->eeprom_seq + 1;
@@ -254,14 +276,21 @@ static void tamacore_session(void)
 		goto out;
 	}
 
-	/* The machine's own wiring, as the front end set it up: PD pulled up,
-	 * the EEPROM on PD with SDA bit 2 / SCL bit 1 at address 0xA0, the IR
-	 * link on PB bit 2. */
+	/*
+	 * The machine's own wiring, in this exact order and no reset afterwards.
+	 *
+	 * splb32_reset() memsets pullup_ext, so calling it after set_pullup()
+	 * silently removes the EEPROM's SDA pull-up and the ROM then hangs in the
+	 * I2C read -- which looked like a guest that ran at full speed and never
+	 * drew anything, because it did: it was spinning. splb32_new() has
+	 * already reset the core, so the wiring goes on afterwards, exactly as
+	 * the userspace front end does it (tamafb.c).
+	 */
 	splb32_set_pullup(cpu, 3, 0x02);
 	splb32_attach_eeprom(cpu, 0xA0, 0x02, 0x01);
-	splb32_attach_ir(cpu, 0x04, 0x04);
 	splb32_eeprom_load(cpu, eeprom_image);
-	splb32_reset(cpu);
+	splb32_attach_ir(cpu, 0x04, 0x04);
+	memcpy(eeprom_shadow, eeprom_image, sizeof(eeprom_shadow));
 
 	ctl->stage = SHM_STAGE_RUNNING;
 	ctl_publish();
@@ -307,6 +336,27 @@ static void tamacore_session(void)
 			ctl->frame_idx = idx;
 			ctl->frames = ctl->frames + 1;
 			ctl->guest_cycles = (uint32_t)cycles_done;
+			{
+				/* Diagnostics: is the guest executing, and does
+				 * it ever write display RAM? A blank LCD with a
+				 * moving PC means it is spinning, not drawing. */
+				const uint8_t *dp = splb32_dpram(cpu);
+				uint32_t lit = 0;
+				int n;
+
+				for (n = 0; n < 0x200; n++)
+					if (dp[n])
+						lit++;
+
+				{
+					splb32_state st;
+
+					splb32_snapshot(cpu, &st);
+					ctl->guest_pc = st.pc;
+					ctl->instrs_lo = st.instrs;
+				}
+				ctl->dpram_lit = lit;
+			}
 			ctl->frame_seq = ctl->frame_seq + 1;  /* last: readers gate on it */
 
 			deadline_us = (int64_t)(next_frame_cycle * 1000000ull /

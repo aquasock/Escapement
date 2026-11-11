@@ -167,9 +167,19 @@ static int panel_blit(const uint16_t *tile)
 {
 	int y;
 
-	/* Bezel across the strip, then the tile in the middle of it. */
+	/*
+	 * The strip is full width because fb_write() blits whole rows, so the
+	 * pixels either side of the LCD have to be something. They must be the
+	 * console background, not a picture element.
+	 *
+	 * This was filled with SHM_LCD_OFF for the first build, which is the
+	 * same light grey the LCD uses -- so the entire 320x57 strip came out as
+	 * one flat grey band with the LCD invisible inside it. On the glass that
+	 * reads as a horizontal smear reaching both edges of the framebuffer,
+	 * which is exactly how it was reported.
+	 */
 	for (y = 0; y < SHM_FB_W * SHM_FRAME_H; y++)
-		g_strip[y] = SHM_LCD_OFF;
+		g_strip[y] = SHM_BEZEL;
 
 	for (y = 0; y < SHM_FRAME_H; y++)
 		memcpy(&g_strip[(size_t)y * SHM_FB_W + SHM_ORIGIN_X],

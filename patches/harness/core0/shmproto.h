@@ -9,9 +9,15 @@
  *   offset      size        owner
  *   0x00000     4 KB        control block, both sides, named fields only
  *   0x01000     8 KB        frame A, core 0 writes
- *   0x02000     8 KB        frame B, core 0 writes
- *   0x03000     4 KB        EEPROM image, core 1 seeds, both update
+ *   0x03000     8 KB        frame B, core 0 writes
+ *   0x05000     4 KB        EEPROM image, core 1 seeds, both update
  *   0x80000     512 KB      ROM, core 1 copies once, core 0 reads only
+ *
+ * The frames get 8 KB each, and must: one frame is 6498 bytes. They were 4 KB
+ * apart once, so drawing frame B overwrote the tail of frame A *and* the
+ * EEPROM image at 0x3000 -- which read back as 18 c6 18 c6, pixel colour
+ * 0xC618. The static asserts below check that arithmetic at compile time
+ * instead of leaving it to be discovered on the glass.
  *
  * Rule that keeps this simple: each field has one writer. The two sides never
  * read-modify-write the same word, so nothing here needs a lock.
@@ -31,8 +37,8 @@
 
 #define SHM_CTL_OFF         0x00000u
 #define SHM_FRAME0_OFF      0x01000u
-#define SHM_FRAME1_OFF      0x02000u
-#define SHM_EEPROM_OFF      0x03000u
+#define SHM_FRAME1_OFF      0x03000u
+#define SHM_EEPROM_OFF      0x05000u
 #define SHM_ROM_OFF         0x80000u
 
 /*
@@ -47,6 +53,17 @@
 #define SHM_FRAME_BYTES     (SHM_FRAME_W * SHM_FRAME_H * 2)
 #define SHM_FRAME_PAD       4           /* LCD surround, in pixels */
 
+#define SHM_EEPROM_BYTES    1024
+#define SHM_ROM_BYTES        524288u     /* 512 KB, the V3 ROM */
+
+/* The bug that produced a full-width smear: a frame larger than its slot. */
+_Static_assert(SHM_FRAME_STRIDE <= (SHM_FRAME1_OFF - SHM_FRAME0_OFF),
+	       "a frame does not fit in its slot");
+_Static_assert(SHM_EEPROM_OFF >= SHM_FRAME1_OFF + SHM_FRAME_STRIDE,
+	       "the EEPROM image overlaps frame B");
+_Static_assert(SHM_EEPROM_OFF + SHM_EEPROM_BYTES <= SHM_ROM_OFF,
+	       "the EEPROM image overlaps the ROM");
+
 /* Where the frame sits inside the watch's 320x400 framebuffer. */
 #define SHM_LCD_W           49
 #define SHM_LCD_H           49
@@ -55,12 +72,14 @@
 #define SHM_ORIGIN_X        ((SHM_FB_W - SHM_LCD_W) / 2 - SHM_FRAME_PAD)
 #define SHM_ORIGIN_Y        ((SHM_FB_H - SHM_LCD_H) / 2 - SHM_FRAME_PAD)
 
-/* Colours, matching the front end this replaces. */
+/*
+ * Colours. The bezel is deliberately NOT the LCD background colour: with both
+ * at 0xC618 the whole strip read as one flat light band with no visible LCD.
+ * Bezel black matches the console background, so only the LCD area shows.
+ */
 #define SHM_LCD_INK         0x0000
 #define SHM_LCD_OFF         0xC618
-
-#define SHM_EEPROM_BYTES    1024
-#define SHM_ROM_BYTES        524288u     /* 512 KB, the V3 ROM */
+#define SHM_BEZEL           0x0000
 
 #define SHM_MAGIC           0x414d4154u     /* 'TAMA' */
 #define SHM_VERSION         1u
@@ -121,8 +140,11 @@ struct shm_ctl {
 	volatile uint32_t eeprom_seq;   /* bumped when the EEPROM image changes */
 	volatile uint32_t reserved2;
 
-	/* line 3: spare, and keeps the block cache-line sized */
-	volatile uint32_t reserved3[8];
+	/* line 3: core 0 diagnostics, core 1 reads */
+	volatile uint32_t guest_pc;     /* where the guest is executing */
+	volatile uint32_t dpram_lit;    /* nonzero bytes in display RAM */
+	volatile uint32_t instrs_lo;    /* opcodes retired, low 32 bits */
+	volatile uint32_t reserved3[5];
 };
 
 #endif /* SHMPROTO_H */
