@@ -1,3 +1,41 @@
+## 63 COMMIT Unreleased 2026-11-11T20:05:00-07:00
+
+#### Coming From:
+
+Unreleased 0e8ddba
+
+#### Purpose:
+
+Record the TinyDesk port's first hardware-verified input path, closed after the earlier entry called touch and the once-a-second flash open.
+
+#### Outcome:
+
+Both open faults are fixed in `~/GIT/tinydesk-twatch` at 084e1d7 on branch `t-watch-ultra`. The flash had two layers and the earlier fix never reached the code: `TD_SIZE_POLL_MS=0` was set twice, but `src/td.c` belongs to the shared `tinydesk` component, so a definition on the port's own component could not reach it, and `add_compile_definitions` at project scope runs after ESP-IDF registers components, so only the port's `main` inherited it. Counting the generated `compile_commands.json` proved it -- 19 translation units carried the define and `src/td.c` was not one of them -- and it is now set from `main/project_include.cmake`, which ESP-IDF evaluates before component registration. That exposed an upstream defect worth reporting: `TD_SIZE_POLL_MS=0` did not compile, because `td.c` tested the value as a run-time condition and then compared `unsigned >= 0`, which `-Werror=type-limits` rejects; written as `#if` it matches the file's own convention and the disabled build carries no dead branch. The repaint was also structural -- `paint_task` kept one span from the topmost changed row to the bottommost, so the size query, which parks the cursor in the bottom-right corner to measure the terminal, stretched the span over all 400 rows. Flushing contiguous runs fixed that, and `TD_ACK_TIMEOUT_MS=0` removed frame pacing, which never switched itself off because the port's own `td_vterm` answers `ESC[5n` and feeds the answer back as desktop input, so every frame paid a query, a flush and a reply for a round trip that controls nothing. On the wire in 15 idle seconds: zero `ESC[5n`, one `ESC[6n` (the one-time setup query), and idle frames carrying no cells. Touch failed for a different reason and was never going to work. The driver implemented the `0xD1=0x1E` unlock handshake this project retracted on 2026-11-10 (TCH-002 revision, TCH-007): those writes belong to SensorLib's `setMode()`, whose only caller is `sleep()`, and a working part reads back `0x00 0x09` at `0x0002`. Requiring `0x1E` made the driver refuse a healthy controller. Behind that sat the real fault, visible only after the retracted handshake was removed: the command-mode entry is a TWO-byte write (`0xD1 0x01`), while a register write carrying a value is three, and the port sent the two-byte command as three, addressing register `0x00D1` -- which the part accepts and ignores -- so command mode was never entered and the `0xD1FC` checkcode read returned normal-mode content. The part acked every transfer, so the failure surfaced as "bad checkcode" rather than a bus error and looked like absent hardware. Three more faults came out of comparing against the measured driver: the poll never sent the `0xD000=0xAB` acknowledge that advances the controller's buffer, it required byte 0 `== 0x06` exactly instead of the low nibble, and it never checked byte 6's `0xAB` validity marker. Bluetooth had never been in the build at all: `sdkconfig.defaults` carried no BT settings, so `CONFIG_BT_ENABLED` was unset, `bt_hid.c` compiled to its empty stub, and the Mouse, Keyboard and Bluetooth apps were absent from the start menu -- which is the quickest way to see it and is now the way to check it. NimBLE is enabled as a central with limits from `ports/nanoesp32`, its memory in PSRAM and soft coexistence with Wi-Fi, since the watch is meant to be driven by a Bluetooth keyboard and mouse and the glass is too small to type on. `to_cell()` also subtracted no origin, so every touch would have landed 45 px down and right with the right-hand fifth of the screen unreachable. Read from the Log Viewer over the USB link, the bring-up now passes and leaves evidence: `rst 8=1 10=1`, `CST9220 410x502`, `CST9217 up at 0x1A`, then `300 rd 0 rep` -- the poll running, which only starts if bring-up succeeded. The pointer path is proven end to end independently of the panel: an injected SGR click over the link opens the start menu, so what touch.c emits reaches the desktop. The radio is not a regression from the Bluetooth work: the Network app scans twelve networks, so Wi-Fi is functional and simply not associated.
+
+#### Next Steps:
+
+Two things need the operator's hands because neither can be simulated. First, a finger on the glass: the driver reads and reports but no press has been seen (`0 rep`), so the decode from controller coordinates to taskbar cells is the one link left unproven. Second, Bluetooth pairing from the desktop's Bluetooth app -- the radio starts and the apps exist, but no device has been paired. Separately, Wi-Fi is offline and the log shows no association attempt at all, which is either that this build does not auto-reconnect or that it needs credentials again; reconnecting through the Network app distinguishes those, and it is worth knowing which because `sdkconfig` was regenerated to enable Bluetooth and the previous file, which was generated and gitignored rather than tracked, carried whatever hand edits it had. The Linux side stays parked at 0e8ddba with its restore image intact.
+
+#### Files Modified:
+
+- ports/twatchultra/CMakeLists.txt
+- ports/twatchultra/README.md
+- ports/twatchultra/board.example.conf
+- ports/twatchultra/sdkconfig.defaults
+- ports/twatchultra/main/project_include.cmake
+- ports/twatchultra/main/display.c
+- ports/twatchultra/main/display.h
+- ports/twatchultra/main/power.c
+- ports/twatchultra/main/touch.c
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: NOT RUN
+
+---
+
 ## 62 COMMIT Unreleased 2026-11-11T12:24:00-07:00
 
 #### Coming From:
