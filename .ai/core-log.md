@@ -1,3 +1,36 @@
+## 71 COMMIT Unreleased 2026-11-12T00:30:00-07:00
+
+#### Coming From:
+
+Unreleased c8a8fef
+
+#### Purpose:
+
+Record that the desktop's grid is now fixed at build time in both directions, and take an inventory of what the fork changes upstream.
+
+#### Outcome:
+
+The 40x26 grid is enforced at the right layer now. `ports/esp_idf/components/tinydesk/CMakeLists.txt` wrote its own `TD_MAX_COLS`/`TD_MAX_ROWS` unconditionally, so the port's declaration was discarded and the generous PSRAM defaults (256x96) applied; the fix is that a port which declares a grid now sets it, which is exactly the mechanism `td_config.h` documents. Clamping only the maximum was half a fix: the clamp in `src/td.c` is `clampi(reported, TD_MIN_COLS/TD_MIN_ROWS, TD_MAX_COLS/TD_MAX_ROWS)`, and the minimum was still the library's "smallest usable desktop" of 12 rows, so attaching a `screen` window smaller than the panel shrank the desktop -- reported by the operator as losing the bottom two rows of the glass and leaving a black band in the framebuffer. Reproduced by answering the size query with `24;40R`, which moved the taskbar to row 24. The component now pins the minimum to the declared grid as well, making the range degenerate, and `td_config.h` gains `#ifndef` guards on those two constants -- they were the only values in that file not overridable from the build system while its own header says any value can be. Verified on the watch by answering the size query deliberately wrong in each direction: `20;20R`, `24;40R` and `34;74R` all leave the taskbar on row 26, and the host suite is 37 of 37. The port also carried an earlier filter in `link_twatch.c` that removed the host terminal's cursor-position report from the USB input; the earlier entry justified it and this one supersedes that reasoning. It was the wrong layer -- it hid the size the terminal really has, when `td_stats` exposes `term_cols`/`term_rows` separately from `cols`/`rows` precisely so the difference between reported and in use stays visible -- and with the grid fixed it was unnecessary, so it is gone: about 120 lines and a byte-wise state machine that could swallow input if it ever mis-parsed a sequence. The fork now stands 19 commits above upstream v0.4.0. Six files of shared code are modified: `src/td.c` (the `TD_SIZE_POLL_MS` test moved to `#if`, which fixes a genuine `-Werror=type-limits` compile failure when the value is 0, since a run-time `unsigned >= 0` is always true), `include/tinydesk/td_config.h` (the two `#ifndef` guards), `ports/esp_idf/components/tinydesk/CMakeLists.txt` (the grid override described above), `apps/bluetooth.c` (full-screen layout computed from the client area), `src/widgets.c` (message boxes wrap to the screen instead of trusting caller line breaks) and `tests/test_bluetooth.c` (coordinates for the new layout). Everything else is new: `ports/twatchultra/`, about 3000 lines across sixteen files. Two build-level overrides remain in the port, `TD_SIZE_POLL_MS=0` and `TD_ACK_TIMEOUT_MS=0`, and both are now suspected of compensating for faults fixed elsewhere -- the first for a dirty cursor cell that the poll may no longer cause, the second for frame pacing that never switched off when the real lag was the mirror stall.
+
+#### Next Steps:
+
+Test the two remaining overrides against the current tree and either justify or remove them: `TD_SIZE_POLL_MS=0` should now be harmless to leave on but is probably redundant, and `TD_ACK_TIMEOUT_MS=0` needs measuring, because its stated justification was a round trip that costs a few bytes rather than lag. Then the apps, one at a time, reflowed for 40x26 -- and any app judged broken before entry 70 should be judged again, since the grid it was laid out against was not the one on the glass. The three capacitive bars under the glass still act on stretches of taskbar rather than three fixed cells, and their recorded edges divide the strip into two equal zones plus a one-pixel third, so the vendor map settles that first. The Mouse and Keyboard slots pair one device each and share the Combo slot's working code path but have not been tried. When the fork is offered upstream, the four shared-code changes are the ones that need to stand on their own merits rather than on this port's needs, and `apps/bluetooth.c` is the most likely to be declined, since it changes a shared app's window shape. The Linux side stays parked; its last code commit is 8645a82 and everything after it in this repository is the project log.
+
+#### Files Modified:
+
+- ports/esp_idf/components/tinydesk/CMakeLists.txt
+- include/tinydesk/td_config.h
+- ports/twatchultra/CMakeLists.txt
+- ports/twatchultra/main/link_twatch.c
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: PASS
+
+---
+
 ## 70 COMMIT Unreleased 2026-11-11T23:20:00-07:00
 
 #### Coming From:
