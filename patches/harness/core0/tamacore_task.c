@@ -265,6 +265,29 @@ static void ctl_init_own(void)
 static uint16_t byte_row_lo[0x200];
 static uint16_t byte_row_hi[0x200];
 
+/*
+ * Per-SEGMENT row spans, and segments grouped by their dpram byte.
+ *
+ * The per-byte table above is a min/max over every segment sharing that byte,
+ * which is wrong the moment a byte holds segments at opposite ends of the
+ * screen. The ten status icons do exactly that: bytes 0, 1, 5 and 6 each carry
+ * one icon from the top row and one from the bottom row, so flipping a single
+ * status icon dirtied everything between them -- very nearly the whole frame,
+ * for a two-state ON/OFF glyph.
+ *
+ * 970 segments share 512 bytes, so multi-segment bytes are the norm and this
+ * is not an icon-only problem; the icons are just where it is most visible.
+ *
+ * So the diff is resolved per segment: a changed byte is XORed with its shadow
+ * to get the set of changed bits, and only the segments whose bit actually
+ * changed contribute their span. An icon flip then dirties that icon's rows.
+ */
+static uint16_t seg_row_lo[SEG_COUNT];
+static uint16_t seg_row_hi[SEG_COUNT];
+static uint16_t byte_first[0x200];   /* index into byte_segs */
+static uint16_t byte_nseg[0x200];    /* how many segments share this byte */
+static uint16_t byte_segs[SEG_COUNT];
+
 /* Display RAM as it was when the frame buffer was last known correct. */
 static uint8_t dpram_shadow[0x200];
 static int dpram_shadow_valid;
@@ -283,6 +306,9 @@ static void build_byte_rows(void)
 		const seg_run *r = &seg_runs[e->run_start];
 		int k;
 
+		seg_row_lo[i] = SHM_FRAME_H;
+		seg_row_hi[i] = 0;
+
 		for (k = 0; k < e->run_count; k++, r++) {
 			int y0 = SHM_FRAME_PAD + r->y * (SHM_DOT + SHM_GAP);
 			int y1 = y0 + SHM_DOT;
@@ -291,7 +317,38 @@ static void build_byte_rows(void)
 				byte_row_lo[e->byte] = (uint16_t)y0;
 			if (y1 > byte_row_hi[e->byte])
 				byte_row_hi[e->byte] = (uint16_t)y1;
+
+			if (y0 < seg_row_lo[i])
+				seg_row_lo[i] = (uint16_t)y0;
+			if (y1 > seg_row_hi[i])
+				seg_row_hi[i] = (uint16_t)y1;
 		}
+	}
+
+	/* Group segments by byte, so a changed byte finds its segments directly
+	 * instead of scanning all 970. Counting sort, built once per session. */
+	for (i = 0; i < 0x200; i++)
+		byte_nseg[i] = 0;
+	for (i = 0; i < SEG_COUNT; i++)
+		byte_nseg[seg_map[i].byte]++;
+
+	{
+		uint16_t acc = 0;
+
+		for (i = 0; i < 0x200; i++) {
+			byte_first[i] = acc;
+			acc = (uint16_t)(acc + byte_nseg[i]);
+		}
+	}
+	{
+		/* static, not on the stack: this task runs on 4 KiB and the table
+		 * is 1 KiB. Function is called once per session. */
+		static uint16_t fill[0x200];
+
+		for (i = 0; i < 0x200; i++)
+			fill[i] = byte_first[i];
+		for (i = 0; i < SEG_COUNT; i++)
+			byte_segs[fill[seg_map[i].byte]++] = (uint16_t)i;
 	}
 }
 
@@ -682,12 +739,31 @@ static void tamacore_session(uint32_t served, uint32_t *served_out)
 
 					if (dpram_shadow_valid) {
 						for (b = 0; b < 0x200; b++) {
-							if (dp[b] == dpram_shadow[b])
+							uint8_t changed = (uint8_t)(dp[b] ^ dpram_shadow[b]);
+							uint16_t k;
+
+							if (!changed)
 								continue;
-							if (byte_row_lo[b] < lo)
-								lo = byte_row_lo[b];
-							if (byte_row_hi[b] > hi)
-								hi = byte_row_hi[b];
+
+							/*
+							 * Resolve to the segments whose bit
+							 * actually changed. Using the byte's
+							 * whole span here is what made a
+							 * single status-icon flip repaint the
+							 * screen: the top and bottom icon
+							 * rows share bytes 0, 1, 5 and 6.
+							 */
+							for (k = 0; k < byte_nseg[b]; k++) {
+								uint16_t si = byte_segs[byte_first[b] + k];
+								const seg_entry *se = &seg_map[si];
+
+								if (!(changed & (1u << se->bit)))
+									continue;
+								if (seg_row_lo[si] < lo)
+									lo = seg_row_lo[si];
+								if (seg_row_hi[si] > hi)
+									hi = seg_row_hi[si];
+							}
 						}
 						if (hi <= lo) {
 							/* Nothing moved. */

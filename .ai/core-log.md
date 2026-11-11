@@ -1,3 +1,33 @@
+## 58 COMMIT Unreleased 2026-11-11T10:27:00-07:00
+
+#### Coming From:
+
+Unreleased 4faadf7
+
+#### Purpose:
+
+Stop a single status-icon change from dirtying nearly the whole display, by resolving dirty rows per segment instead of per display byte, as the first step of correcting the LCD geometry.
+
+#### Outcome:
+
+The dirty-row resolution is fixed and measured; the geometry correction it was meant to accompany is not started, and this entry says so rather than implying otherwise. The old table was per BYTE: `build_byte_rows()` took a min/max over every segment sharing that byte, and the diff loop used the byte's whole span when it changed. That is wrong whenever one byte holds segments at opposite ends of the screen, and the ten status icons do exactly that -- bytes 0, 1, 5 and 6 each carry one icon from the top row and one from the bottom row -- so flipping a single two-state ON/OFF glyph dirtied very nearly the whole frame. It is not an icon-only problem either, because 970 segments share 512 bytes, so multi-segment bytes are the norm; the icons are simply where it is most visible. The fix resolves the diff per segment: a changed byte is XORed with its shadow to get the changed bits, only the segments whose bit actually changed contribute, and each contributes its own precomputed row span. Segments are grouped by byte with a counting sort built once per session, so a changed byte finds its segments without scanning all 970. Two details mattered for correctness rather than speed: the `fill[]` table is 1 KiB and this task runs on a 4 KiB stack, so it is static rather than automatic, and `byte_seg`/`fill` are `uint16_t` because 970 exceeds a byte. Measured on hardware after flashing: frames advance, `draw_max` fell from the 56-71 ms seen in the previous entries to 47 ms, and the board boots and runs normally with the pet playing. **What this cycle did not do, stated plainly because the operator asked for more than this.** The real complaint is that the V3 display is a 32x30 dot matrix plus 10 status icons, that our map is 49x49 because `gen_segmap.py` scales the whole artwork bounding box rather than the matrix, and that the icons are being rendered as quantised pixels inside that grid instead of as overlay glyphs. Investigation confirmed all of it from the artwork itself: parsing `tinytama/assets/Tamagotchi_v3.svg` gives 970 segment ids, of which exactly 960 are 22.5x22.5 unit squares forming a perfect 32x30 grid -- columns 0-31 and rows 0-29, 32 times 30 being 960 with no gaps and no strays -- and exactly 10 are complex glyphs 120-150 units wide in two rows of five. Our 49 is simply 1219.7 artwork units divided by the 25.1 unit dot pitch, i.e. the whole artwork box and not the LCD. None of the rendering or geometry changes were made: the generator, `segmap.h`, `SHM_LCD_DOTS_W/H`, `SHM_DOT`/`SHM_GAP` and both renderers are untouched, and the map is still 49x49 with the icons quantised into its outer rows. That work was deferred deliberately rather than half-done, because it spans the generator, the shared-memory contract and both renderers, and a partial change to that contract is exactly the class of fault that has cost this project several silent failures. The core-syntax audit passed: `.ai/core.md` and `.ai/core-syntax.md` were re-read, the complete `.ai/` diff was inspected, `.ai/core.md` was not modified, and this entry was validated against the template with six sections in canonical order, sequential numbering from 57, an ISO-8601 timestamp carrying the America/Phoenix offset, prose-only Outcome and Next Steps, and Status values within the allowed set.
+
+#### Next Steps:
+
+The geometry rework is the next cycle and the facts it needs are already measured, so it should not re-derive them. The plan is to split the generator's output into two maps: the 32x30 matrix as a bitmap of 960 bits, which is 120 bytes and which the existing `byte_bit` segment index already addresses directly, and the 10 icons as their own run-lists with their own bounding box. Rendering the matrix then becomes 960 bit tests expanded into DOT x DOT blocks, replacing 4800 per-segment run lookups, and the icons become overlay glyphs drawn at matched scale above and below the matrix, which is what the hardware does. The arithmetic for the chosen 5 px dot is a pet area of 160x150 where the frame is currently 293x293, so the frame shrinks and the per-frame work falls with it; the operator chose 5 px with a 1 px gap and icons as proper glyphs. The icons are two-state only, which this cycle's per-segment dirtying now exploits properly -- an icon flip dirties that icon's rows and nothing else -- and the same reasoning suggests going further: an icon's glyph pixels only change when its state changes, so a flip could repaint just that glyph's rows without re-running the matrix, provided the dirty band is computed from the two sub-rectangles rather than from a single lo/hi pair, which is the one structural limit of the current representation and should be addressed in the same cycle. This touches `shmproto.h`, so `scripts/check-vectors.sh` must pass and both halves must be flashed together; the firmware and userspace read `SHM_LCD_DOTS_W/H` and `SHM_DOT`/`SHM_GAP` from that header and currently agree only because the map came from `patches/harness/segmap-1x/`. A full backup before the first flash of that change is warranted.
+
+#### Files Modified:
+
+- patches/harness/core0/tamacore_task.c
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: NOT RUN
+
+---
+
 ## 57 COMMIT Unreleased 2026-11-11T10:15:00-07:00
 
 #### Coming From:
