@@ -43,6 +43,7 @@ SOURCES=(
     "patches/harness/core0/render.h"
     "patches/harness/core0/shmproto.h"
     "patches/harness/core0/tamacore_task.c"
+    "patches/harness/core0/esc_instr.c"
 )
 
 # render.h is the segment-map renderer, shared with the desktop front end and

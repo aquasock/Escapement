@@ -1,3 +1,35 @@
+## 54 COMMIT Unreleased 2026-11-11T09:35:00-07:00
+
+#### Coming From:
+
+Unreleased bae1b42
+
+#### Purpose:
+
+Test the lead left by entry 53, that the fatal access during a flash write is core 0 reading the PSRAM write source rather than core 1 failing to fetch instructions, by staging each chunk through internal DRAM.
+
+#### Outcome:
+
+The lead was right, and the reboot is fixed. The write source is Linux's buffer and therefore lives in PSRAM, and `linux_flash.c` called `esp_flash_write()` with the external-memory cache disabled, so core 0 read PSRAM inside a window where that read cannot work. Each 4096-byte chunk is now copied into a static internal-DRAM buffer with the cache still on, and `esp_flash_write()` reads the copy; the buffer was verified in the ELF at 0x3fca3eb0, so it is internal DRAM rather than PSRAM. **The result is unambiguous because the test was the same one that had never once passed.** Before this change a single 1 KiB write to `/home` with the emulator playing rebooted the board every time it was attempted, at `/home` 74 percent full and again at 47 percent full. After it, four consecutive 1 KiB writes at 12 s into emulator play all survived, five cache-disable windows each, with uptime continuous across the whole run; a 128 KiB write plus forty file create/delete cycles, which is erase-heavy jffs2 garbage-collection pressure, survived with 891 windows and uptime 369.34 to 410.97 unbroken; and nine rounds of 64 KiB write-and-delete at ten-second intervals over 100 s survived with 1860 windows and uptime 424.93 to 527.18 unbroken. The emulator was confirmed RUNNING in every run rather than assumed. So the fatal read was on core 0 all along, and the answer to entry 52's open question is that core 1 was never the one dying. That also explains two things that had been recorded as mysteries: chunking the writes to 4 KiB bounded the window but changed nothing, because the problem was never the window's length, and the longest window measured 0.51 ms against an 800 ms watchdog for the same reason. The interrupt-level theory was already excluded in entry 53 and stays excluded; the mechanism is a single illegal read, not a race. **Made reproducible rather than left on the watch.** `patches/harness/core0/0003-*.patch` was regenerated from the firmware tree's own `git diff` instead of being hand-edited, and both halves were verified by reverse-applying them with `git apply --check --reverse`, so the committed patch is now faithful to what is actually deployed; it previously described the chunking and the old instrument and had nothing about staging. `patches/harness/core0/esc_instr.c` was added to `scripts/sync-firmware.sh`'s copy list, which now reports the firmware tree matches this repo. `CONFIG_VECTORS_ADDR` moved to 0x40382000 in the patch-carried config, because the instrumented firmware grows IRAM and moves `space_for_vectors` a page up from the historical 0x40380000, and `scripts/check-vectors.sh` reports the kernel's vectors spanning 0x40382000..0x40382916 inside the firmware's 0x40382000..0x40383000 buffer -- the guard that entry 51 built is what makes this move checkable rather than remembered. A full 16 MiB backup of the working state was taken to `~/twatch-backup/working-2026-11-11-0925.bin`, sha256 `11081f3a`, and the board was verified booting to a login prompt after the read. One honest limit on the evidence: the first attempt at the decisive test returned no output because a background `&` broke the console framing of `watch-exec.py`, so the test was rebuilt as a script on the watch that writes its results to a file and can be re-run; the numbers above come from that version, and the earlier no-output run was not counted as a pass. The core-syntax audit passed: `.ai/core.md` and `.ai/core-syntax.md` were re-read, the complete `.ai/` diff was inspected, `.ai/core.md` was not modified, and this entry was validated against the template with six sections in canonical order, sequential numbering from 53, an ISO-8601 timestamp carrying the America/Phoenix offset, prose-only Outcome and Next Steps, and Status values within the allowed set.
+
+#### Next Steps:
+
+The reboot is fixed but only in the firmware tree, which is never pushed, so the fix currently lives on one watch and in one patch file; the first thing to do is confirm the regenerated patch applies cleanly to a fresh checkout of `c5423bd` and reproduces a booting, non-rebooting pair, because that is the only claim a future session can act on. Beyond that the reference still contains two records that this session disproved and did not revise: EMU-003 and EMU-004 were corrected for the internal-SRAM claim in entry 53, but KRN-005's statement that a flash write from core 0 aborts because the IPC never completes predates the finding that the abort comes from an illegal PSRAM read while the cache is off, and JFS-001 states the same aborts-forever conclusion; both should be re-read against this entry before anyone plans around them. The instrument now earns its keep: it survived several resets during this cycle and its PREV record read 250 calls with a 2534373-cycle maximum window, and since a write during play is safe it can be left enabled and read after any future freeze to say whether a cache-disable window was involved. Twenty records still lack a fast lookup index line -- TCH-005 through TCH-010, KRN-007 and KRN-008, HAP-001, RTC-004, PMU-004, LCD-012 and LCD-013, and EMU-011 through EMU-017 except EMU-012 -- which is mechanical work, not analysis, and has now been deferred twice. The 23 log entries between entry 50 and entry 51 remain unwritten.
+
+#### Files Modified:
+
+- patches/harness/core0/0003-flash-chunking-and-cache-instrument.patch
+- scripts/sync-firmware.sh
+- patches/kernel/config/devkit_c1_16m_linux.config
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: NOT RUN
+
+---
+
 ## 53 COMMIT Unreleased 2026-11-11T09:40:00-07:00
 
 #### Coming From:
