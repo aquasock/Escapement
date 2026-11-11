@@ -702,5 +702,42 @@ There is deliberately no `/etc/init.d` entry: autostarting would hand the
 emulator `/dev/fb0` and the emulated machine from power-on whether or not
 anyone wanted the pet running.
 
+## 4x, with no gap between dots
+
+The LCD is drawn at 196x196: each of the 49x49 real LCD dots is a 4x4 block of
+pixels with no spacing between them. The pet is a quarter of the screen instead
+of a sixteenth.
+
+Three things had to change, and each was forced by a measurement rather than a
+preference.
+
+**The segment map is scaled at draw time, not rebuilt.** A 4x map is four times
+as many runs (5366 -> 21464), which is 126 KB of const data, and that overflowed
+the 768 KB firmware partition by 57 KB. Scaling in the renderer costs nothing:
+the map stays 32 KB and each run is drawn four times wider and four rows taller.
+The result is exact either way, because a run is a whole number of LCD dots and
+an integer scale keeps every edge on a pixel boundary.
+
+**The blit is banded.** A 4x frame is 83,232 bytes against 6,498 at 1x. One
+full-width write of 204 rows measures **79 ms**; at 16 fps that is 1,264 ms of
+every second on core 1, i.e. more than the whole core. The frame is now written
+in four bands of 51 rows and only the bands whose rows changed are sent, so a
+busy screen costs four ~20 ms writes and a quiet pet costs one.
+
+**Nothing is allocated.** The obvious version keeps the whole frame plus a shadow
+of what was sent, and 2 x 83,232 bytes does not allocate here:
+
+```
+tamacore: cannot allocate a 83232 byte frame: Cannot allocate memory
+```
+
+with 1228 kB free and an order-6 block available -- the NOMMU contiguity rule
+(KRN-001), not exhaustion. Rather than retry-and-hope, the blitter reads one
+band at a time from the window and keeps a per-row hash of what it last wrote:
+54 KB of static buffers, no `malloc`, and the binary came out 3 KB smaller.
+
+Measured with the emulator up, 40 s: **690 of 690 frames delivered** at ~15 fps,
+core 0 at 3,999,088 cycles/s, worst frame 15 ms late.
+
 **Still open.** Two `tamacore` instances race for the window; there is no
 mutual exclusion.

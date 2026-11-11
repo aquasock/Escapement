@@ -8,16 +8,17 @@
  *
  *   offset      size        owner
  *   0x00000     4 KB        control block, both sides, named fields only
- *   0x01000     8 KB        frame A, core 0 writes
- *   0x03000     8 KB        frame B, core 0 writes
- *   0x05000     4 KB        EEPROM image, core 1 seeds, both update
- *   0x80000     512 KB      ROM, core 1 copies once, core 0 reads only
+ *   0x01000   104 KB        frame A, core 0 writes
+ *   0x1B000   104 KB        frame B, core 0 writes
+ *   0x35000     4 KB        EEPROM image, core 1 seeds, both update
+ *   0x80000   512 KB        ROM, core 1 copies once, core 0 reads only
  *
- * The frames get 8 KB each, and must: one frame is 6498 bytes. They were 4 KB
- * apart once, so drawing frame B overwrote the tail of frame A *and* the
- * EEPROM image at 0x3000 -- which read back as 18 c6 18 c6, pixel colour
- * 0xC618. The static asserts below check that arithmetic at compile time
- * instead of leaving it to be discovered on the glass.
+ * The frame slots are sized from the frame itself, and the static asserts below
+ * check that. They exist because an earlier layout put the frames 4 KB apart
+ * while a frame was 6498 bytes, so drawing frame B overwrote the tail of frame A
+ * and the EEPROM image with it -- which read back as 18 c6 18 c6, pixel colour
+ * 0xC618. The frame is now 204x204 (a 4x LCD plus surround) and 83,232 bytes,
+ * so the slot is 0x1A000 and the EEPROM moved clear of it.
  *
  * Rule that keeps this simple: each field has one writer. The two sides never
  * read-modify-write the same word, so nothing here needs a lock.
@@ -47,21 +48,47 @@
 
 #define SHM_CTL_OFF         0x00000u
 #define SHM_FRAME0_OFF      0x01000u
-#define SHM_FRAME1_OFF      0x03000u
-#define SHM_EEPROM_OFF      0x05000u
+#define SHM_FRAME1_OFF      0x1b000u
+#define SHM_EEPROM_OFF      0x35000u
 #define SHM_ROM_OFF         0x80000u
 
 /*
- * The frame is the LCD area plus its 4 px surround, so core 1 blits one
- * rectangle and never has to reason about the border. 57x57 RGB565 is 6498
- * bytes; the stride is rounded up to a multiple of the 32-byte cache line so a
- * flush covers whole lines.
+ * Where the frame sits inside the watch's 320x400 framebuffer, and how big the
+ * LCD itself is. These come first because the frame macros are derived from
+ * them; defining SHM_FRAME_W in terms of a SHM_LCD_W declared later would not
+ * compile, and ordering them wrongly is exactly the kind of mistake the
+ * static asserts below are there to catch.
  */
-#define SHM_FRAME_W         57
-#define SHM_FRAME_H         57
-#define SHM_FRAME_STRIDE    6528u       /* 57*57*2 = 6498, padded to 32 */
-#define SHM_FRAME_BYTES     (SHM_FRAME_W * SHM_FRAME_H * 2)
+#define SHM_LCD_SCALE       4
+#define SHM_LCD_W           (49 * SHM_LCD_SCALE)
+#define SHM_LCD_H           (49 * SHM_LCD_SCALE)
+#define SHM_FB_W            320
+#define SHM_FB_H            400
 #define SHM_FRAME_PAD       4           /* LCD surround, in pixels */
+#define SHM_ORIGIN_X        ((SHM_FB_W - SHM_LCD_W) / 2 - SHM_FRAME_PAD)
+#define SHM_ORIGIN_Y        ((SHM_FB_H - SHM_LCD_H) / 2 - SHM_FRAME_PAD)
+
+/*
+ * The frame is the LCD area plus its surround, so core 1 blits a rectangle and
+ * never has to reason about the border. The stride is rounded up to a multiple
+ * of the 32-byte cache line so a flush covers whole lines.
+ *
+ * At 4x the LCD is 196x196 and a frame is 83,232 bytes -- 12.8x the 1x frame,
+ * which is why the blitter writes it in bands (see SHM_BAND_ROWS). A full-width
+ * strip of 204 rows costs about 62 ms at the measured 2.1 MB/s, and 16 fps
+ * would need 995 ms of every second on core 1. Four bands of 51 rows cost 16 ms
+ * each, and only the bands that actually changed are written.
+ */
+#define SHM_FRAME_W         (SHM_LCD_W + 2 * SHM_FRAME_PAD)
+#define SHM_FRAME_H         (SHM_LCD_H + 2 * SHM_FRAME_PAD)
+#define SHM_FRAME_STRIDE    (((SHM_FRAME_W * SHM_FRAME_H * 2) + 31) / 32 * 32)
+#define SHM_FRAME_BYTES     (SHM_FRAME_W * SHM_FRAME_H * 2)
+
+/*
+ * Rows per blit band. 51 gives exactly four bands for a 204-row frame, so a
+ * full repaint is four writes and a typical idle repaint is one.
+ */
+#define SHM_BAND_ROWS       ((SHM_FRAME_H + 3) / 4)
 
 #define SHM_EEPROM_BYTES    1024
 #define SHM_ROM_BYTES        524288u     /* 512 KB, the V3 ROM */
@@ -71,16 +98,13 @@ _Static_assert(SHM_FRAME_STRIDE <= (SHM_FRAME1_OFF - SHM_FRAME0_OFF),
 	       "a frame does not fit in its slot");
 _Static_assert(SHM_EEPROM_OFF >= SHM_FRAME1_OFF + SHM_FRAME_STRIDE,
 	       "the EEPROM image overlaps frame B");
+_Static_assert(SHM_ORIGIN_X >= 0 && SHM_ORIGIN_X + SHM_FRAME_W <= SHM_FB_W,
+	       "the frame does not fit across the framebuffer");
+_Static_assert(SHM_ORIGIN_Y >= 0 && SHM_ORIGIN_Y + SHM_FRAME_H <= SHM_FB_H,
+	       "the frame does not fit down the framebuffer");
+_Static_assert(SHM_BAND_ROWS * 4 >= SHM_FRAME_H, "four bands must cover a frame");
 _Static_assert(SHM_EEPROM_OFF + SHM_EEPROM_BYTES <= SHM_ROM_OFF,
 	       "the EEPROM image overlaps the ROM");
-
-/* Where the frame sits inside the watch's 320x400 framebuffer. */
-#define SHM_LCD_W           49
-#define SHM_LCD_H           49
-#define SHM_FB_W            320
-#define SHM_FB_H            400
-#define SHM_ORIGIN_X        ((SHM_FB_W - SHM_LCD_W) / 2 - SHM_FRAME_PAD)
-#define SHM_ORIGIN_Y        ((SHM_FB_H - SHM_LCD_H) / 2 - SHM_FRAME_PAD)
 
 /*
  * Colours. The bezel is deliberately NOT the LCD background colour: with both

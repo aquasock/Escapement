@@ -6,7 +6,7 @@
 # compiled into that image, and it is built from sources that live here:
 #
 #   patches/harness/splb32/     the interpreter and its peripherals
-#   patches/harness/segmap-1x/  the 49x49 segment map
+#   patches/harness/segmap-1x/  the 49x49 segment map, one pixel per LCD dot
 #   patches/harness/core0/      the window contract and the core-0 task
 #
 # So they are copied in rather than duplicated. Edit them here, run this, build.
@@ -40,6 +40,7 @@ SOURCES=(
     "patches/harness/splb32/splb32_sound.h"
     "patches/harness/segmap-1x/segmap.c"
     "patches/harness/segmap-1x/segmap.h"
+    "patches/harness/core0/render.h"
     "patches/harness/core0/shmproto.h"
     "patches/harness/core0/tamacore_task.c"
 )
@@ -48,7 +49,7 @@ SOURCES=(
 # not modified here, so it comes straight from the harness checkout. It is
 # copied rather than edited: any change to it should be made upstream and
 # vendored deliberately, not drift in quietly.
-EXTERNAL=("$HARNESS/render.h")
+EXTERNAL=()
 
 drift=0
 for src in "${SOURCES[@]}"; do

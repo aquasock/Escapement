@@ -39,8 +39,15 @@
 
 #include "splb32.h"
 #include "segmap.h"
-#include "render.h"
 #include "shmproto.h"
+
+/*
+ * The renderer scales the 49x49 map at draw time, so no second copy of it has
+ * to be built. SEG_SCALE has to be a plain integer constant with no header
+ * dependency, and render.h picks it up after this line.
+ */
+#define SEG_SCALE SHM_LCD_SCALE
+#include "render.h"
 
 /* 16 fps: the real hardware redraws its LCD at about 32 Hz and the guest only
  * produces new pixels at that rate, so 16 halves the transport with nothing
@@ -112,6 +119,15 @@ static inline void ctl_publish(void)
 {
 	esp_cache_msync((void *)ctl, 32, ESP_CACHE_MSYNC_FLAG_INVALIDATE);
 	esp_cache_msync((void *)((uint8_t *)ctl + 64), 32,
+			ESP_CACHE_MSYNC_FLAG_INVALIDATE);
+	/*
+	 * Line 3 as well. Omitting it is silent: the writes land in core 0's
+	 * D-cache, core 1 reads PSRAM and sees the old value, and a field that
+	 * looked like it worked at boot (because the one-off flush in
+	 * ctl_boot_once covered it) then never changes again. The publish
+	 * timings read exactly 0 for that reason.
+	 */
+	esp_cache_msync((void *)((uint8_t *)ctl + 96), 32,
 			ESP_CACHE_MSYNC_FLAG_INVALIDATE);
 }
 
