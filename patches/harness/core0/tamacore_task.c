@@ -32,6 +32,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "esp_cache.h"
+#include "esp_system.h"
 #include "esp_timer.h"
 #include "hal/mmu_ll.h"
 #include "soc/ext_mem_defs.h"
@@ -137,8 +138,23 @@ static void ctl_init_own(void)
 	 * Each side initialising its own line is the rule everywhere else in
 	 * this structure, and the handshake below makes it sufficient.
 	 */
-	memset((void *)ctl, 0, 32);          /* line 0 */
-	memset((void *)((uint8_t *)ctl + 64), 0, 64);   /* lines 2 and 3 */
+	/*
+	 * Clear line 0 and line 2, and the per-session fields of line 3 -- but
+	 * preserve reset_reason and boot_count.
+	 *
+	 * Those two describe the boot rather than the session, and clearing them
+	 * here is what made the reset reason read as 0 every time it was
+	 * checked: the value was correct for a moment and then wiped by the
+	 * first session's initialisation. The INT_WDT readings that did survive
+	 * came from a build that wrote the reason after this clear.
+	 */
+	memset((void *)ctl, 0, 32);                     /* line 0 */
+	memset((void *)((uint8_t *)ctl + 64), 0, 32);   /* line 2 */
+
+	ctl->guest_pc = 0;
+	ctl->dpram_lit = 0;
+	ctl->instrs_lo = 0;
+	ctl->btn_events = 0;
 
 	ctl->magic = SHM_MAGIC;
 	ctl->version = SHM_VERSION;
@@ -453,11 +469,50 @@ out:
 	splb32_free(cpu);
 }
 
+/*
+ * Once per boot, before any session: record why the previous boot ended.
+ *
+ * esp_reset_reason() describes the reset that got us here, so without this a
+ * reboot is a mystery -- the console log has scrolled past, Linux's dmesg
+ * starts empty, and a task watchdog, an abort(), a brownout and a stack
+ * overflow all look identical from the outside. Values are esp_reset_reason_t:
+ * 1 = power-on, 3 = software, 4 = panic, 5 = interrupt watchdog,
+ * 6 = task watchdog, 7 = other watchdog, 9 = brownout.
+ *
+ * `boots` is the count of real boots, kept in PSRAM so it survives the reset.
+ * It is deliberately NOT incremented per session: an earlier version put it
+ * inside the session loop, and a spinning outer loop made it climb like a boot
+ * loop that was not happening.
+ */
+static void ctl_boot_once(void)
+{
+	uint32_t boots = ctl->boot_count;
+
+	ctl->reset_reason = (uint32_t)esp_reset_reason();
+	ctl->boot_count = boots + 1;
+
+	esp_cache_msync((void *)((uint8_t *)ctl + 96), 32,
+			ESP_CACHE_MSYNC_FLAG_INVALIDATE);
+}
+
 static void tamacore_task(void *arg)
 {
-	uint32_t served = 0;
+	uint32_t served;
 
 	(void)arg;
+
+	/* Wait for the window before touching anything, then take the boot
+	 * record. `served` starts at whatever session is already published, so
+	 * core 0 only begins a machine when core 1 actually asks for one --
+	 * a stale count from the previous boot is not a request. */
+	while (!window_mapped())
+		vTaskDelay(pdMS_TO_TICKS(10));
+
+	ctl_boot_once();
+
+	esp_cache_msync((void *)((uint8_t *)ctl + 32), 32,
+			ESP_CACHE_MSYNC_FLAG_INVALIDATE);
+	served = ctl->session;
 
 	/*
 	 * One session per core 1 run, numbered rather than flagged.

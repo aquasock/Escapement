@@ -425,21 +425,32 @@ int main(int argc, char **argv)
 	}
 
 	/*
-	 * Zero the control line this side owns -- the ready flags, the button
-	 * mask, quit -- before setting any of it.
+	 * Clear the stale fields on this side's line -- but NOT `session`.
 	 *
-	 * PSRAM is not zeroed at power-on. A stale `buttons` word from a
-	 * previous boot reads as a random mask, and core 0 would apply it as
-	 * phantom button presses; a stale `quit` would stop the guest before it
-	 * started. Both were observed. Each side therefore initialises its own
-	 * line, which keeps the one-writer rule and needs no lock.
+	 * PSRAM is not zeroed at power-on, so a stale `buttons` word reads as a
+	 * random mask and a stale `quit` stops the guest before it starts; both
+	 * were observed, so these have to be cleared. Writing zeros over the
+	 * whole 32-byte line also zeroes `session`, and that is a deadlock: the
+	 * counter then only ever goes 0 -> 1, while core 0 remembers serving
+	 * session 1 and waits forever for a number that never comes. The count
+	 * has to be monotonic across boots to mean anything.
 	 */
 	{
-		uint8_t zero[32] = { 0 };
+		uint8_t zero[4] = { 0 };
+		static const unsigned int stale[] = {
+			offsetof(struct shm_ctl, rom_ready),
+			offsetof(struct shm_ctl, eeprom_ready),
+			offsetof(struct shm_ctl, eeprom_dirty),
+			offsetof(struct shm_ctl, buttons),
+			offsetof(struct shm_ctl, quit),
+		};
+		unsigned int i;
 
-		if (shared_write(SHM_CTL_OFF + 32, zero, sizeof(zero)) != 0) {
-			note("could not clear the control line");
-			return 1;
+		for (i = 0; i < sizeof(stale) / sizeof(stale[0]); i++) {
+			if (shared_write(SHM_CTL_OFF + stale[i], zero, sizeof(zero))) {
+				note("could not clear the control line");
+				return 1;
+			}
 		}
 	}
 

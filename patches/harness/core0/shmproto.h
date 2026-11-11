@@ -156,7 +156,9 @@ struct shm_ctl {
 	volatile uint32_t dpram_lit;    /* nonzero bytes in display RAM */
 	volatile uint32_t instrs_lo;    /* opcodes retired, low 32 bits */
 	volatile uint32_t btn_events;   /* pin changes applied from `buttons` */
-	volatile uint32_t reserved3[4];
+	volatile uint32_t reset_reason; /* esp_reset_reason() for THIS boot */
+	volatile uint32_t boot_count;   /* firmware boots, increments per reset */
+	volatile uint32_t reserved3[2];
 };
 
 #endif /* SHMPROTO_H */
