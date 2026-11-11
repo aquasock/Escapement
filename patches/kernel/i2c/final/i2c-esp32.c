@@ -210,15 +210,25 @@ struct esp32_i2c {
 };
 
 /*
- * Two separate bounded budgets, because they answer different questions and
- * one must not starve the other. The success counter shows whether the bus is
- * carrying traffic; the error counter shows how it breaks. A single shared
- * counter was spent entirely during probe, which is exactly when nothing was
- * wrong.
+ * Two bounded budgets, because they answer different questions and one must not
+ * starve the other. The success counter shows whether the bus is carrying
+ * traffic; the error counter shows how it breaks. A single shared counter was
+ * spent entirely during probe, which is exactly when nothing was wrong.
+ *
+ * BOTH also require `espressif,debug` in the DTS, and that gate is the
+ * important half. It was missing: the budgets were armed unconditionally, so
+ * every boot printed 30 "ok addr=.." lines whether or not anyone wanted them.
+ * The comment on those calls said "proof of life", which is a diagnostic -- and
+ * a diagnostic that runs on every boot, forever, is not a diagnostic, it is
+ * noise. On this board the cost is not the serial bytes: the console mirrors to
+ * fbcon, so each line repaints the panel over SPI.
+ *
+ * So: a budget bounds the flood when debugging is asked for, and the flag stops
+ * it when it is not. Either one alone is wrong.
  */
 #define DBG(i2c, fmt, ...)					\
 	do {							\
-		if ((i2c)->dbg_budget) {				\
+		if ((i2c)->debug && (i2c)->dbg_budget) {		\
 			(i2c)->dbg_budget--;				\
 			dev_err((i2c)->dev, fmt, ##__VA_ARGS__);	\
 		}						\
@@ -226,7 +236,7 @@ struct esp32_i2c {
 
 #define DBG_OK(i2c, fmt, ...)					\
 	do {							\
-		if ((i2c)->ok_budget) {				\
+		if ((i2c)->debug && (i2c)->ok_budget) {		\
 			(i2c)->ok_budget--;				\
 			dev_err((i2c)->dev, fmt, ##__VA_ARGS__);	\
 		}						\
@@ -414,19 +424,26 @@ static void esp32_i2c_route_pins(struct esp32_i2c *i2c)
 
 	/* Read back, because a silent write here is exactly the failure that
 	 * costs an evening: the driver reports success and the bus is dead. */
-	dev_info(dev, "route sda pin %u -> sig %u: iomux=%08x out_sel=%08x\n",
-		 sda, SIG_I2CEXT0_SDA,
-		 ioread32(iopad + IO_MUX_OFF(sda)),
-		 ioread32(gpio + GPIO_OUT_SEL_OFF(sda)));
-	dev_info(dev, "route scl pin %u -> sig %u: iomux=%08x out_sel=%08x\n",
-		 scl, SIG_I2CEXT0_SCL,
-		 ioread32(iopad + IO_MUX_OFF(scl)),
-		 ioread32(gpio + GPIO_OUT_SEL_OFF(scl)));
-	dev_info(dev, "input sda<-sig%u:%08x scl<-sig%u:%08x pad_driver sda=%u scl=%u\n",
-		 SIG_I2CEXT0_SDA, ioread32(gpio + GPIO_IN_SEL_OFF(SIG_I2CEXT0_SDA)),
-		 SIG_I2CEXT0_SCL, ioread32(gpio + GPIO_IN_SEL_OFF(SIG_I2CEXT0_SCL)),
-		 !!(ioread32(gpio + GPIO_PIN_OFF(sda)) & GPIO_PIN_PAD_DRIVER),
-		 !!(ioread32(gpio + GPIO_PIN_OFF(scl)) & GPIO_PIN_PAD_DRIVER));
+	/*
+	 * dev_dbg, not dev_info. These print raw register values and exist to
+	 * answer "did the routing actually take?" during bring-up; once the bus
+	 * works they are three lines of hex on every boot, and on this board
+	 * each one repaints the panel. Enable with dynamic debug when they are
+	 * wanted again:  echo 'file i2c-esp32.c +p' > /sys/kernel/debug/dynamic_debug/control
+	 */
+	dev_dbg(dev, "route sda pin %u -> sig %u: iomux=%08x out_sel=%08x\n",
+		sda, SIG_I2CEXT0_SDA,
+		ioread32(iopad + IO_MUX_OFF(sda)),
+		ioread32(gpio + GPIO_OUT_SEL_OFF(sda)));
+	dev_dbg(dev, "route scl pin %u -> sig %u: iomux=%08x out_sel=%08x\n",
+		scl, SIG_I2CEXT0_SCL,
+		ioread32(iopad + IO_MUX_OFF(scl)),
+		ioread32(gpio + GPIO_OUT_SEL_OFF(scl)));
+	dev_dbg(dev, "input sda<-sig%u:%08x scl<-sig%u:%08x pad_driver sda=%u scl=%u\n",
+		SIG_I2CEXT0_SDA, ioread32(gpio + GPIO_IN_SEL_OFF(SIG_I2CEXT0_SDA)),
+		SIG_I2CEXT0_SCL, ioread32(gpio + GPIO_IN_SEL_OFF(SIG_I2CEXT0_SCL)),
+		!!(ioread32(gpio + GPIO_PIN_OFF(sda)) & GPIO_PIN_PAD_DRIVER),
+		!!(ioread32(gpio + GPIO_PIN_OFF(scl)) & GPIO_PIN_PAD_DRIVER));
 
 	i2c->have_pins = true;
 }
@@ -1003,8 +1020,8 @@ static int esp32_i2c_probe(struct platform_device *pdev)
 			dev_err(&pdev->dev, "cannot enable clock: %d\n", ret);
 			return ret;
 		}
-		dev_info(&pdev->dev, "clock rate %lu Hz\n",
-			 clk_get_rate(i2c->clk));
+		dev_dbg(&pdev->dev, "peripheral clock %lu Hz\n",
+			clk_get_rate(i2c->clk));
 	}
 
 	of_property_read_u32(pdev->dev.of_node, "clock-frequency", &freq);
@@ -1057,10 +1074,10 @@ static int esp32_i2c_probe(struct platform_device *pdev)
 
 		i2c->sys = sys;
 
-		dev_info(&pdev->dev,
-			 "sys: perip_clk_en0=%08x perip_rst_en0=%08x (bit7=%u)\n",
-			 ioread32(sys + 0x18), ioread32(sys + 0x20),
-			 !!(ioread32(sys + 0x20) & BIT(7)));
+		dev_dbg(&pdev->dev,
+			"sys: perip_clk_en0=%08x perip_rst_en0=%08x (bit7=%u)\n",
+			ioread32(sys + 0x18), ioread32(sys + 0x20),
+			!!(ioread32(sys + 0x20) & BIT(7)));
 	}
 
 	esp32_i2c_write(i2c, I2C_FILTER_CFG, 0);
@@ -1086,11 +1103,17 @@ static int esp32_i2c_probe(struct platform_device *pdev)
 		return ret;
 	}
 
-	dev_info(&pdev->dev,
-		 "ESP32-S3 I2C master at %pR, %u Hz, ctr=%08x clk_conf=%08x\n",
-		 res, i2c->bus_freq,
-		 esp32_i2c_read(i2c, I2C_CTR),
-		 esp32_i2c_read(i2c, I2C_CLK_CONF));
+	/*
+	 * The one line this driver says on a healthy boot. The register values
+	 * that used to be here (ctr, clk_conf) are dev_dbg below: they answer
+	 * "did the controller come out of reset correctly?", which is a
+	 * bring-up question, and on this board every line repaints the panel.
+	 */
+	dev_info(&pdev->dev, "ESP32-S3 I2C master at %pR, %u Hz\n",
+		 res, i2c->bus_freq);
+	dev_dbg(&pdev->dev, "ctr=%08x clk_conf=%08x\n",
+		esp32_i2c_read(i2c, I2C_CTR),
+		esp32_i2c_read(i2c, I2C_CLK_CONF));
 
 	return 0;
 }
