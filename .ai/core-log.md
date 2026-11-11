@@ -1,3 +1,35 @@
+## 66 COMMIT Unreleased 2026-11-11T20:52:00-07:00
+
+#### Coming From:
+
+Unreleased d7bb6b9
+
+#### Purpose:
+
+Record the port's partial-update rework and the Bluetooth window's reflow, both of which the operator accepted on the glass.
+
+#### Outcome:
+
+Two cycles are recorded together because they were driven back to back by the same acceptance test -- pointer inside the framebuffer and the Bluetooth window -- and the second could not be evaluated until the first stopped making every touch repaint. In `~/GIT/tinydesk-twatch` at f9b5270 on branch `t-watch-ultra`, the flush path was pushing 96 per cent of the framebuffer per pointer move. The cause was not the touch driver: `display.c` tracked the dirty region as runs of ROWS and then pushed each run at the full 320-pixel width. This desktop repaints the entire icon column on every pointer move, so 23 changed cells in one column formed a single contiguous run of rows and went out as a full-width band -- 122,880 pixels for a column that is 8 pixels wide. It now tracks the column extent of each run and pushes a rectangle, so the same move is 3,072 pixels, a 40-fold reduction; and the band height is sized to the rectangle so the column goes out as one transaction instead of 24, since at narrow widths the per-transaction cost of two window-register writes and taking the bus was exceeding the pixel data. Measured on the board with the flush timed and logged through the Log Viewer: 641 us average and 680 us maximum per flush in steady state, against roughly 16 ms for the same move beforehand. A second fault was made and caught inside that cycle: moving the byte-swap and DMA source buffer from PSRAM to a `MALLOC_CAP_INTERNAL|MALLOC_CAP_DMA` allocation booted the board to a dark screen with no output at all, because with the Bluetooth controller holding internal RAM that request can fail and `CONFIG_ESP_CONSOLE_NONE` leaves nowhere to report it before the desktop link exists; it is a 10 KB static array now, internal by construction because `extram.lf` maps only libtinydesk, libtdsh and libmicropython to PSRAM. The Bluetooth window had a separate and simpler defect with a worse symptom: it opened as a floating 72x34 window on a 40x25 screen. The window manager clamps the RECTANGLE to the screen but cannot re-flow contents, so the device list and its buttons sat at rows 21 to 30, off the bottom of the glass -- which reads as a scan that finds your keyboard with nowhere to click it, and would read the same on any port with 25 or 30 rows, which is every ESP32 board here. It now opens full screen with every row derived from the client height the window manager actually returns, so drawing and widgets cannot disagree about where the bottom is; on 25 rows that leaves 14 for the three slots, then the scan header, status line, seven rows of device list, three buttons and Close. Text longer than the window is now shortened where it carries least meaning rather than truncated mid-value, and the window's status line moved from column 9 to 10 because "Close ]" occupies 0..8 and the two had been running together as "Close ]listening for devices". The app is shared with every other port, so it was also built host-side under `-Werror` and is clean there. Both results were accepted on the glass by the operator, who confirmed the picture and pointer inside the framebuffer as good and the reflowed window as good.
+
+#### Next Steps:
+
+Bluetooth pairing is still the one untested subsystem: a scan lists devices and they are now reachable, but no keyboard or mouse has been paired, so the HID decode in `hid_input.c` and the reconnect-on-boot path remain unexercised. The three capacitive bars under the glass still act on stretches of taskbar rather than three fixed cells, and their geometry is unresolved because the recorded edges (22, 158, 294) divide the strip into two equal zones plus a one-pixel third -- so the vendor map is the place to settle that before any fix is written. The Linux side stays parked at d7bb6b9 with its restore image intact.
+
+#### Files Modified:
+
+- apps/bluetooth.c
+- ports/twatchultra/main/display.c
+- ports/twatchultra/README.md
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: PASS
+
+---
+
 ## 65 COMMIT Unreleased 2026-11-11T20:26:00-07:00
 
 #### Coming From:
