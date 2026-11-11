@@ -1,3 +1,33 @@
+## 74 COMMIT Unreleased 2026-11-12T02:30:00-07:00
+
+#### Coming From:
+
+Unreleased f9ffe9d
+
+#### Purpose:
+
+Record a redraw fault that is upstream of this port, two fixes found alongside it that do stand on their own, and a diagnostic effort that went wrong twice before it produced a useful answer.
+
+#### Outcome:
+
+The operator reported leftover pixels on dark screens, reproducible by opening Files and navigating into a directory with fewer entries than the last. It is not fixed and it is not in this port. What established that is a measurement rather than a theory: navigating `/root` into `Desktop` and recording every cursor-position sequence the desktop emits shows writes to rows 2 through 11 and NO writes at all to rows 12 through 25. The desktop never sends those cells, and its own front buffer therefore already believes they are blank, so its diff skips them for ever and nothing downstream can recover -- neither a full push of the framebuffer nor blanking the whole panel, which were both tried. The two port-side fixes that came out of the investigation at 1579667 do stand on their own. First, the cell the cursor leaves was never repainted: `paint_cell` inverts a cell when the cursor is on it while the cell's own colours are unchanged, so once the cursor moved away the comparison read `want == have && !cur`, skipped the cell, and left it inverted on the glass permanently; the cursor's position is remembered now and that cell is painted back exactly once. Second, the panel is wiped once at start-up -- the framebuffer is 320x416 inside a 410x502 glass so a margin is never written, and the controller's RAM is not cleared at reset, meaning whatever the previous firmware (a Linux framebuffer with a different geometry) left there survives; whether anything visible was in those margins is now known to be unproven, since the wipe did not clear the reported fault, and the comment on it says so. The diagnostic effort is worth recording because it failed twice in the same way. A 3-second reflush test never ran: the wait was `ulTaskNotifyTake(pdMS_TO_TICKS(3000))` and the desktop rewrites the clock every second, so the timeout branch was unreachable dead code, and the operator's answer to it described a test that had not executed. Then a mismatch counter was placed before painting, so it counted cells that were merely pending rather than stuck and reported 33 on a healthy framebuffer. Both were reported to the operator as evidence before the error was noticed. The measurement that finally worked -- recording which rows the desktop writes -- took one run and answered the question outright, and the lesson is that it should have been the first thing tried: it observes what the desktop actually sends instead of instrumenting our side of a path we had already measured as correct. An earlier conclusion in that sequence was also wrong and was retracted to the operator: a full push of `s_fb` that left the pixels in place was read as "the panel rejected them", when it meant `s_fb` held the same stale content the glass was showing. The issue is parked at the operator's request. Whether the fix belongs in the Files app, the list widget, or the window manager's fill is not yet known, and the one experiment that would separate those -- forcing `td_full_redraw()` while the garbage is on screen -- has not been run.
+
+#### Next Steps:
+
+When this is picked up: force `td_full_redraw()` with the garbage visible. If the strips clear, the front buffer was stale and the defect is where a buffer init loses a repaint (`apply_size` and `td_buffer_init` in `src/td.c`); if they stay, the composed back buffer never had the cells cleared, which puts it in the Files list, the list widget, or `draw_window`'s fill. Either way it is upstream code shared by every port, so it should be fixed there rather than worked around here. Separately: the remaining port overrides `TD_SIZE_POLL_MS=0` and `TD_ACK_TIMEOUT_MS=0` are still untested against the current tree; the rest of the apps still need checking maximised on 40x26, with Files, Editor, Settings and System Monitor the likely ones to need work; and the three capacitive bars under the glass still act on stretches of taskbar rather than three fixed cells, awaiting the vendor map. The Linux side stays parked; its last code commit is 8645a82 and everything after it in this repository is the project log.
+
+#### Files Modified:
+
+- ports/twatchultra/main/display.c
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: FAIL
+
+---
+
 ## 73 COMMIT Unreleased 2026-11-12T01:40:00-07:00
 
 #### Coming From:
