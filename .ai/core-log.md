@@ -1,3 +1,34 @@
+## 67 COMMIT Unreleased 2026-11-11T21:10:00-07:00
+
+#### Coming From:
+
+Unreleased bb7bf2e
+
+#### Purpose:
+
+Record the port's Bluetooth input path as verified on hardware, which was the last untested subsystem, and the two layout defects a real pairing exposed.
+
+#### Outcome:
+
+A Bluetooth combo keyboard-and-mouse paired from a scan into the Combo slot and drives the desktop, so the radio, the pairing path, the HID decode and NVS persistence are all exercised on the glass -- `td_hid.c`'s boot-format keyboard decoder and the mouse report map both, since a combo device sends both kinds of report down one link. This was the last subsystem the port had written but never run, and with it the port's entire input and output path is now verified end to end: panel, touch, USB link, and Bluetooth. The window's own status was the evidence rather than an inference -- `Pairings 1 stored in the board's NVS`, `Combo ready, K06 BLE Keyboard`, `last: connected: keyboard and mouse`, and `[ Off ]` reading as the reconnect toggle. Two layout defects appeared only once a slot was occupied, and both are fixed in the fork at 641f7bb. The first: a button is its caption plus four columns, so `Pair...`, `Off` and `Forget` with one column between them need thirty, and starting at the value column they ended at column 40 of a 40-column window -- cutting the closing bracket off `[ Forget ]`, on the one button a user reaches for when they want to let go of a device. The group now starts one column left and ends at 39. The second: detail lines were indented to the value column, spending eleven of forty columns on nothing, which is why a paired device read `paired: K06 BLE Keyboard D1:` with the address cut mid-octet; they start at column 1 now, and when the window is narrow the address is dropped rather than truncated, because the state and the device name identify it and the reconnecting flag is already carried by the button beside it. The app is shared with every other port, so it was built host-side under `-Werror` as well and is clean. The operator accepted the result on the glass.
+
+#### Next Steps:
+
+The Mouse and Keyboard slots pair one device each and are the same code path as the Combo slot that now works, but neither has been tried -- worth a pass only if there is a reason to use separate devices. The three capacitive bars under the glass still act on stretches of taskbar rather than three fixed cells, and their geometry is unresolved because the recorded edges divide the strip into two equal zones plus a one-pixel third, so the vendor map is the place to settle that before a fix is written. Beyond those, the port's documented gaps are unchanged and deliberate: no Sixel or picture support, no sound, no haptics, no battery reporting, and SD hardware still unproven on this board. The Linux side stays parked at bb7bf2e with its restore image intact.
+
+#### Files Modified:
+
+- apps/bluetooth.c
+- ports/twatchultra/README.md
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: PASS
+
+---
+
 ## 66 COMMIT Unreleased 2026-11-11T20:52:00-07:00
 
 #### Coming From:
