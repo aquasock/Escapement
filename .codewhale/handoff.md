@@ -1,4 +1,4 @@
-# Handoff — Escapement, 2026-11-10T20:05
+# Handoff — Escapement, 2026-11-10T21:35
 
 Linux 7.2.4 on a T-Watch Ultra (ESP32-S3). Real Linux on the watch's own Xtensa
 cores, not emulated. This file is orientation; verify before acting on it.
@@ -41,25 +41,41 @@ strip blit      17.0-17.4 ms per 320x57 write
 - Boot is stable. The boot-loop, frozen-block, stale-flag and one-shot bugs are
   fixed and written up in `docs/tamagotchi.md`.
 
-## Not verified — the open work
+## Verified since
 
-1. **The glass.** The emulated display region hashed identically over two
-   seconds during one run, so the pet was not visibly animating in that sample.
-   Could be an idle guest, could be frames not landing. Needs eyes.
-2. **Buttons.** Never tested end to end since the move. `buttons` in the control
-   block read 0 in every sample taken. Needs a press.
-3. **Frame delivery.** One run blitted 77 of 159 published frames. The write is
-   17 ms, so this is overruns (10 ms pacing tick against a 21 ms poll), not
-   transfer cost. Fix by publishing on a tick boundary and polling tighter.
-4. **No mutual exclusion.** Two `tamacore` instances will race for the window.
+- **The glass: correct.** Decoded from the window at the byte level, the frame is
+  a 4 px black bezel around a 49x49 LCD with the V3 egg drawn in it. Operator
+  confirms it is much faster.
+- **Frame delivery: fixed.** 141 published, 141 blitted in 10 s. The old 77-of-159
+  was the pacing bug below, not the panel.
+- **The blank screen: found.** `splb32_run_cycles()` returns ABSOLUTE cycles and
+  the loop did `cycles_done += ...`, inflating the counter until the "caught up"
+  test was always true and the guest was starved to ~105k opcodes in 10 s. One
+  `+=`. Now `cycles_done = ...` against an absolute wall-clock target.
+- **Second run deadlocked: fixed.** Core 0 cleared the whole control block,
+  wiping core 1's flags. Each side now clears only its own line and the handshake
+  is a session counter (`session` in line 1).
+
+## Not verified — what is left
+
+1. **Physical buttons.** `btn_events` proves core 0 applies a mask it reads, and
+   `tamacore -t` exercises the path, but no finger has been on the glass since
+   the move. Press the bars and watch the pet.
+2. **Menus at speed.** Should now be structural — core 1 blits one fixed 57x57
+   tile whatever is on screen — but it is an argument, not a measurement.
+3. **No mutual exclusion.** Two `tamacore` instances still race for the window.
 
 ## Next actions, in order
 
-1. Run `/home/tamacore 60` on the watch and watch the glass. If it is blank or
-   frozen, dump frames A and B and compare against the emulated dpram.
-2. Press the bars. If nothing happens, check that `buttons` moves in
-   `/proc/esp-shared` at offset 44 before suspecting the guest.
-3. Only then tune delivery. Do not optimise a path that has not been seen.
+1. Press the bars. If nothing happens, check `buttons` at offset 44 and
+   `btn_events` at offset 108 in `/proc/esp-shared` -- if the mask moves but the
+   counter does not, the guest is not reading line 1; if the counter moves but
+   the pet ignores it, the emulated pin mapping is wrong.
+2. Then the status menu, to confirm the 0.52x is gone.
+
+Note: `scripts/watch-exec.py` sends `^C` on every call, which kills a foreground
+`tamacore` on the console. For a long manual test, run it in the foreground of a
+`watch-exec` call and leave that call running.
 
 ## Reconstruct
 
