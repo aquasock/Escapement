@@ -325,6 +325,28 @@ static void set_buttons(uint32_t mask)
 	shared_write(SHM_CTL_OFF + 44, &mask, sizeof(mask));
 }
 
+#define TAMACORE_VERSION "1.0"
+
+static void usage(void)
+{
+	printf(
+"usage: tamacore [seconds] [-q] [-t] [-b N]\n"
+"\n"
+"The Tamagotchi Connection V3, emulated on the watch's core 0. Frames are\n"
+"blitted to /dev/fb0 by this process on core 1; the bars below the display\n"
+"are the three buttons. Ctrl-C stops it and leaves the pet where it was.\n"
+"\n"
+"  seconds   run for that long, then exit and report (default: until Ctrl-C)\n"
+"  -q        quiet: no startup line and no summary\n"
+"  -t        self-test: press a button, check core 0 applied it, exit\n"
+"  -b N      time N panel writes and exit (measures the blit path)\n"
+"  -h        this help\n"
+"  -V        version\n"
+"\n"
+"Needs /proc/esp-shared (CONFIG_ESP_SHARED in the kernel) and /home/rom.bin.\n"
+"The save lives in /home/tama.sav and is only written when the pet changes it.\n");
+}
+
 int main(int argc, char **argv)
 {
 	struct shm_ctl ctl = { 0 };
@@ -336,21 +358,41 @@ int main(int argc, char **argv)
 	double seconds = 0.0;
 	time_t started;
 
-	for (i = 1; i < argc; i++) {
-		if (strcmp(argv[i], "-q") == 0)
-			quiet = 1;
-		else if (strcmp(argv[i], "-b") == 0 && i + 1 < argc)
-			bench = atoi(argv[++i]);
-		else if (strcmp(argv[i], "-t") == 0)
-			selftest = 1;
-		else if (argv[i][0] != '-')
-			seconds = atof(argv[i]);
-	}
-
-	/* Unbuffered, because this program is normally run with its output on a
-	 * pipe or redirected, and a buffered summary that never flushes is how a
-	 * working run looked like a silent hang. */
 	setvbuf(stdout, NULL, _IONBF, 0);
+
+	for (i = 1; i < argc; i++) {
+		if (strcmp(argv[i], "-q") == 0) {
+			quiet = 1;
+		} else if (strcmp(argv[i], "-b") == 0 && i + 1 < argc) {
+			bench = atoi(argv[++i]);
+		} else if (strcmp(argv[i], "-t") == 0) {
+			selftest = 1;
+		} else if (strcmp(argv[i], "-h") == 0 ||
+			   strcmp(argv[i], "--help") == 0) {
+			usage();
+			return 0;
+		} else if (strcmp(argv[i], "-V") == 0 ||
+			   strcmp(argv[i], "--version") == 0) {
+			printf("tamacore %s\n", TAMACORE_VERSION);
+			return 0;
+		} else if (argv[i][0] == '-' && argv[i][1]) {
+			/*
+			 * Refuse an unknown option rather than ignoring it.
+			 *
+			 * This used to fall through to "start the emulator and
+			 * run until killed", so a typo like `-q` written `-Q`
+			 * quietly took over the panel and the emulated machine
+			 * instead of doing nothing. A command that can seize the
+			 * display should be strict about what it is asked for.
+			 */
+			fprintf(stderr, "tamacore: unknown option '%s'\n",
+				argv[i]);
+			usage();
+			return 2;
+		} else {
+			seconds = atof(argv[i]);
+		}
+	}
 
 	signal(SIGINT, on_signal);
 	signal(SIGTERM, on_signal);
