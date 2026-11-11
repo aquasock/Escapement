@@ -1,3 +1,33 @@
+## 64 COMMIT Unreleased 2026-11-11T20:20:00-07:00
+
+#### Coming From:
+
+Unreleased 0267262
+
+#### Purpose:
+
+Record the operator's hardware acceptance of the port's input path, which entry 63 wrote as not run.
+
+#### Outcome:
+
+The operator confirmed on the glass that touch responds and that Wi-Fi associates with the credentials already stored on the device, and accepted the cycle. That completes the evidence entry 63 was missing and supersedes its `User Test: NOT RUN`; nothing in the delivered firmware changed. Touch was the one link left unproven, because entry 63 could show the driver reading and could show an injected SGR click opening the start menu, but could not show a finger on the glass -- the operator's tap is that evidence and it arrives without any further change to the driver. Wi-Fi remembering its credentials also closes the risk entry 63 raised about regenerating `sdkconfig`: deleting that file to make the new Bluetooth defaults apply could have discarded hand edits made to it, since it is generated and gitignored, and a fresh association from stored credentials proves the previous configuration carried nothing that this one lost. One behaviour the operator called out is worth recording as intended rather than as a fault: Wi-Fi does not associate at boot, and connecting from the Network app afterwards works, which is the operator's preference for this board. The Bluetooth radio is now in the build and its Mouse, Keyboard and Bluetooth apps appear in the start menu, so `bt_hid.c` is compiled and `bt_hid_start()` returns a table rather than the empty stub -- but no device has been paired, so the Bluetooth keyboard and mouse path remains written and enabled without having been exercised, and nothing in this entry should be read as claiming otherwise.
+
+#### Next Steps:
+
+Pair a Bluetooth keyboard and mouse from the desktop's Bluetooth app: the radio starts and the apps exist, but no device has ever been paired, so the HID decode in `hid_input.c` and the reconnect-on-boot path are untested on this board. Separately, the three capacitive bars under the glass are now reachable with working touch and their mapping deserves a decision: `to_cell()` converts a touch through the framebuffer's 320x400 grid, which is right for the screen but wrong for the bars, since they sit below it -- bar 0 clamps to taskbar column 0, but bar 1 spans columns 14 to 31 rather than landing on one cell, so pressing the middle bar acts on whichever taskbar column happens to be under the finger. Giving the bars their own three fixed cells would make them behave as three buttons. Boot-time Wi-Fi association stays off by the operator's choice.
+
+#### Files Modified:
+
+None.
+
+#### Status:
+
+- Build: N/A
+- Deployment: N/A
+- User Test: PASS
+
+---
+
 ## 63 COMMIT Unreleased 2026-11-11T20:05:00-07:00
 
 #### Coming From:
