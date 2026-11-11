@@ -6,11 +6,12 @@ build/
 images/*.bin
 
 # Built by scripts/build-userspace.sh; deploy /home/blekbd, /home/panel-test
-# and /home/tprobe
+# /home/tprobe and /home/fbbench
 # on the watch with scripts/watch-deploy.sh.
 userspace/blekbd
 userspace/blekbd.strip
 userspace/tprobe
+userspace/fbbench
 userspace/panel-test
 
 # Runtime session state. .codewhale/handoff.md is tracked deliberately, so the

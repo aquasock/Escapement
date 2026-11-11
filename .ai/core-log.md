@@ -1,3 +1,38 @@
+## 45 COMMIT Unreleased 2026-11-10T17:30:23-07:00
+
+#### Coming From:
+
+Unreleased c1ff9d7
+
+#### Purpose:
+
+Cut the panel transfer cost to make full-frame refresh affordable, following the operator's report that the status screen runs at 0.3x with visible tearing.
+
+#### Outcome:
+
+The cost is now understood precisely, the fix is proven impossible by register width rather than by effort, and the optimisation attempted measured as a no-op that rules out the leading theory. Three things came out of it and only the first is an implementation. **DMA cannot be used from this port.** The GDMA out-link register stores only the low 20 bits of the first descriptor's address, so descriptors must live in internal DRAM at 0x3FC88000; Linux here has no internal SRAM mapping at all, its device tree memory being a single 8 MB block at 0x3D800000 covering PSRAM only. That is an addressing limit, not a contention one, so no driver work changes it. Two risks that had been raised around the same idea were checked and dissolved: the esp-hosted link on this board is shmem (`CONFIG_ESP_SHMEM_HOST_INTERFACE=y`), not SPI and not SDIO, so networking claims no SPI DMA path; and slave_bt.c's UHCI channels are never initialised because this build drives BT through the internal controller via NimBLE, which a GDMA occupancy dump at 2.1 s confirmed as all five channels zero. **The transfer is not wire bound.** Halving the SPI clock from 40 MHz to 20 MHz through the existing `spi_hz` parameter made a full frame 15 percent worse, not 100 percent: 93-95 ms becomes 108.8 ms. Wire time at 4 lanes and 40 MHz is about 3.2 us of the ~23 us each 64-byte transaction costs, so roughly 20 us per transaction is fixed engine turnaround outside the CPU's reach. **The MMIO reduction gained nothing, and that is the useful result.** Five of the roughly eight register writes per chunk were redundant on all but the last chunk -- a `SPI_USER` rewrite with an unchanged value, an unchanged `SPI_MS_DLEN`, and a `SPI_UPDATE` latch plus poll on each of 4000 chunks -- and removing them measured 93.3 ms against 94.8 ms, inside the noise. That rules out MMIO as the cost, which points the next attempt at fewer transactions or fewer bytes rather than faster ones, and it is recorded as a negative result on purpose because the change was kept. The operator confirmed the display was correct on the glass after it: console text legible, ring and bars intact, no tearing at rest. Two measurement traps cost real time and are now written down. `dd if=/dev/zero of=/dev/fb0` cannot measure this: a `dd` that touches nothing costs 430-440 ms on this board, so a 25 KB write and a 256 KB write both 'take' about 440 ms and the numbers describe process startup. Deriving a per-band figure from the emulator's stall log gives 9.3 ms from one frame and 25 ms from another, a 2.7x spread, which is why `userspace/fbbench.c` was written -- one process, CLOCK_MONOTONIC, no fork noise -- and committed with the emulator's other diagnostics. A self-matching bug in `watch-backup.sh` was also fixed: its in-flight guard used `pgrep -f 'esptool.*read_flash'`, which matches the calling shell's own command line when that line mentions esptool, so the script refused to run with the port perfectly free; the pattern is now `[e]sptool` and cannot match itself. The core-syntax audit passed: `.ai/core.md` and `.ai/core-syntax.md` were re-read, the complete `.ai/` diff was inspected, `.ai/core.md` was not modified, all YAML blocks in the reference parse and all 80 records carry the ten required fields with unique ids, and this entry was validated against the template with six sections in canonical order, sequential numbering from 44, an ISO-8601 timestamp carrying the America/Phoenix offset, prose-only Outcome and Next Steps, and Status values within the allowed set.
+
+#### Next Steps:
+
+Fewer bytes, not faster bytes, is the only lever left on the panel, and there are two concrete offers. The first is to confine blits to the guest LCD area: the emulator's LCD is 292x300 (175 KB) inside a 320x400 framebuffer (256 KB), so painting only the LCD region would cut bytes and transactions by about 32 percent with no new hardware risk. The second is the `swab16` copy inside `co5300_blit`, which loops over every pixel with a multiply per index while holding the ioctl, and has never been timed separately from the transfer it feeds -- it is counted inside the 93 ms measured, and is plausibly 10 to 20 ms of it. Either is worth measuring before it is believed, using `fbbench`. The stalls themselves remain open and are not a throughput problem: EMU-002's status-screen frames decompose as emu 49 percent, panel 32 percent and render 15 percent against a 50 ms budget at 20 fps, which is why better paint alone moves them from 153 ms to perhaps 65 ms rather than eliminating them. The deferred items are unchanged and none should be started without asking: BLE media keys, the Rii K06 touchpad and Logitech keyboard, firmware-side BLE bond persistence, wake-from-sleep, and moving the Tamagotchi emulator to core 0.
+
+#### Files Modified:
+
+- patches/kernel/display/final/spi-esp32.c
+- scripts/watch-backup.sh
+- scripts/build-userspace.sh
+- userspace/fbbench.c
+- .gitignore
+- .ai/core-reference.md
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: PASS
+
+---
+
 ## 44 COMMIT Unreleased 2026-11-10T16:46:42-07:00
 
 #### Coming From:

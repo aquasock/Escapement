@@ -1,10 +1,10 @@
-# Handoff — Escapement, 2026-11-10T16:47
+# Handoff — Escapement, 2026-11-10T17:31
 
 Linux 7.2.4 on a T-Watch Ultra (ESP32-S3). Real Linux on the watch's own Xtensa
 cores, not emulated. This file is orientation; verify before acting on it.
 
-Canonical detail lives in `.ai/core-reference.md` (78 records, fourteen topics).
-Project history lives in `.ai/core-log.md` (44 entries; newest first — 44, 43, 42, 41, 40, 39, 38, 37, 36, 35, 34, 33,
+Canonical detail lives in `.ai/core-reference.md` (80 records, fourteen topics).
+Project history lives in `.ai/core-log.md` (45 entries; newest first — 45, 44, 43, 42, 41, 40, 39, 38, 37, 36, 35, 34, 33, 32,
 31, 30, 29, 28, 27, 26, 25, 24, 23, 22, 21, 20, 19, 18, 17, then 1 through 16).
 Do not re-derive what those hold.
 
@@ -18,10 +18,10 @@ persistence, any wake-from-sleep path, and moving the emulator to core 0.
 
 ## Reconstruct (in this order)
 
-1. `git log --oneline -8` — `main` was at `17099e0`, clean and fully pushed,
+1. `git log --oneline -8` — `main` was at `c1ff9d7`, clean and fully pushed,
    before the commit carrying this file.
 2. `.ai/core.md` (policy), then `.ai/core-reference.md` (hardware facts — open
-   the record, not the index line), then `.ai/core-log.md` entries 44, 43, 42.
+   the record, not the index line), then `.ai/core-log.md` entries 45, 44, 43.
 3. `git -C build/esp-hosted/esp_hosted_ng branch --show-current` — expect
    `ble-bond-wip`, five local-only commits.
 
@@ -198,6 +198,20 @@ Compare corebench to corebench, tamafb to tamafb, never across. See EMU-011.
 The old claim "4 fps gives ~1.0x; the panel is the limit" is **retired** — it
 was true with the touch daemon competing and is false now.
 
+**The panel transfer is 94 ms/frame and DMA is impossible here.** `addr : 20` in
+`gdma_struct.h` means GDMA descriptors must live in internal DRAM, and Linux on
+this port has no internal SRAM mapping — its whole space is PSRAM at
+`0x3D800000`. Not contention, addressing. See LCD-012; do not retry it.
+
+The transfer is **not wire bound**: 40 MHz → 93.3 ms, 20 MHz → 108.8 ms, so half
+the clock costs 15%. ~20 µs of every 64-byte transaction is fixed engine
+turnaround. **Removing 5 of 8 MMIO writes per chunk measured as a no-op**
+(94.8 → 93.3 ms), which rules out MMIO and means *fewer bytes* is the only lever
+left (LCD-013).
+
+Measure panel cost with `userspace/fbbench.c` and nothing else. `dd` to
+`/dev/fb0` measures fork+exec — a dd that touches nothing costs 430–440 ms here.
+
 **Stalls are the open thread** (next up by operator request). 29 in an otherwise
 faster emulator, 14 on `dirty 0xFC`, longest early ones 286 and 211 ms wall with
 panel 104 and 41 ms. That is the EMU-002 shape: guest stops touching display RAM,
@@ -218,11 +232,15 @@ time and clean probe semantics and nothing else. Fix it in the touch cycle.
 
 ## Backups — read the directory, do not trust this file
 
-**`working-2026-11-10-1621.bin` is the current, complete state.** Taken
-2026-11-10 16:24, 16 MiB, sha256 `464b0413…`, **after a reboot** so it is a
-cold-boot state. It is the first image with every verified subsystem: touch
-interrupt-driven at a 5 s idle poll, haptics in the kernel, the enlarged
-interrupt table, and the I2C recovery fix.
+**`working-2026-11-10-1703.bin` is the newest verified image.** Taken
+2026-11-10 17:03, 16 MiB, sha256 `91ff286e…`, kernel inside byte-identical to
+the built `xipImage` (`a8c213d4…`). It predates the chunk-loop MMIO change only,
+which measured as a no-op, so restoring it costs nothing functional.
+
+`working-2026-11-10-1621.bin` (sha256 `464b0413…`) is the previous complete
+state and the one with the longest verification trail: touch interrupt-driven at
+a 5 s idle poll, haptics in the kernel, the enlarged interrupt table, and the
+I2C recovery fix.
 
 Verified rather than trusted:
 
@@ -257,13 +275,9 @@ recovery line has no literal `NACK:` because `%s` supplies it at the call site.
 ~/twatch-backup/twatch-factory-16MB.bin       471c9a21  stock
 ```
 
-**1621 is the one to restore.** 1053 remains the fallback if the hardware-I2C
+**1703 is the one to restore.** 1053 remains the fallback if the hardware-I2C
 path is ever suspected: it is the bit-banged build with the old userspace touch
 daemon, fully functional for its time. Restore command:
-but polling only) and is worth keeping for one more cycle as the A/B for the
-interrupt work. 1053 remains the fallback if the hardware-I2C path is ever
-suspected: it is the bit-banged build with the old userspace touch daemon, fully
-functional for its time. Restore command:
 
 ```sh
 PY=build/idf-tools/python_env/idf5.1_py3.14_env/bin/python

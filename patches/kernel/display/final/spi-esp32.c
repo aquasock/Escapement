@@ -107,6 +107,33 @@
 #define ESP32_SPI_FIFO_SIZE	64
 #define SPI_W0_REG		0x98
 
+/*
+ * GDMA, at 0x6003F000, with 5 channel pairs on this chip.
+ *
+ * Worth knowing before using it: the GDMA block is shared with the firmware on
+ * core 0, and the firmware is a closed WiFi blob we cannot inspect. The Linux
+ * panel driver wants one TX channel to replace 4000 CPU-mode FIFO chunks per
+ * frame with a handful of DMA transfers, but claiming a channel the blob is
+ * already using would corrupt its traffic -- and the failure would appear as
+ * intermittent WiFi, not as a panel bug.
+ *
+ * What the firmware source does say, and it is reassuring: the esp-hosted
+ * transport on this board is shmem (CONFIG_ESP_SHMEM_HOST_INTERFACE=y), not SPI
+ * and not SDIO, so networking claims no SPI DMA path at all; and slave_bt.c's
+ * UHCI channels are never initialised because this build uses the internal BT
+ * controller through NimBLE. That leaves the blob's own internal use as the
+ * only unknown, which is what the dump below is for.
+ */
+#define ESP32_GDMA_BASE		0x6003f000
+#define ESP32_GDMA_CHANS	5
+#define GDMA_CH_STRIDE		0xc0
+#define GDMA_IN_CONF0(n)	(0x00 + (n) * GDMA_CH_STRIDE)
+#define GDMA_IN_LINK(n)		(0x20 + (n) * GDMA_CH_STRIDE)
+#define GDMA_IN_PERI_SEL(n)	(0x48 + (n) * GDMA_CH_STRIDE)
+#define GDMA_OUT_CONF0(n)	(0x60 + (n) * GDMA_CH_STRIDE)
+#define GDMA_OUT_LINK(n)		(0x80 + (n) * GDMA_CH_STRIDE)
+#define GDMA_OUT_PERI_SEL(n)	(0xa8 + (n) * GDMA_CH_STRIDE)
+
 #define SPI_SLAVE_REG		0xe0
 #define SPI_SLAVE_MODE			BIT(26)
 #define SPI_SOFT_RESET			BIT(27)
@@ -504,19 +531,49 @@ static int esp32_spi_exec_op(struct spi_mem *mem, const struct spi_mem_op *op)
 	 * nothing but the first 32 pixels over and over.
 	 */
 	bool first = true;
+	/*
+	 * Per-chunk MMIO was the whole cost of a frame, not the wire.
+	 *
+	 * Measured on this board: a full 256000-byte frame takes 94.8 ms at
+	 * 40 MHz and 108.8 ms at 20 MHz -- only 15 percent worse for half the
+	 * clock, so the transfer is not wire bound. Wire time for a 64-byte
+	 * chunk at 4 lanes and 40 MHz is 3.2 us, against 23.7 us measured per
+	 * chunk, so about 20 us of every chunk was register work.
+	 *
+	 * Three of those register writes were redundant on all but a couple of
+	 * chunks per transfer:
+	 *
+	 *   - SPI_USER was rewritten for every chunk after the first, with the
+	 *     same value every time. It only changes once, when the command
+	 *     and address bits are cleared for the continuation.
+	 *   - SPI_MS_DLEN was rewritten for every chunk although only the last
+	 *     partial chunk differs.
+	 *   - SPI_CMD=SPI_UPDATE, plus a poll waiting for it to clear, ran per
+	 *     chunk. It only has to be done when a config register changed.
+	 *
+	 * Steady state is now: fill the FIFO, write SPI_USR, poll until done.
+	 */
+	bool need_update = true;	/* config written above is not latched */
+	unsigned int last_n = 0;
 
 	while (remaining) {
 		unsigned int n = min(remaining, ESP32_SPI_FIFO_SIZE);
 		u32 n32 = n & -4;
 		u32 r32 = n - n32;
 
-		if (!first) {
+		if (!first && (cr & (SPI_USR_COMMAND | SPI_USR_ADDR |
+				     SPI_USR_DUMMY))) {
 			cr &= ~(SPI_USR_COMMAND | SPI_USR_ADDR | SPI_USR_DUMMY);
 			esp32_spi_write(spi, SPI_USER_REG, cr);
+			need_update = true;
 		}
 
-		esp32_spi_write(spi, SPI_MS_DLEN_REG,
-				FIELD_PREP(SPI_MS_DATA_BITLEN, n * 8 - 1));
+		if (n != last_n) {
+			esp32_spi_write(spi, SPI_MS_DLEN_REG,
+					FIELD_PREP(SPI_MS_DATA_BITLEN, n * 8 - 1));
+			last_n = n;
+			need_update = true;
+		}
 
 		if (tx) {
 			if (n32)
@@ -530,7 +587,14 @@ static int esp32_spi_exec_op(struct spi_mem *mem, const struct spi_mem_op *op)
 			tx += n;
 		}
 
-		if (esp32_spi_start_transfer(spi) || esp32_spi_wait(spi))
+		if (need_update) {
+			esp32_spi_write(spi, SPI_CMD_REG, SPI_UPDATE);
+			if (esp32_spi_wait_bit(spi, SPI_UPDATE))
+				return -ETIMEDOUT;
+			need_update = false;
+		}
+		esp32_spi_write(spi, SPI_CMD_REG, SPI_USR);
+		if (esp32_spi_wait_bit(spi, SPI_USR))
 			return -ETIMEDOUT;
 
 		if (rx) {
@@ -547,6 +611,15 @@ static int esp32_spi_exec_op(struct spi_mem *mem, const struct spi_mem_op *op)
 		remaining -= n;
 		first = false;
 	}
+
+	/*
+	 * The completion interrupt only needs clearing once per transfer, not
+	 * once per chunk. INT_ENA is zero in polling mode so this is a latched
+	 * raw bit; clearing it here keeps the next transfer's detection honest
+	 * without an extra read and write on every chunk.
+	 */
+	if (op->data.nbytes)
+		esp32_spi_write(spi, SPI_DMA_INT_CLR_REG, SPI_TRANS_DONE_INT);
 
 	if (!op->data.nbytes) {
 		if (esp32_spi_start_transfer(spi) || esp32_spi_wait(spi))
@@ -876,6 +949,36 @@ static int esp32_spi_probe(struct platform_device *pdev)
 	// "did it bind?" unanswerable from the console.
 	dev_info(&pdev->dev, "probed: bus %d, clk %u Hz\n",
 		 pdev->id, host->max_speed_hz);
+
+	/*
+	 * One-time GDMA occupancy dump.
+	 *
+	 * Diagnostic, not configuration: nothing is written and no channel is
+	 * claimed. A channel the firmware has configured will show a non-zero
+	 * LINK register or a non-zero PERI_SEL; a free one reads zero in all
+	 * four. Printed once so a single boot answers the question, because the
+	 * answer decides whether the panel driver may use DMA at all.
+	 */
+	{
+		void __iomem *gd = devm_ioremap(&pdev->dev, ESP32_GDMA_BASE, 0x400);
+		int n;
+
+		if (!gd) {
+			dev_warn(&pdev->dev, "cannot map GDMA at %08x\n",
+				 ESP32_GDMA_BASE);
+		} else {
+			for (n = 0; n < ESP32_GDMA_CHANS; n++)
+				dev_info(&pdev->dev,
+					 "gdma ch%d: in_conf0=%08x in_link=%08x in_sel=%08x out_conf0=%08x out_link=%08x out_sel=%08x\n",
+					 n,
+					 ioread32(gd + GDMA_IN_CONF0(n)),
+					 ioread32(gd + GDMA_IN_LINK(n)),
+					 ioread32(gd + GDMA_IN_PERI_SEL(n)),
+					 ioread32(gd + GDMA_OUT_CONF0(n)),
+					 ioread32(gd + GDMA_OUT_LINK(n)),
+					 ioread32(gd + GDMA_OUT_PERI_SEL(n)));
+		}
+	}
 	host->bus_num = pdev->id;
 	host->mode_bits = SPI_CPHA | SPI_CPOL |
 		SPI_CS_HIGH | SPI_LSB_FIRST |

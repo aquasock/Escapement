@@ -138,6 +138,8 @@ Topic IDs are the `record_id` prefix. An entry reserves a name; it does not clai
 | Why does entering the time screen take 1.5 s? | EMU | EMU-002 |
 | Is 40 MHz safe on this panel? | LCD | LCD-011 |
 | How much does raising the SPI clock buy? | LCD | LCD-011 |
+| Can the panel transfer use DMA to go faster? | LCD | LCD-012 |
+| What actually limits a framebuffer write on this board? | LCD | LCD-013 |
 | Why is the emulator slow when the ROM computes? | EMU | EMU-003 |
 | How fast is PSRAM access on this watch? | EMU | EMU-003 |
 | Why not use the other core? | EMU | EMU-004 |
@@ -1227,6 +1229,37 @@ EMU-010: "The touch daemon costs the emulator about 30 percent of its throughput
     - "patches/kernel/display/final/co5300.c: CO5300_SPI_HZ_DEFAULT, and the spi_hz module parameter that made the comparison a single-boot test"
   verification: "Measured on hardware 2026-11-09 by the user's own eyes on the glass for the band order and the absence of shear, and by wall-clock timing for the two frame costs. The SPI frequency was changed at runtime through /sys/module/co5300/parameters/spi_hz, which assigns spi->max_speed_hz so the divider is reprogrammed at the next exec_op."
 
+
+- record_id: LCD-012
+  kind: LCD
+  topic_id: LCD
+  status: VERIFIED
+  verified_date: 2026-11-10
+  title: "SPI DMA is not usable from this port: the GDMA descriptor address field is 20 bits and Linux has no internal SRAM mapping"
+  statement: "The ESP32-S3 GDMA out-link register stores only the low 20 bits of the first descriptor's address (`out.link.addr : 20` in gdma_struct.h), so a descriptor must live in the low 1 MB of the address space, which on this chip is internal DRAM at 0x3FC88000. Linux on this port has no internal SRAM mapping at all: the device tree's memory node is a single block at 0x3D800000 of 8 MB, the whole of PSRAM. Any descriptor the kernel allocated would therefore be outside the range the hardware can address."
+  consequence: "Replacing the 4000 CPU-mode FIFO chunks per frame with a handful of DMA transfers is not possible on this port, and no amount of driver work changes it. This is worth recording because the idea is attractive and will be proposed again: the transfer is 83 percent per-transaction overhead, so fewer transactions is the obvious fix, and DMA is the obvious way to get them. It cannot be done without mapping internal SRAM into Linux, which is a kernel memory-layout change of a different order. Two related facts, both checked so they are not re-investigated: the esp-hosted link on this board is shmem (CONFIG_ESP_SHMEM_HOST_INTERFACE=y), not SPI and not SDIO, so networking claims no SPI DMA path and the usual worry about fighting the WiFi blob for a GDMA channel does not apply; and the firmware's UHCI DMA channels in slave_bt.c are never initialised because this build drives BT through the internal controller via NimBLE, so a GDMA channel dump taken at 2.1 s showed all five channels zero. None of that helps, because the limit is addressing, not contention."
+  sources:
+    - "components/soc/esp32s3/include/soc/gdma_struct.h: `uint32_t addr : 20;` with the comment that it stores the 20 least significant bits of the first outlink descriptor's address"
+    - "components/soc/esp32s3/include/soc/gdma_reg.h: GDMA_OUT_LINK_CH0_REG, OUTLINK_ADDR bitpos [19:0]"
+    - "components/hal/include/hal/dma_types.h: dma_descriptor_t, 12 bytes, owner bit, max 4095 bytes per descriptor"
+    - "the device tree memory node: a single 8 MB block at 0x3D800000, with no internal SRAM region"
+    - "components/esp_hw_support/dma/gdma.c: `esp_ptr_internal(user_data)` checks, the same constraint expressed as a runtime test in ESP-IDF"
+  verification: "Established by reading the register definitions and the device tree, then confirmed empirically: a GDMA occupancy dump added to esp32_spi_probe read all five channels as zero at 2.1 s, before the shmem link came up at 4.2 s. No DMA code was written, because the descriptor address range makes it unimplementable rather than merely risky."
+
+- record_id: LCD-013
+  kind: LCD
+  topic_id: LCD
+  status: VERIFIED
+  verified_date: 2026-11-10
+  title: "A framebuffer write costs 94 ms per full frame and is not wire bound: half the SPI clock buys only 15 percent"
+  statement: "Measured in-process on /dev/fb0 with fbbench, which is the only honest instrument available: a full 320x400 RGB565 frame (256000 bytes) costs 93-95 ms at 40 MHz, and 108.8 ms at 20 MHz. Halving the SPI clock costs only 15 percent, so the transfer is not limited by shifting bits. Banded writes cost the same in total: 10 bands of 40 rows cost 10.0 ms each, 100 ms per frame."
+  consequence: "The cost is per-transaction turnaround, not bytes and not MMIO. 256000 bytes over a 64-byte FIFO is 4000 transactions at about 23 us each, of which wire time at 4 lanes and 40 MHz is about 3.2 us -- so roughly 20 us of every transaction is fixed overhead that lives in the SPI engine, outside the CPU's reach, which is exactly why halving the peripheral clock barely moved it. A follow-up optimisation that removed 5 of the 8 MMIO register writes per chunk (a redundant SPI_USER rewrite, a redundant SPI_MS_DLEN rewrite, and a SPI_UPDATE latch with its poll loop on every one of 4000 chunks) measured as a no-op: 94.8 ms before, 93.3 ms after. That result is kept deliberately, because it rules out MMIO as the cost and points the next attempt at fewer transactions or fewer bytes rather than faster ones. Two measurement traps are recorded with it: `dd if=/dev/zero of=/dev/fb0` is useless here because a dd that touches nothing costs 430-440 ms on this board, so 25 KB and 256 KB both 'take' about 440 ms; and deriving a per-band figure from the emulator's stall log gives 9.3 ms from one frame and 25 ms from another, a 2.7x spread that cannot be resolved by arithmetic."
+  sources:
+    - "userspace/fbbench.c: one process, CLOCK_MONOTONIC, full-frame and banded timings"
+    - "on the watch: ./fbbench -n 12 at 40 MHz and at 20 MHz, the clock set through /sys/module/co5300/parameters/spi_hz"
+    - "patches/kernel/display/final/spi-esp32.c: the 64-byte chunk loop in esp32_spi_exec_op"
+    - "LCD-011 for the earlier 100.85 ms figure this reproduces independently, and LCD-010 for where the time was thought to be"
+  verification: "Measured on hardware 2026-11-10, after the operator confirmed the display was correct on the glass following the chunk-loop change. Consistent across runs: 93.3, 94.8, 94.0 and 94.8 ms for a full frame at 40 MHz across three boots; 108.8 ms at 20 MHz; banded 9.99-10.30 ms per band."
 - record_id: EMU-003
   kind: EMU
   topic_id: EMU

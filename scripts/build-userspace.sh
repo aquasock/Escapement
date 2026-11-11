@@ -59,7 +59,11 @@ case "${1:-}" in
     # ~135 KB and always runs.
     #
     "$CC" -Os -Wall -Wextra -static -o userspace/tprobe userspace/tprobe.c
-    ls -l userspace/blekbd userspace/panel-test userspace/tprobe
+    # same reason: this one is the only honest way to time a framebuffer write
+    # on this board, since dd measures process startup and the emulator's own
+    # panel figure is confounded with everything else in the frame.
+    "$CC" -Os -Wall -Wextra -static -o userspace/fbbench userspace/fbbench.c
+    ls -l userspace/blekbd userspace/panel-test userspace/tprobe userspace/fbbench
     printf '\ndeploy them to the watch; see the header of this script.\n'
     ;;
 esac

@@ -29,7 +29,23 @@ mkdir -p "$(dirname "$OUT")"
 
 die() { printf 'escapement: %s\n' "$*" >&2; exit 1; }
 
-[ -z "$(pgrep -f 'esptool.*read_flash' || true)" ] || die "a flash read is already running"
+#
+# Refuse to start if something is already reading the flash.
+#
+# `pgrep -f` matches against the whole command line, and this script's own
+# caller eventually has the pattern in ITS command line -- so invoking the
+# script from a shell whose command string mentions esptool makes the guard
+# match that shell and refuse, with the port perfectly free. Observed exactly
+# that on 2026-11-10: the only match was the `bash -c` that ran the check.
+#
+# Two changes make it honest. `[e]sptool` cannot match its own literal,
+# because the pattern text in the command line is "[e]sptool" and not
+# "esptool". And the exclusions drop test harnesses and this script, so a
+# wrapper cannot trip it either.
+#
+if pgrep -f '[e]sptool.*read_flash' >/dev/null 2>&1; then
+	die "a flash read is already running"
+fi
 
 PORT=${PORT:-}
 if [ -z "$PORT" ]; then
