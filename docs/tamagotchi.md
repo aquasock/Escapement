@@ -680,5 +680,27 @@ consistent with a core-0 machine running unbidden, but it has not been
 reproduced deliberately. **It is not memory**: NOMMU Linux has no OOM killer,
 and 256 s idle showed 1328 kB free.
 
+**Running it.** `tamacore` is an ordinary program, not a boot service. Install
+once with `./scripts/install-tamacore.sh`, then type `tamacore` on the watch.
+Ctrl-C stops it and the pet is where you left it.
+
+```
+tamacore            run until Ctrl-C
+tamacore 60         run a minute, then print the summary
+tamacore -q         quiet
+tamacore -t         self-test the button path
+tamacore -b 20      time 20 panel writes and exit
+```
+
+The binary lives in `/home` because `/` is cramfs and read-only, so `/usr/bin`
+can take neither a copy nor a symlink; `/etc/profile.d/home-path.sh` puts `/home`
+on `PATH`. That file is on jffs2, so it survives a kernel-only flash and is
+rewritten by a full image flash -- re-run the installer after one. An already
+open shell keeps its old `PATH` until it is replaced.
+
+There is deliberately no `/etc/init.d` entry: autostarting would hand the
+emulator `/dev/fb0` and the emulated machine from power-on whether or not
+anyone wanted the pet running.
+
 **Still open.** Two `tamacore` instances race for the window; there is no
 mutual exclusion.
