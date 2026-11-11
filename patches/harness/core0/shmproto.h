@@ -223,7 +223,16 @@ struct shm_diag {
 	volatile uint32_t c1_blit_max;  /* longest single pwrite, us */
 	volatile uint32_t c1_last_us;   /* duration of the last pwrite, us */
 	volatile uint32_t c1_frames;    /* frames this side has blitted */
-	volatile uint32_t reserved1[3];
+	/*
+	 * Slice instrumentation, borrowed from the reserved words. A slice is one
+	 * splb32_run_cycles() call in the behind-the-clock path. The question it
+	 * answers is whether the task watchdog fires because individual slices
+	 * are long, or because the loop spins through many short ones without
+	 * ever yielding -- those need different fixes.
+	 */
+	volatile uint32_t slice_us_max;   /* longest single slice, us */
+	volatile uint32_t slice_us_last;  /* most recent slice, us */
+	volatile uint32_t slice_since_yield_us; /* longest run with no vTaskDelay */
 };
 
 _Static_assert(sizeof(struct shm_diag) == 96,

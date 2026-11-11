@@ -61,6 +61,14 @@
  * button press and a frame deadline are never missed by more than that. */
 #define SLICE_CYCLES        (SPLB32_CLOCK_HZ / 50u)
 
+/*
+ * Longest this loop may run without blocking. The task watchdog watches core
+ * 0's idle task with a 10 s timeout, and an emulator that is behind the wall
+ * clock never takes the ahead-of-clock yield, so this is what guarantees idle
+ * gets to run. A tenth of the budget, cheap enough to be invisible.
+ */
+#define YIELD_INTERVAL_US   100000
+
 /* Two seconds of guest time in one call, before the first frame. This is how
  * the userspace front end starts (tamafb.c), and without it the first core-0
  * build came up blank: the paced loop alone never let the ROM finish booting. */
@@ -390,6 +398,7 @@ static void tamacore_session(uint32_t served, uint32_t *served_out)
 	uint64_t cycles_done = 0;
 	uint64_t next_frame_cycle = FRAME_CYCLES;
 	int64_t t0_us, last_eeprom_us, last_hz_us = 0;
+	int64_t last_yield_us = 0;      /* when this loop last blocked */
 	uint64_t last_hz_cycles = 0;
 	uint32_t idx = 0;
 	uint32_t buttons = 0, applied = 0;
@@ -556,16 +565,76 @@ static void tamacore_session(uint32_t served, uint32_t *served_out)
 
 		if (cycles_done >= target) {
 			vTaskDelay(1);          /* ahead of the wall clock: yield */
+			last_yield_us = esp_timer_get_time();
 			continue;
 		}
 
 		{
 			uint64_t want = target - cycles_done;
+			int64_t s0, s1;
+			uint32_t d;
 
 			if (want > SLICE_CYCLES)
 				want = SLICE_CYCLES;
 
+			/*
+			 * Slice instrumentation. A slice is one uninterrupted
+			 * splb32_run_cycles() call, and this branch is the one
+			 * that never yields -- the only vTaskDelay in this loop
+			 * is above, and it is taken only when the emulator is
+			 * AHEAD of the wall clock. When the guest computes
+			 * continuously and the board cannot keep up, that branch
+			 * is never reached and core 0's idle task is starved
+			 * until the 10 s task watchdog fires (ESP_RST_TASK_WDT,
+			 * reason 6, observed at the hatch).
+			 *
+			 * slice_us_max says whether individual slices are long;
+			 * slice_since_yield_us says how long this loop has gone
+			 * without blocking. Those point at different fixes, so
+			 * both are measured before either is chosen.
+			 */
+			s0 = esp_timer_get_time();
 			cycles_done = splb32_run_cycles(cpu, want);
+			s1 = esp_timer_get_time();
+
+			d = (uint32_t)(s1 - s0);
+			diag->slice_us_last = d;
+			if (d > diag->slice_us_max)
+				diag->slice_us_max = d;
+
+			if (last_yield_us == 0)
+				last_yield_us = s0;
+			d = (uint32_t)(s1 - last_yield_us);
+			if (d > diag->slice_since_yield_us)
+				diag->slice_since_yield_us = d;
+		}
+
+		/*
+		 * Yield on a wall-clock interval, not on being ahead.
+		 *
+		 * Measured at the hatch (2026-11-11): individual slices are 21-33 ms,
+		 * so the slice cap is doing its job -- but this loop went 6.26 s
+		 * without a single vTaskDelay, and the task watchdog allows 10 s.
+		 * That is the whole bug. When the guest computes continuously the
+		 * board cannot keep up, `cycles_done >= target` is never true, and
+		 * the only yield in this loop sits in that never-taken branch.
+		 *
+		 * FreeRTOS runs the idle task only when nothing else is ready, and
+		 * this task is priority 1 against idle at 0, so a loop that never
+		 * blocks starves it outright. CONFIG_ESP_TASK_WDT_CHECK_IDLE_TASK_CPU0
+		 * is on with a 10 s timeout, so the chip resets -- reason 6,
+		 * ESP_RST_TASK_WDT. Core 0's radio and IPC tasks starve with it,
+		 * which is why the console goes silent before the reset rather than
+		 * at it.
+		 *
+		 * 100 ms is a tenth of the watchdog budget and costs one 10 ms tick
+		 * per 100 ms ONLY while catching up. Normal play is ahead of the
+		 * clock, takes the branch above every iteration, and never reaches
+		 * this.
+		 */
+		if ((uint32_t)(esp_timer_get_time() - last_yield_us) > YIELD_INTERVAL_US) {
+			vTaskDelay(1);
+			last_yield_us = esp_timer_get_time();
 		}
 
 		apply_buttons(cpu, buttons, &applied);

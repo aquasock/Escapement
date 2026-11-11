@@ -51,6 +51,18 @@ overwrites it.
 Apply the firmware half from build/esp-hosted/esp_hosted_ng and the IDF half
 inside esp/esp_driver/esp-idf. Both trees are LOCAL ONLY and never pushed.
 
+YIELD ON A WALL CLOCK. Separate fault, same commit because it is the same
+core-0 task loop. The only vTaskDelay in the pacing loop sat in the
+"ahead of the wall clock" branch. When the guest computes continuously -- the
+hatch, the menus -- the board cannot keep up, that branch is never taken, and
+core 0's idle task is starved until the 10 s task watchdog resets the chip
+(ESP_RST_TASK_WDT, reason 6). Measured at the hatch: individual slices were
+only 21-33 ms, so the slice cap was fine, but the loop went 6.26 s without
+blocking. tamacore_task.c now also yields when 100 ms have passed since the
+last block, which costs one 10 ms tick per 100 ms only while catching up.
+Verified: the hatch and the naming screen now complete with the pet walking,
+where before they reset the board every time.
+
 --- linux_boot.c / linux_flash.c / app_main.c / CMakeLists.txt (firmware tree) ---
 diff --git a/esp_hosted_ng/esp/esp_driver/network_adapter/main/app_main.c b/esp_hosted_ng/esp/esp_driver/network_adapter/main/app_main.c
 index 8664ab1..33e5fd8 100644

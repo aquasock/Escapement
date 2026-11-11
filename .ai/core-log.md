@@ -1,3 +1,36 @@
+## 57 COMMIT Unreleased 2026-11-11T10:15:00-07:00
+
+#### Coming From:
+
+Unreleased 0224375
+
+#### Purpose:
+
+Fix the freeze at the hatch, which turns out to be a task-watchdog starvation of core 0 rather than anything to do with flash, and repair `watch-exec.py`, which was misreporting healthy boards as hung.
+
+#### Outcome:
+
+The hatch works and the operator has confirmed it on the glass: the pet hatched, survived being named, and is walking around. **The diagnosis was wrong twice before it was right, and the instrument is what corrected it.** Entry 54's flash fix was real and holds -- `flash_max` measured 10.25 ms and `chunk_max` 2.13 ms during the failures, with no evidence of a cache window being involved -- but the reboot at the hatch was a different fault. Reading `reset_reason` at the correct offset (112, not 28 as this session had been reading it) gave **6, ESP_RST_TASK_WDT**, not 5, ESP_RST_INT_WDT. `CONFIG_ESP_TASK_WDT_CHECK_IDLE_TASK_CPU0=y` with `CONFIG_ESP_TASK_WDT_TIMEOUT_S=10` makes that a statement about core 0's idle task: it did not run for ten seconds. The pacing loop in `tamacore_task.c` had exactly one `vTaskDelay`, in the branch taken when the emulator is AHEAD of the wall clock. When the guest computes continuously the board cannot keep up, `cycles_done >= target` is never true, that branch is never reached, and a priority-1 task that never blocks starves priority-0 idle outright. Core 0's radio and IPC tasks starve with it, which is why the console went silent before the reset rather than at it -- the freeze and the reboot were one fault seen at two moments, not two faults. **The measurement was asked for before the fix and it changed the fix.** Instrumenting slice duration into three borrowed words of `shm_diag` gave `slice_us_max` of 21-33 ms and `slice_since_yield_us` climbing to 6,257,613 us at the moment of death. Slices were therefore fine and the slice cap was doing its job; what failed was that the loop never blocked. That pointed at a wall-clock yield rather than a per-slice one, which matters because yielding every slice would have cost about 17 percent of throughput and was not needed. The fix is `YIELD_INTERVAL_US` 100000: if 100 ms have passed since the last block, call `vTaskDelay(1)`. It costs one 10 ms tick per 100 ms only while catching up, and normal play never reaches it because it takes the ahead-of-clock branch every iteration. Verified after flashing: `slice_since_yield_us` now caps at 162147 us instead of growing without bound, `slice_us_max` is unchanged at 35 ms, frames keep advancing, uptime ran continuously to 238 s and beyond, and the hatch and naming both completed with the pet walking. **`watch-exec.py` was a real defect and cost this session hours.** Two bugs. It accumulated console output across the whole wait and tested for `# ` anywhere in it, so after repeated resets had left several prompts stacked it could act on a `login:` that had already been answered, or type credentials into a live shell; it now decides from the last 400 bytes only, tracks whether it has already sent a username, and gives up rather than looping. And `main()` ignored the return value of `login()`, so when login did not take it typed the command into a `login:` prompt and then waited out its full 180 s timeout for a marker that could never arrive -- which reads as "the board hung" when the board is healthy. It now exits with a specific message. Both are fixed and the tool was verified across four consecutive invocations. Recording the cost honestly: this session repeatedly blamed the board for what were tool failures, and the operator had to say so. `patches/harness/core0/0003-*.patch` was regenerated again and re-verified -- firmware half applies to a clean c5423bd and produces byte-identical files, esp-idf half byte-identical to the live submodule. The core-syntax audit passed: `.ai/core.md` and `.ai/core-syntax.md` were re-read, the complete `.ai/` diff was inspected, `.ai/core.md` was not modified, and this entry was validated against the template with six sections in canonical order, sequential numbering from 56, an ISO-8601 timestamp carrying the America/Phoenix offset, prose-only Outcome and Next Steps, and Status values within the allowed set.
+
+#### Next Steps:
+
+Two records and one document now state the wrong cause for the hatch freeze and should be corrected before anyone plans around them. `docs/tamagotchi.md` records the reboot mechanism as the shared-cache flash fault from entry 54, which is true of a different failure and not of this one, and it should gain the task-watchdog finding rather than have the flash finding removed -- both faults are real and both were measured. The reference is unaffected in its flash records but the watchdog relationship deserves its own record, since "core 0's idle task starves when the emulator cannot keep up" is a constraint on any future work that puts computation on core 0 and it cost three sessions to find. The slice instrumentation added to `shm_diag` is worth keeping rather than removing: it answers a question that will recur, the three words were already reserved, and it is how this fault was found. `watch-exec.py`'s login hardening has one known weakness that was not exercised -- a console with several stacked prompts can still resolve against the newest of them, which is correct, but the tool does not clear the backlog first, so an unusually deep stack could still confuse it; it has not been observed since the fix and is not worth more work unless it recurs. The 100 ms yield is a throughput trade made under duress and should be reconsidered once the emulator is otherwise stable: at the hatch it costs about 9 percent, and a smaller interval or a yield that only engages while behind for longer than a few hundred milliseconds would recover most of that, but it needs measurement rather than another guess.
+
+#### Files Modified:
+
+- patches/harness/core0/tamacore_task.c
+- patches/harness/core0/shmproto.h
+- patches/harness/core0/0003-flash-chunking-and-cache-instrument.patch
+- scripts/watch-exec.py
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: PASS
+
+---
+
 ## 56 COMMIT Unreleased 2026-11-11T10:00:00-07:00
 
 #### Coming From:

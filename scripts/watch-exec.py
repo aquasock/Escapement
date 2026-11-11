@@ -113,32 +113,51 @@ def login(fd, timeout=60):
     drain(fd, 0.4)
     write_all(fd, b"\r")
 
+    # Decide from the TAIL of what arrived, never from the whole accumulated
+    # buffer. After a session that left several prompts stacked, the old text
+    # is still in the stream, so a plain `in buf` test can act on a `login:`
+    # that has already been answered and type credentials into a live shell.
+    def state(window):
+        tail = window[-400:]
+        if b"# " in tail:
+            return "shell"
+        if b"login:" in tail or b"assword" in tail:
+            return "login"
+        return "unknown"
+
     deadline = time.time() + timeout
-    buf = b""
+    sent_user = False
     while time.time() < deadline:
-        buf += drain(fd, 0.5)
-        if b"# " in buf:
+        buf = drain(fd, 0.6)
+        st = state(buf)
+
+        if st == "shell":
             return True
-        if b"login:" in buf:
-            break
 
-    if b"login:" not in buf and b"# " not in buf:
-        return False
+        if st == "login":
+            if b"assword" in buf[-400:]:
+                if not PASSWD:
+                    raise SystemExit(
+                        "watch is at a login prompt and no password is "
+                        "configured; set WATCH_PASS or "
+                        "~/.config/escapement/watch-pass")
+                write_all(fd, PASSWD.encode() + b"\r")
+                sent_user = True
+                # `login` sleeps after a bad password; allow for it.
+                time.sleep(2.5)
+            elif not sent_user:
+                write_all(fd, b"root\r")
+                sent_user = True
+                time.sleep(1.0)
+            else:
+                # Sent credentials and got the prompt back: they were wrong,
+                # or the login did not take. One more try, then give up.
+                return False
+        else:
+            # Nothing recognisable yet. Nudge the console to reprint.
+            write_all(fd, b"\r")
 
-    if b"login:" in buf:
-        write_all(fd, b"root\r")
-        time.sleep(0.8)
-        buf = drain(fd, 1.2)
-        if b"assword" in buf:
-            if not PASSWD:
-                raise SystemExit(
-                    "watch is at a login prompt and no password is configured; "
-                    "set WATCH_PASS or ~/.config/escapement/watch-pass")
-            write_all(fd, PASSWD.encode() + b"\r")
-            time.sleep(1.2)
-            buf = drain(fd, 1.5)
-
-    return b"# " in buf
+    return False
 
 
 def write_all(fd, data, deadline=10.0):
@@ -198,7 +217,15 @@ def main():
                 os.read(fd, 65536)
             except BlockingIOError:
                 break
-        login(fd)
+        # The return value matters. Ignoring it was a real defect: when login
+        # did not take, the command below was typed into a `login:` prompt,
+        # thrown away, and the tool then waited out its full 180 s timeout for
+        # an end marker that could never appear -- which reads as "the board
+        # hung" when nothing was wrong with the board at all.
+        if not login(fd):
+            sys.exit("watch-exec: could not reach a root shell on %s "
+                     "(console answered, but no '# ' prompt appeared). "
+                     "The board may be frozen, or logged out." % PORT)
 
         # The literal markers never appear in the echoed command line: the
         # echo carries "%s_BEGIN%s", the real output carries "__WX_BEGIN__".
