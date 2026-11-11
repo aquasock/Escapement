@@ -584,3 +584,56 @@ kernel, on the interrupt, the bars cost nothing and the 34.7 percent stays.
 - **`tbtns` slowing down is done**, and it buys only 1.1 percent -- the 34.7
   percent it costs is not the poll rate. Superseded: the daemon is retired and
   the bars are decoded on the touch interrupt, so there is no poll to slow.
+
+## The guest runs on core 0 now
+
+The architectural answer above is implemented. As of 2026-11-10 the SPLB32 core
+executes on **core 0**, which has a data cache, and Linux on core 1 does what it
+is good at: pushing pixels and reading buttons.
+
+**How the two halves talk.** Through the top megabyte of PSRAM,
+`0x3df00000..0x3e000000`, which the DTS keeps out of Linux's memory node while
+`init_linux_mmap()` leaves it mapped. One MMU table, both cores, no `ioremap`
+and no `/dev/mem`. The layout is `patches/harness/core0/shmproto.h`: a 128-byte
+control block, two 57x57 RGB565 frame buffers, a 1 KB save image, and the 512 KB
+ROM at `0x80000`. Each field has exactly one writer, so nothing needs a lock.
+
+**What was measured, on hardware:**
+
+```
+guest rate      4,038,199 emulated cycles/s      (target 4,000,000)
+frames          159 published in 10 s            (16 fps, exact)
+worst lateness  11 ms
+strip blit      17.0-17.4 ms per 320x57 write
+```
+
+The guest is at realtime, sitting on core 0, while core 1 is free — which is the
+thing the status menu needed and the interpreter could not deliver.
+
+**Four failure modes found on the way, all now avoided:**
+
+- **A boot loop at the handoff** (`rst:0xc`, twice). The task's first statement
+  wrote the control block at `0x3df00000` *before* `init_linux_mmap()` repointed
+  MMU entry `0x1f0`. Before the map, that virtual address is a different physical
+  page — the firmware's own PSRAM — so the write corrupted the firmware. Nothing
+  in the window may be touched until entry `0x1f0` reads back
+  `MMU_ACCESS_SPIRAM | 0x70`.
+- **A frozen control block.** `esp_cache_msync(..., 0)` writes back but the
+  writes still did not reach core 1; with `ESP_CACHE_MSYNC_FLAG_INVALIDATE` they
+  did. The one-way probe had used the flag and was visible, which was the clue.
+- **A one-shot task.** The guest task `vTaskDelete`d itself when a session
+  ended, so every later run read a stale control block and reported the previous
+  run's numbers.
+- **Stale flags across a reset.** PSRAM survives a reboot, so `rom_ready` and
+  `quit` from the previous boot looked like a live handshake and the guest
+  exited before emulating anything. The handshake is now ordered around the
+  guest's own `magic`: core 1 waits for it, and only then writes anything.
+
+**What is not yet verified.** The emulated display region hashed identically
+over two seconds during a run, so the pet was not visibly animating in that
+sample — either the guest was idle or the frames were not reaching the glass.
+The blitter also delivered 77 of 159 published frames in one 10 s run: the panel
+write is only 17 ms, so that is overruns from a 10 ms pacing tick against a 21 ms
+poll, not a slow transfer. Both need a look at the glass and a button press
+before this counts as done. Two `tamacore` instances will also race for the
+window; there is no mutual exclusion yet.

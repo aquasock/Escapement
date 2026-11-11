@@ -215,6 +215,18 @@ What this does **not** prove: that a full frame survives at frame rate, only
 that the mechanism is sound and one-way traffic is coherent. The first real
 test is the emulator writing pixels from core 0 and the panel showing them.
 
+### And so the emulator moved
+
+The guest runs on core 0 as of 2026-11-10: firmware `tamacore_task.c` steps
+SPLB32 and publishes 57x57 RGB565 frames into the window at 16 fps, and
+`userspace/tamacore.c` on core 1 loads the ROM in, blits each new frame with one
+full-width `write()` to `/dev/fb0`, and pushes button state back.
+
+Measured: **4,038,199 emulated cycles/s** against a 4,000,000 target, 159 frames
+in 10 s, worst frame 11 ms late, 17 ms per strip write. The deferred proposal
+above is no longer deferred; what remains unverified is on the glass, and
+`docs/tamagotchi.md` lists it.
+
 Two failure modes from the earlier attempts are now understood and avoided, and
 both are worth remembering:
 

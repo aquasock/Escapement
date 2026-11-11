@@ -1,0 +1,61 @@
+From: Escapement
+Subject: [PATCH] core0: build the Tamagotchi into the firmware and start it on core 0
+
+The firmware half of the core-0 move. Everything substantial lives in this repo
+and is copied in by scripts/sync-firmware.sh; this patch is only the two files
+that belong to the firmware tree itself, because a whole-file copy of either
+would have to track esp-hosted forever:
+
+  CMakeLists.txt  add the emulator sources to the component
+  app_main.c      start tamacore_start() just before the Linux handoff
+
+Why before the handoff and not after: the task waits on its own for the MMU
+entry that init_linux_mmap() leaves behind, so starting it early is safe, and
+starting it late would race the handoff. It also cannot log -- a high-volume log
+hook through the log pipe wedges this board at exactly that moment (ble_hid.c
+has the measurement) -- so it publishes progress into the PSRAM window instead
+and core 1 reads it from there.
+
+Apply from the esp-hosted tree root, then run ./scripts/sync-firmware.sh from
+the Escapement repo before rebuilding.
+
+Measured on hardware 2026-11-10: guest at 4,038,199 emulated cycles/s against a
+4,000,000 target, 159 frames in 10 s at 16 fps, worst frame 11 ms late.
+
+diff --git a/esp_hosted_ng/esp/esp_driver/network_adapter/main/CMakeLists.txt b/esp_hosted_ng/esp/esp_driver/network_adapter/main/CMakeLists.txt
+index 10d6011..ee81530 100644
+--- a/esp_hosted_ng/esp/esp_driver/network_adapter/main/CMakeLists.txt
++++ b/esp_hosted_ng/esp/esp_driver/network_adapter/main/CMakeLists.txt
+@@ -1,5 +1,7 @@
+-set(COMPONENT_SRCS "app_main.c" "slave_bt.c" "cmd.c" "stats.c" "linux_boot.c" "linux_ipc.c" "linux_flash.c" "ble_prov.c" "ble_hid.c" "log_pipe.c" "bond.c" "shmwindow.c")
+-set(COMPONENT_ADD_INCLUDEDIRS "./include")
++set(COMPONENT_SRCS "app_main.c" "slave_bt.c" "cmd.c" "stats.c" "linux_boot.c" "linux_ipc.c" "linux_flash.c" "ble_prov.c" "ble_hid.c" "log_pipe.c" "bond.c"
++    # the Tamagotchi runs here now, on core 0 -- see tamacore_task.c
++    "tamacore_task.c" "splb32.c" "ht24lc08.c" "con_v3_ir.c" "splb32_sound.c" "segmap.c")
++set(COMPONENT_ADD_INCLUDEDIRS "./include" ".")
+ 
+ if(CONFIG_IDF_TARGET_ESP32S3)
+     list(APPEND COMPONENT_SRCS linux_ll_esp32s3.c)
+diff --git a/esp_hosted_ng/esp/esp_driver/network_adapter/main/app_main.c b/esp_hosted_ng/esp/esp_driver/network_adapter/main/app_main.c
+index e918164..8664ab1 100644
+--- a/esp_hosted_ng/esp/esp_driver/network_adapter/main/app_main.c
++++ b/esp_hosted_ng/esp/esp_driver/network_adapter/main/app_main.c
+@@ -731,12 +731,13 @@ void app_main()
+ 	periph_module_enable(PERIPH_RSA_MODULE);
+ 
+ 	/*
+-	 * Core 0's writer into the PSRAM megabyte Linux does not own. Started
+-	 * before the handoff and silent by design: it publishes into the window
+-	 * rather than the log pipe, which wedges the board at this stage.
++	 * The Tamagotchi, on core 0. Started before the handoff and silent by
++	 * design: it publishes into the PSRAM window rather than the log pipe,
++	 * which wedges the board at this stage. It waits for core 1 to put the
++	 * ROM in the window, so this only creates the task.
+ 	 */
+-	void shmwindow_start(void);
+-	shmwindow_start();
++	void tamacore_start(void);
++	tamacore_start();
+ 
+ 	void linux_boot(void);
+ 	linux_boot();
