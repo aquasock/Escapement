@@ -659,10 +659,26 @@ unconditionally every two seconds, so a guest that had not yet written its EEPRO
 replaced a real save with a kilobyte of zeros — it now compares against a shadow
 copy and publishes only on change.
 
-**What is not yet verified.** The physical buttons: `btn_events` in the control
-block proves core 0 applies a mask it reads, and `tamacore -t` exercises that,
-but no finger has been on the glass since the move. The menu claim wants the
-same treatment — it should now be structural rather than measured, because core
-1 blits one fixed 57x57 tile whatever the screen contains, but that is an
-argument and not yet a number. Two `tamacore` instances still race for the
-window.
+**Verified on the glass, 2026-11-10.** The buttons work (`tamacore -t` reports
+`pin changes applied by core 0: 0 -> 2` with the picture changing), the status
+menu is no longer slow, and a 90 s run delivered **1416 of 1416** frames at
+~15.6 fps with the guest at 3,998,834 cycles/s and the worst frame 8 ms late.
+
+**Two more bugs, both from the session counter.** The counter could never pass
+one: core 1 cleared its whole 32-byte control line to remove stale flags, and
+`session` lives on that line, so it went 0 → 1 every start while core 0
+remembered serving session 1 and waited forever. And worse, the firmware
+started a *phantom session* — `served` began at 0 while `session` was already 1
+from a previous boot, so core 0 ran a guest nobody had asked for. That is what
+rebooted the board. `served` now starts at whatever session is published.
+
+The reset reason took three tries to read honestly: `ctl_init_own()` cleared
+line 3, which holds `reset_reason`, so it read 0 by the time it was inspected.
+The one reading that survived said `ESP_RST_INT_WDT` (5). The precise mechanism
+is not proven — it stopped when the phantom session went away, which is
+consistent with a core-0 machine running unbidden, but it has not been
+reproduced deliberately. **It is not memory**: NOMMU Linux has no OOM killer,
+and 256 s idle showed 1328 kB free.
+
+**Still open.** Two `tamacore` instances race for the window; there is no
+mutual exclusion.
