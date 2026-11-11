@@ -75,6 +75,64 @@
 #define SHM_DIAG_VERSION    1u
 
 /*
+ * Flash-path instrument: does anything on core 0 disable the caches after
+ * Linux starts, and who. That is the question the freezes turn on.
+ *
+ * The mechanism, established 2026-11-11 and worth stating accurately because an
+ * earlier version of this comment had it wrong: CONFIG_XIP_KERNEL=y and _stext
+ * is at 0x42140000, so the kernel EXECUTES FROM FLASH. A flash operation on
+ * core 0 turns the external-memory cache off for the whole chip, and kernel
+ * instructions are fetched through that cache. Core 1 cannot execute a single
+ * kernel instruction during the window, so it does not slow down or lose
+ * data -- it dies. Linux has only the flash window and the PSRAM window in
+ * /proc/iomem, with no internal SRAM at all, so there is nowhere to run that
+ * the cache does not mediate.
+ *
+ * The counters are NOT kept here and this area is NOT written by the
+ * instrument. The instrument runs inside
+ * spi_flash_disable_interrupts_caches_and_other_cpu(), which is called during
+ * boot before this window is mapped and always with the cache off, so a store
+ * here is invalid. An earlier version did store here and the board stopped
+ * booting with no message at all. The counters live in internal RAM instead
+ * and a core-0 task copies them into this area once the window is usable.
+ *
+ * A full page past SHM_DIAG_PREV_OFF on purpose: the first attempt used
+ * 0x70110, which is 16 bytes INTO the crash snapshot, so it corrupted the one
+ * record that outlives a reset.
+ */
+#define SHM_DIAG_FLASH_OFF  (SHM_DIAG_OFF + 0x200u)
+#define SHM_DIAG_FLASH_MAGIC 0x464c5348u    /* 'H','S','L','F' -> "FLSH" */
+/*
+ * The same record as it was at the START of this boot, i.e. the reading taken
+ * when the previous boot died. Same reasoning as SHM_DIAG_PREV_OFF: the live
+ * record is re-based to zero every boot, so without a copy the one number that
+ * matters -- how many flash operations had happened when the board went down --
+ * is destroyed by the reboot that made it interesting.
+ */
+#define SHM_DIAG_FLASH_PREV_OFF (SHM_DIAG_OFF + 0x240u)
+
+struct shm_flash_instr {
+	volatile uint32_t magic;    /* SHM_DIAG_FLASH_MAGIC once publishing */
+	volatile uint32_t calls;    /* cache-disable calls since arming */
+	volatile uint32_t ret;      /* caller's return address, most recent */
+	volatile uint32_t cpu;      /* core that made it (always expected 0) */
+	volatile uint32_t armed;    /* 1 once core 0 armed it at the jump */
+	/*
+	 * Longest single window with interrupts disabled and the cache off,
+	 * in CPU cycles: CONFIG_ESP_INT_WDT_TIMEOUT_MS is 800, and at 240 MHz
+	 * that is 192000000 cycles. A value approaching it is the reset.
+	 * Measured across spi_flash_disable/enable with the cycle counter,
+	 * which is a register read and legal with the cache off.
+	 */
+	volatile uint32_t max_cyc;
+	volatile uint32_t last_cyc;
+	volatile uint32_t reserved[1];
+};
+
+_Static_assert(sizeof(struct shm_flash_instr) == 32,
+	       "the flash instrument record must be one cache line");
+
+/*
  * Core 0 publishes only the rows it changed, and core 1 blits only those.
  *
  * This is not an optimisation for its own sake. A 5-dot frame is 181,202 bytes,
