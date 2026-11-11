@@ -1,3 +1,33 @@
+## 62 COMMIT Unreleased 2026-11-11T12:24:00-07:00
+
+#### Coming From:
+
+Unreleased 8645a82
+
+#### Purpose:
+
+Record the TinyDesk port's first working state and what remains broken, because that work now lives in a separate repository and the log is the only place this project records it.
+
+#### Outcome:
+
+The port renders a desktop on the AMOLED and is not finished. The work is in `~/GIT/tinydesk-twatch`, a fork of TinyDesk v0.4.0 (commit fce4c5a) on branch `t-watch-ultra`, seven commits, with `ports/twatchultra/` written against the upstream v0.4.0 tree rather than the stale local `../tinydesk-work` checkout, which sits on a nanoesp32 branch well behind it. Getting the panel lit took four faults and every one of them failed silently. The AMOLED's rail is switched by XL9555 P07 and nothing else, and on a cold boot the expander has every pin configured as an input, so the panel was unpowered while a correct init sequence went into it. The QSPI framing was wrong twice before it was right: register writes need `SPI_TRANS_MULTILINE_CMD | SPI_TRANS_MULTILINE_ADDR` on a device configured `command_bits = 8, address_bits = 24, spics_io_num = -1, SPI_DEVICE_HALFDUPLEX`, which was finally transcribed from LilyGo's own `LilyGoDispQSPI` rather than derived. The reset pulse is 200/300/200 ms and an earlier 20/120 ms left the controller held in reset. And the picture was offset until the framebuffer's true origin was applied: the 320x400 rectangle sits at (45,45) on the glass and the controller's RAM starts a further 22 columns left, so a pixel is written at x+45+22 and y+45. Colours were a separate defect in this project's own code: `td_vterm` stores colour INDICES and the port masked them with `& 0x0F`, which folded every 256-colour index into the wrong entry, so the desktop appeared in colours nobody chose while the same bytes rendered correctly in a PC terminal that expands the indices itself. `s_palette` is now the full xterm 256 collection. The operator confirmed the desktop looks right on the glass. **Two things remain broken and neither is disguised.** Touch does not work. The controller's reset is on the XL9555 expander rather than an SoC GPIO and nothing drove it; two sources disagree on the pin, LilyGo's hardware page saying expander GPIO10 and this project's TCH-005 saying P08, so the port now drives both and logs each rather than guessing, and touch still does not respond with that in place. And the display, and the USB mirror with it, flashes a full screen once a second. The capture isolates it exactly -- `ESC[?2026l ESC[5n ESC[7 ESC[999;999H ESC[6n ESC[8 ESC[?2026h` wrapped around every frame -- which is the desktop's terminal-size query, asked because a serial terminal cannot report a resize, and answered by moving the cursor to the bottom-right corner where the cells it touches repaint. `TD_SIZE_POLL_MS=0` was set twice, first on the port's own component and then at project scope via `add_compile_definitions`, and the capture still shows the query, so either the definition is not reaching `td.c`'s translation unit or something other than the poll interval is emitting it. That is unresolved and is stated as unresolved. One retraction belongs in the record: the repeated `ESC[6n` was called a stuck loop for several cycles, and it is not -- `TD_SIZE_POLL_MS` defaults to 1000, so one query a second is designed behaviour, and the fault is its visible cost on this panel rather than its existence. The core-syntax audit passed: `.ai/core.md` and `.ai/core-syntax.md` were re-read, the complete `.ai/` diff was inspected, `.ai/core.md` was not modified, and this entry was validated against the template with six sections in canonical order, sequential numbering from 61, an ISO-8601 timestamp carrying the America/Phoenix offset, prose-only Outcome and Next Steps, and Status values within the allowed set.
+
+#### Next Steps:
+
+Three things, in the order that unblocks the most. First, grep the port's generated `compile_commands.json` for `TD_SIZE_POLL_MS=0`: if it is absent the definition never reached the compiler and the fix is to find where the `tinydesk` component's flags are actually set, in `ports/esp_idf/app/app.cmake`; if it is present then the emit is in the frame path rather than the poll, and the place to look is `td_render_query_size`'s callers in `src/td.c` and whether a malformed or ignored resize reply leaves the desktop querying forever. Second, touch: the reset is now driven on both candidate expander pins, so the next failure is either the CST9217 not answering at 0x1A at all -- which `bring_up()` logs as the checkcode it read -- or the controller answering and the SGR mouse reports not reaching the desktop. Those are distinguishable from the log and should be distinguished before any more code is written; the CST9217 handshake in `touch.c` is transcribed from this project's measured TCH-007 sequence and has not been questioned. Third, the fork has to be pushed somewhere under `aquasock` before it is a contribution, and the systems table in the port README already states which subsystems are verified and which are not -- display verified, touch written but unverified, `/fs` and WiFi untested, SD hardware unproven on this board, and battery, RTC and haptics deliberately absent because TinyDesk has no consumer for them. The Linux side of this project is parked, not abandoned: `main` is at 8645a82 with the flash fix, the hatch yield and the display rework all committed and pushed, and a full restore image of the state before the port overwrote the partition table is at `~/twatch-backup/pre-tinydesk-2026-11-11-1130.bin`, sha256 cd0dd018.
+
+#### Files Modified:
+
+None.
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: PASS
+
+---
+
 ## 61 COMMIT Unreleased 2026-11-11T11:18:00-07:00
 
 #### Coming From:
