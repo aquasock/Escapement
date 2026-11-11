@@ -1,3 +1,33 @@
+## 65 COMMIT Unreleased 2026-11-11T20:26:00-07:00
+
+#### Coming From:
+
+Unreleased e1dcf8c
+
+#### Purpose:
+
+Correct a mapping figure that entry 64 stated from memory rather than from arithmetic, before it is used as the basis for the next cycle.
+
+#### Outcome:
+
+Entry 64 described how the three bars under the glass map onto the desktop's taskbar and got the first of them wrong; this entry supersedes that figure. The claim was that bar 0 clamps to taskbar column 0 and that only bar 1 spreads. Computed directly from the constants this project recorded -- `CST92XX_BTN_Y0` 440 and edges 22, 158 and 294 (TCH-004), against `to_cell()` as it now stands with origin 45 and an 8x16 cell -- bar 0 occupies x 22..157 and therefore spans columns 0 through 14, not column 0 alone; bar 1 occupies x 158..293 and spans columns 14 through 31; and bar 2 is x 294 and nothing else, a single pixel column, because `cst92xx_button_at()` admits x up to and including 294 and then assigns 294 itself to the third bar. So all three bars act on stretches of the taskbar rather than on single cells, and the last one is effectively unreachable. The underlying conclusion in entry 64 stands unchanged -- the bars sit below the 320x400 framebuffer and mapping them through its grid is the wrong model -- but the numbers are now recorded as measured rather than as guessed, because the next cycle's fix depends on them and a wrong figure in this log is exactly the kind of thing a later session would build on. Nothing was delivered to the device and no firmware changed: this is a correction to the project record.
+
+#### Next Steps:
+
+Give the three bars their own fixed cells instead of deriving them through the framebuffer grid, and settle what the third bar actually covers before writing it, since the recorded edges leave it one pixel and that is more likely a transcription artefact in TCH-004 than the real geometry -- the vendor's own map for this strip is the place to check. Separately, Bluetooth pairing is still untested: the radio starts and the apps exist, but no keyboard or mouse has been paired.
+
+#### Files Modified:
+
+None.
+
+#### Status:
+
+- Build: N/A
+- Deployment: N/A
+- User Test: N/A
+
+---
+
 ## 64 COMMIT Unreleased 2026-11-11T20:20:00-07:00
 
 #### Coming From:
