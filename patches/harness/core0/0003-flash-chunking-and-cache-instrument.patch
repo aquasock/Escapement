@@ -169,7 +169,7 @@ index 0406af3..42f2598 100644
  }
  
 diff --git a/esp_hosted_ng/esp/esp_driver/network_adapter/main/linux_flash.c b/esp_hosted_ng/esp/esp_driver/network_adapter/main/linux_flash.c
-index 288c0d5..beb3bf0 100644
+index 288c0d5..c540bbb 100644
 --- a/esp_hosted_ng/esp/esp_driver/network_adapter/main/linux_flash.c
 +++ b/esp_hosted_ng/esp/esp_driver/network_adapter/main/linux_flash.c
 @@ -47,6 +47,28 @@ extern int g_spi_flash_skip_ipc;
@@ -201,7 +201,51 @@ index 288c0d5..beb3bf0 100644
  /*
   * Flash work is recorded into the shared diagnostics, which live in PSRAM and
   * survive a reset. That is the only way to find out what the board was doing
-@@ -160,8 +182,11 @@ static void esp_flash_rx(void *p, void *data)
+@@ -97,27 +119,28 @@ static void esp_flash_rx(void *p, void *data)
+ 			asm volatile ("memw" ::: "memory");
+ 		}
+ 		/*
+-		 * CHUNKED, and this is the fix for the reboots.
++		 * CHUNKED. This bounds each uninterruptible window; it is NOT the
++		 * fix for the reboots, and an earlier version of this comment
++		 * claimed it was.
+ 		 *
+ 		 * With g_spi_flash_skip_ipc set, each esp_flash_* call runs with
+ 		 * non-IRAM interrupts disabled, the scheduler suspended and the
+ 		 * cache off for its WHOLE duration -- see
+ 		 * spi_flash_disable_interrupts_caches_and_other_cpu() in
+-		 * cache_utils.c. The interrupt watchdog resets the chip if that
+-		 * state lasts too long, and a 32 KB jffs2 write reproducibly
+-		 * rebooted this board with rst reason 5 (ESP_RST_INT_WDT).
++		 * cache_utils.c. One call over a whole 32 KB request is a long
++		 * window, so the request is split into FLASH_CHUNK-sized pieces
++		 * and the flag is dropped between them, letting esp_flash_*
++		 * re-enable interrupts on each return. Erase must be
++		 * sector-aligned, and 4096 is both the flash sector and jffs2's
++		 * erase size here, so one size works for both.
+ 		 *
+-		 * One call over the whole request is therefore not safe, and the
+-		 * fact that a 1 KB write survives while 32 KB does not is the
+-		 * measurement that says so.
+-		 *
+-		 * So the request is split into FLASH_CHUNK-sized pieces and the
+-		 * flag is dropped between them, which lets esp_flash_* re-enable
+-		 * interrupts on each return. Each uninterruptible window is then
+-		 * bounded by one chunk regardless of how large the write is.
+-		 * Erase must be sector-aligned, and 4096 is both the flash sector
+-		 * and jffs2's erase size here, so the same chunk size works for
+-		 * both.
++		 * The reboots were a different fault and chunking did not change
++		 * them: a 1 KB write -- a single chunk -- rebooted the board just
++		 * as reliably as 32 KB did, while the longest window measured
++		 * 0.51 ms against an 800 ms watchdog. The real cause was this
++		 * handler passing a PSRAM source buffer to esp_flash_write() with
++		 * the cache off, which the staging buffer above now avoids.
++		 * Bounding the window is still worth doing on its own merits.
+ 		 */
+ 		switch (cmd->code) {
+ 		case ESP_IPC_FLASH_CMD_ERASE: {
+@@ -160,8 +183,11 @@ static void esp_flash_rx(void *p, void *data)
  
  				int64_t t0 = esp_timer_get_time();
  

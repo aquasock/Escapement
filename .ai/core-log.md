@@ -1,3 +1,34 @@
+## 56 COMMIT Unreleased 2026-11-11T10:00:00-07:00
+
+#### Coming From:
+
+Unreleased 6d14186
+
+#### Purpose:
+
+Remove the two stale rationales that entry 55 flagged as still present in the tree, and confirm the deliberate no-autostart decision is recorded rather than merely implemented.
+
+#### Outcome:
+
+Both stale rationales are corrected, a third was found alongside them, and the autostart decision turned out to need no fixing at all. `linux_flash.c` described chunking as the fix for the reboots, which entry 54 disproved: chunking bounds each uninterruptible window and is still worth keeping for that, but it did not stop the reboots, because a 1 KB write -- one chunk -- rebooted the board as reliably as 32 KB while the longest window measured 0.51 ms against an 800 ms watchdog. The comment now says what chunking does and states explicitly that it is not the reboot fix, records why the diagnosis was wrong, and names the staging buffer as the actual fix. `docs/tamagotchi.md` carried the same class of error in a different form: it said the reboot mechanism was not proven and was consistent with the phantom session, which was true when written and is now superseded. It now carries the established mechanism -- the cache is shared on this SoC so core 0 disables it for the whole chip, the kernel is XIP and fetches through it, and the fatal access was core 0 reading Linux's PSRAM source buffer inside the window -- with the measured evidence, plus two separate things that are not fixed. The text that chunking the writes was what stopped the reboot is replaced by the statement that chunking did not change it and why. The `ESP_RST_INT_WDT` reading is kept because it is a real reading of a real reset, and the heading that presented it as the explanation is removed; the paragraph now says plainly that whether the watchdog was the cause or a consequence is not established, and that an 800 ms watchdog cannot have expired because of a 0.51 ms window, so the two facts still need reconciling by something other than window duration. A third stale statement surfaced during this cycle: the doc's claim that the phantom session was what rebooted the board, which entry 54 replaced. It is now stated as having been the belief at the time, with the reboots stopping when it was fixed offered as the reason for that belief rather than as proof, and marked as at most a contributor; the paragraph that introduced the flash mechanism no longer calls it a second cause either, because what it actually is is a real bug that happened to be fixed alongside the real one. **The autostart question needed no fix.** `docs/tamagotchi.md` already states the decision and its reason -- autostarting would hand the emulator `/dev/fb0` and the emulated machine from power-on whether or not anyone wanted the pet running -- and `scripts/install-tamacore.sh` enforces it mechanically rather than by prose, checking for `/etc/init.d/S51tamacore` and reporting `autostart: none - runs only when typed`. What was genuinely missing was a log entry, which this one supplies; the decision itself is sound, recorded in the place a reader would look, and verified by tooling. Since `linux_flash.c` changed, the firmware was rebuilt and reflashed rather than left describing source it was not built from: the layout did not move, `check-vectors.sh` still reports the kernel's vectors spanning 0x40382000..0x40382916 inside the firmware's buffer, `space_for_vectors` stays at 0x40382000 and `flash_stage` at 0x3fca3eb0, and the board boots to a login prompt on kernel #16. The reboot fix was then re-verified on the rebuilt binary rather than assumed to carry over: a 1 KiB write to `/home` at 12 s into emulator play landed with the emulator confirmed running and uptime continuous from 143.66 to 160.63. `patches/harness/core0/0003-*.patch` was regenerated from the tree's own diff and both halves verified again -- the firmware hunk applies to a clean c5423bd and produces files byte-identical to the live tree, and the esp-idf hunk is byte-identical to the live submodule's diff. `scripts/sync-firmware.sh --check` reports the firmware tree matches this repo. The core-syntax audit passed: `.ai/core.md` and `.ai/core-syntax.md` were re-read, the complete `.ai/` diff was inspected, `.ai/core.md` was not modified, and this entry was validated against the template with six sections in canonical order, sequential numbering from 55, an ISO-8601 timestamp carrying the America/Phoenix offset, prose-only Outcome and Next Steps, and Status values within the allowed set.
+
+#### Next Steps:
+
+The stale-rationale sweep is complete for the two files named in entry 55 and for the third statement it turned up, but it was a targeted fix rather than a systematic one, and the same mistake has now been found four times in this session -- in `shmproto.h`, in `esc_instr.c`, in `linux_flash.c` and twice in `docs/tamagotchi.md` -- because each of those files was written from the best model available at the time and the model changed twice underneath them. Anything written before entry 54 that explains WHY a change was made should therefore be read as suspect even where its WHAT is still correct, and `docs/cores.md`, which records the coherency result and the emulator's move to core 0, is the obvious next place to check. The `ESP_RST_INT_WDT` question is now stated as open in two places and should stay that way until measured: the instrument committed at 2436f59 records the longest cache-off window and its caller and survives a reset, so a future freeze can be read rather than argued about, and if a reset reports reason 5 again the PREV record will say whether a flash window was involved at all. Nothing else is known to be outstanding from the cleanup list: the patch is verified reproducible, JFS-001 and its four dependants are revised, all 86 records carry an index line, and the log gap is closed by entry 55.
+
+#### Files Modified:
+
+- patches/harness/core0/0003-flash-chunking-and-cache-instrument.patch
+- docs/tamagotchi.md
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: NOT RUN
+
+---
+
 ## 55 COMMIT Unreleased 2026-11-11T09:50:00-07:00
 
 #### Coming From:

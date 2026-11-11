@@ -669,16 +669,44 @@ one: core 1 cleared its whole 32-byte control line to remove stale flags, and
 `session` lives on that line, so it went 0 → 1 every start while core 0
 remembered serving session 1 and waited forever. And worse, the firmware
 started a *phantom session* — `served` began at 0 while `session` was already 1
-from a previous boot, so core 0 ran a guest nobody had asked for. That is what
-rebooted the board. `served` now starts at whatever session is published.
+from a previous boot, so core 0 ran a guest nobody had asked for. That was
+believed at the time to be what rebooted the board, because the reboots stopped
+when it was fixed; it is now known to have been at most a contributor, since
+the larger fault was found separately and is described below. `served` now
+starts at whatever session is published.
 
 The reset reason took three tries to read honestly: `ctl_init_own()` cleared
 line 3, which holds `reset_reason`, so it read 0 by the time it was inspected.
-The one reading that survived said `ESP_RST_INT_WDT` (5). The precise mechanism
-is not proven — it stopped when the phantom session went away, which is
-consistent with a core-0 machine running unbidden, but it has not been
-reproduced deliberately. **It is not memory**: NOMMU Linux has no OOM killer,
-and 256 s idle showed 1328 kB free.
+The one reading that survived said `ESP_RST_INT_WDT` (5). **It is not memory**:
+NOMMU Linux has no OOM killer, and 256 s idle showed 1328 kB free.
+
+**The reboot mechanism, since established (2026-11-11).** The phantom session
+above is not the explanation, though it is a real bug that was worth fixing. A flash write from
+core 0 turns the external-memory cache off for the *whole chip*, because the
+cache is shared on this SoC — `SOC_IDCACHE_PER_CORE` is defined for esp32 and
+not for esp32s3, so `spi_flash_disable_cache()` on core 0 affects core 1. This
+kernel is XIP with `_stext` at 0x42140000, so kernel instructions are fetched
+through that cache; core 1 cannot execute an instruction while the window is
+open. The fatal access, though, was on core 0: `linux_flash.c` passed Linux's
+PSRAM source buffer to `esp_flash_write()` with the cache off, which cannot
+work. Each chunk is now copied into an internal-DRAM staging buffer with the
+cache still on, and the copy is what gets written.
+
+That is why chunking the writes did not help: a 1 KB write — one chunk —
+rebooted the board as reliably as 32 KB, and the longest window measured
+0.51 ms against an 800 ms watchdog, so this was never a watchdog timeout. The
+fix is verified: a 1 KB write during emulator play, which previously rebooted
+every time, survived four consecutive runs; 128 KB plus 40 file create/delete
+cycles survived 891 cache-disable windows; and nine rounds of 64 KB
+write-and-delete over 100 s survived 1860, with uptime unbroken throughout.
+
+The `ESP_RST_INT_WDT` reading above is a real reading of a real reset and is
+kept. What is not established is whether the watchdog was the cause or a
+consequence: a core-0 fault inside the window would leave interrupts unserviced,
+which would present as an interrupt-watchdog reset afterwards. Since the window
+itself is only 0.51 ms, an 800 ms watchdog cannot have expired because of the
+window's length, so the two facts have to be reconciled by something other than
+window duration. Treat the reset reason as describing the symptom.
 
 **Running it.** `tamacore` is an ordinary program, not a boot service. Install
 once with `./scripts/install-tamacore.sh`, then type `tamacore` on the watch.
