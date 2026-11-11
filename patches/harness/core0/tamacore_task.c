@@ -29,6 +29,8 @@
 #include <stdint.h>
 #include <string.h>
 
+#include <stddef.h>
+
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "esp_cache.h"
@@ -143,6 +145,27 @@ static inline void diag_phase(uint32_t phase)
 static inline void diag_publish(void)
 {
 	esp_cache_msync((void *)diag, SHM_DIAG_OWN_BYTES,
+			ESP_CACHE_MSYNC_FLAG_INVALIDATE);
+}
+
+/*
+ * Clear core 1's `quit` word.
+ *
+ * Core 1 sets quit on exit and does not clear it, so without this every later
+ * session sees it set and falls straight through to the exit path -- an endless
+ * 20 Hz loop through ctl_init_own, rewriting the control block and flushing
+ * cache for nobody.
+ *
+ * Written with the peer-line invalidation afterwards so the cleared value is
+ * what this core reads next time rather than a cached line.
+ */
+static inline void ctl_peer_clear_quit(void)
+{
+	volatile uint32_t *q = (volatile uint32_t *)
+		((uint8_t *)ctl + offsetof(struct shm_ctl, quit));
+
+	*q = 0;
+	esp_cache_msync((void *)((uint8_t *)ctl + 32), 32,
 			ESP_CACHE_MSYNC_FLAG_INVALIDATE);
 }
 
@@ -392,8 +415,26 @@ static void tamacore_session(uint32_t served, uint32_t *served_out)
 		if (ctl->rom_ready && ctl->eeprom_ready &&
 		    ctl->session != served)
 			break;
-		if (ctl->quit)
+		/*
+		 * `quit` is core 1's field and is left set when it exits, so this
+		 * has to consume it rather than merely observe it. Observing it
+		 * forever made every later session fall straight through to `out`
+		 * -- an endless loop through ctl_init_own() at 20 Hz, rewriting
+		 * the control block and flushing cache for nobody. Clear the
+		 * session too: it is this side's record of "already served", and
+		 * leaving it set means a later run with the same number is
+		 * ignored.
+		 */
+		if (ctl->quit) {
+			/*
+			 * Clear `quit` -- core 1's write, done here because core 0 is
+			 * the side that has to see it cleared and core 1 has
+			 * already exited. It is one word in core 1's line, and
+			 * core 1 is gone, so this does not race.
+			 */
+			ctl_peer_clear_quit();
 			goto out;
+		}
 		vTaskDelay(pdMS_TO_TICKS(20));
 	}
 
