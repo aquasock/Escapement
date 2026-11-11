@@ -347,7 +347,12 @@ python3 "$FORK/check-kernel-config.py" \
     || die "config drifted from the board seed"
 grep -q '^CONFIG_XTENSA_NOMMU_FORK=y' .config || die "fork backend not enabled"
 grep -q '^CONFIG_LOCALVERSION="-forkbank"' .config || die "LOCALVERSION not set"
-grep -q '^CONFIG_VECTORS_ADDR=0x40380000' .config || die "CONFIG_VECTORS_ADDR moved"
+# Not a string comparison against a literal: the address is the firmware's to
+# choose, and a hardcoded expectation passes whatever the firmware does. This
+# compares the config against the actual space_for_vectors in the firmware ELF
+# and against the built System.map, so it fails when the firmware has moved.
+KCONF=$K/.config KMAP=$K/System.map "$here/scripts/check-vectors.sh" \
+    || die "vectors address does not match the firmware; see the message above"
 grep -q '^CONFIG_RTC_DRV_PCF85063=y' .config || die "RTC driver missing"
 
 # The panel API's argument validation is pure arithmetic and lives in

@@ -15,14 +15,17 @@ needs rebuilding and only 0x10000 needs reflashing.
 
 Second hunk: quad mode changes how much internal RAM the firmware uses, and
 that moves `space_for_vectors` -- which the kernel is linked against as
-CONFIG_VECTORS_ADDR=0x40380000. The symbol is a 4 KiB buffer declared
-4 KiB-aligned, so with the allocation landing one page lower it rounded down
-to 0x4037f000 and the kernel would jump to the wrong page. Asking for 8 KiB
-alignment rounds it back up to 0x40380000, which avoids rebuilding the
-kernel. Check it holds after any change to internal RAM use:
+CONFIG_VECTORS_ADDR. The symbol is a 4 KiB buffer whose alignment decides
+the page it lands on, so any change to internal RAM use can move it, and the
+kernel config has to follow.
 
-    xtensa-esp32s3-elf-nm build/network_adapter.elf | grep space_for_vectors
-    # must print 40380000
+The address is NOT a constant to check against a literal. It was 0x40380000
+for most of this project's life; the core-0 flash instrument pushed firmware
+IRAM past that boundary and it is now 0x40382000. Alignment cannot move it
+back down, because the IRAM content preceding it stays where it is. Run the
+check instead of remembering a number:
+
+    ./scripts/check-vectors.sh -v
 
 --- a/esp_hosted_ng/esp/esp_driver/network_adapter/sdkconfig.defaults.esp32s3.16m8r
 +++ b/esp_hosted_ng/esp/esp_driver/network_adapter/sdkconfig.defaults.esp32s3.16m8r

@@ -141,19 +141,19 @@ say "build"
 idf.py build
 
 # ---- the check that actually matters --------------------------------------
+# The address is the firmware's linker decision, not a constant: space_for_vectors
+# is 8 KiB-aligned, so it moves a page whenever IRAM grows past a boundary. It
+# cannot be pushed back down by changing the alignment -- whatever IRAM content
+# already precedes it stays there -- so the kernel is what has to follow. This
+# delegates to scripts/check-vectors.sh so build, kernel and flash all apply one
+# rule instead of three.
 say "vectors address"
-NM="$IDF_TOOLS_PATH/tools/xtensa-esp32s3-elf/"*/xtensa-esp32s3-elf/bin/xtensa-esp32s3-elf-nm
-got=$($NM build/network_adapter.elf | awk '/space_for_vectors/ {print $1}' | tr 'a-f' 'A-F')
-want=$(grep '^CONFIG_VECTORS_ADDR=' \
-       "$PROJ/new-files/board/espressif/esp32s3/devkit_c1_16m_linux.config" \
-       | cut -d= -f2 | sed 's/^0x//' | tr 'a-f' 'A-F')
-printf 'space_for_vectors = 0x%s, kernel expects 0x%s\n' "$got" "$want"
-if [ "$got" != "$want" ]; then
-    die "vectors address moved. The kernel is linked against 0x$want.
-Any change to internal RAM use moves this symbol. Either raise the buffer's
-alignment in linux_boot.c until it lands back on 0x$want, or rebuild the
-kernel with a matching CONFIG_VECTORS_ADDR. Do not flash this firmware."
-fi
+FW_ELF=$NA/build/network_adapter.elf \
+KCONF=$here/patches/kernel/config/devkit_c1_16m_linux.config \
+KMAP= \
+    "$here/scripts/check-vectors.sh" -v \
+    || die "vectors address does not match the kernel config.
+Rebuild the kernel with the address named above; do not flash this firmware."
 
 say "ok"
 ls -l build/network_adapter.bin

@@ -65,9 +65,22 @@ flash() {
         write_flash --flash_mode dio --flash_freq 80m --flash_size 16MB "$@"
 }
 
+# Refuse to write a firmware that does not pair with the kernel this tree
+# builds. --app writes core 0 alone, which is exactly how a mismatch reaches a
+# board: the firmware's linker can move space_for_vectors without the kernel
+# on flash moving with it, and the symptom is a board that boots and then dies.
+check_pair() {
+    [ -f "$APP" ] || return 0
+    "$here/scripts/check-vectors.sh" || die "refusing to flash: the firmware here
+  does not match the kernel here. Writing it would strand the kernel already
+  on the watch. Fix the address (the message above names the command), rebuild,
+  then flash again."
+}
+
 case "${1:---image}" in
 --app)
     [ -f "$APP" ] || die "$APP missing. Run ./scripts/build.sh"
+    check_pair
     say "app only (0x10000) -> $PORT"
     flash 0x10000 "$APP"
     ;;
