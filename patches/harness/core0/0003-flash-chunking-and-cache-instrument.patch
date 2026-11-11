@@ -1,0 +1,253 @@
+From: Escapement
+Subject: [PATCH] flash: chunk flash operations, and instrument every cache-disable
+
+Two changes to the firmware tree, both about the same failure.
+
+CHUNKING. linux_flash.c set g_spi_flash_skip_ipc around each esp_flash_* call.
+That flag is correct -- the IPC that would park the other core can never
+complete, because core 1 is Linux and not a FreeRTOS task (JFS-001) -- but the
+call that follows still runs
+spi_flash_disable_interrupts_caches_and_other_cpu(), which disables non-IRAM
+interrupts, suspends the scheduler and turns the cache off for the WHOLE
+request. One 32 KB write is one uninterruptible window, and the interrupt
+watchdog resets the chip when that runs long. Reproduced with nothing else
+running: 1 KB survives, 32 KB reboots with rst reason 5 (ESP_RST_INT_WDT).
+After chunking to 4096 bytes the longest single flash call measures 55.6 ms and
+32/64/128 KB writes all complete.
+
+INSTRUMENTATION. esp-idf's spi_flash/cache_utils.c gains a counter in the shared
+PSRAM diagnostics, armed at the Linux handoff, recording any call to
+spi_flash_disable_interrupts_caches_and_other_cpu() after Linux is up -- plus the
+caller's return address. This is the only place that catches EVERY
+cache-disabling operation; instrumenting this project's own flash handler
+instead left a board that froze with that handler idle and unexplained.
+
+  diag 0x3df70110  call count since Linux came up
+  diag 0x3df70114  caller return address of the most recent call
+  diag 0x3df70118  0x45534331 ("ESC1") once armed
+
+The IDF half is LOCAL ONLY and lives in a nested submodule that is never pushed;
+this patch is how it survives. Apply from build/esp-hosted/esp_hosted_ng and
+inside esp/esp_driver/esp-idf respectively.
+
+NOT RESOLVED at the time of writing: the board still freezes/reboots during long
+runs with the emulator up. Read diag 0x3df70110 after a freeze -- a non-zero
+count with Linux up is the smoking gun; zero means the death is not a flash
+cache operation at all.
+
+--- linux_flash.c / linux_boot.c (firmware tree) ---
+diff --git a/esp_hosted_ng/esp/esp_driver/network_adapter/main/linux_boot.c b/esp_hosted_ng/esp/esp_driver/network_adapter/main/linux_boot.c
+index 30efbe3..0406af3 100644
+--- a/esp_hosted_ng/esp/esp_driver/network_adapter/main/linux_boot.c
++++ b/esp_hosted_ng/esp/esp_driver/network_adapter/main/linux_boot.c
+@@ -104,6 +104,21 @@ static void map_flash_and_go(void)
+ 
+ 	init_linux_mmap();
+ 
++	/*
++	 * Arm the flash-path instrument (see the LOCAL INSTRUMENTATION note in
++	 * esp-idf's spi_flash/cache_utils.c). From here on, any flash operation
++	 * on core 0 turns the external-memory cache off for the whole chip while
++	 * Linux is executing from PSRAM with no cache of its own -- which kills
++	 * core 1. The counter records whether that ever happens.
++	 */
++	{
++		volatile uint32_t *n = (volatile uint32_t *)0x3df70110u;
++		volatile uint32_t *live = (volatile uint32_t *)0x3df70118u;
++
++		*n = 0;
++		*live = 0x45534331u;    /* "ESC1" */
++	}
++
+ 	part = find_partition("linux");
+ 	if (part) {
+ 		linux = flash_base + part->address;
+diff --git a/esp_hosted_ng/esp/esp_driver/network_adapter/main/linux_flash.c b/esp_hosted_ng/esp/esp_driver/network_adapter/main/linux_flash.c
+index f9d0ad2..288c0d5 100644
+--- a/esp_hosted_ng/esp/esp_driver/network_adapter/main/linux_flash.c
++++ b/esp_hosted_ng/esp/esp_driver/network_adapter/main/linux_flash.c
+@@ -2,6 +2,7 @@
+ #include <stdlib.h>
+ #include <stdio.h>
+ #include <string.h>
++#include "esp_timer.h"
+ #include "esp.h"
+ #include "esp_flash.h"
+ #include "esp32s3/rom/cache.h"
+@@ -39,6 +40,37 @@ struct esp32_ipc_flash_cmd {
+ 
+ extern int g_spi_flash_skip_ipc;
+ 
++/*
++ * Bytes per uninterruptible flash operation. 4096 is the flash sector size and
++ * jffs2's erase size on this board, so it is the smallest unit an erase can be
++ * asked for and a natural unit for writes.
++ */
++#define FLASH_CHUNK	4096u
++
++/*
++ * Flash work is recorded into the shared diagnostics, which live in PSRAM and
++ * survive a reset. That is the only way to find out what the board was doing
++ * when the interrupt watchdog fired: a reboot leaves no console log behind, and
++ * the one thing worth knowing -- how long a single uninterruptible flash call
++ * lasted -- is exactly what disappears with it.
++ *
++ * Layout mirrors struct shm_diag in shmproto.h: line 1 of the diagnostics is
++ * core 0's, and flash_max_us / flash_last are the last two words of it.
++ */
++#define SHM_DIAG_BASE		0x3df70000u
++#define SHM_DIAG_FLASH_MAX	(SHM_DIAG_BASE + 56)
++#define SHM_DIAG_FLASH_LAST	(SHM_DIAG_BASE + 60)
++
++static void flash_record(uint32_t code, uint32_t size, int64_t us)
++{
++	volatile uint32_t *max = (volatile uint32_t *)SHM_DIAG_FLASH_MAX;
++	volatile uint32_t *last = (volatile uint32_t *)SHM_DIAG_FLASH_LAST;
++
++	if ((uint32_t)us > *max)
++		*max = (uint32_t)us;
++	*last = (code << 24) | ((size >> 12) & 0xffff);
++}
++
+ /* The flash is identity-mapped for Linux at this base (see linux_boot.c). */
+ #define LINUX_FLASH_VADDR_BASE	0x42000000
+ 
+@@ -64,25 +96,87 @@ static void esp_flash_rx(void *p, void *data)
+ 		while (cmd->remote_state != ESP32_IPC_FLASH_STATE_READY) {
+ 			asm volatile ("memw" ::: "memory");
+ 		}
+-		g_spi_flash_skip_ipc = 1;
++		/*
++		 * CHUNKED, and this is the fix for the reboots.
++		 *
++		 * With g_spi_flash_skip_ipc set, each esp_flash_* call runs with
++		 * non-IRAM interrupts disabled, the scheduler suspended and the
++		 * cache off for its WHOLE duration -- see
++		 * spi_flash_disable_interrupts_caches_and_other_cpu() in
++		 * cache_utils.c. The interrupt watchdog resets the chip if that
++		 * state lasts too long, and a 32 KB jffs2 write reproducibly
++		 * rebooted this board with rst reason 5 (ESP_RST_INT_WDT).
++		 *
++		 * One call over the whole request is therefore not safe, and the
++		 * fact that a 1 KB write survives while 32 KB does not is the
++		 * measurement that says so.
++		 *
++		 * So the request is split into FLASH_CHUNK-sized pieces and the
++		 * flag is dropped between them, which lets esp_flash_* re-enable
++		 * interrupts on each return. Each uninterruptible window is then
++		 * bounded by one chunk regardless of how large the write is.
++		 * Erase must be sector-aligned, and 4096 is both the flash sector
++		 * and jffs2's erase size here, so the same chunk size works for
++		 * both.
++		 */
+ 		switch (cmd->code) {
+-		case ESP_IPC_FLASH_CMD_ERASE:
+-			ret = esp_flash_erase_region(NULL, cmd->addr, cmd->size);
++		case ESP_IPC_FLASH_CMD_ERASE: {
++			uint32_t done = 0;
++
++			ret = ESP_OK;
++			while (done < cmd->size) {
++				uint32_t n = cmd->size - done;
++
++				if (n > FLASH_CHUNK)
++					n = FLASH_CHUNK;
++
++				int64_t t0 = esp_timer_get_time();
++
++				g_spi_flash_skip_ipc = 1;
++				ret = esp_flash_erase_region(NULL, cmd->addr + done, n);
++				g_spi_flash_skip_ipc = 0;
++				flash_record(cmd->code, n, esp_timer_get_time() - t0);
++
++				if (ret != ESP_OK)
++					break;
++				done += n;
++			}
+ 			break;
++		}
+ 
+ 		case ESP_IPC_FLASH_CMD_READ:
+ 			ret = linux_flash_read(cmd->data, cmd->addr, cmd->size);
+ 			break;
+ 
+-		case ESP_IPC_FLASH_CMD_WRITE:
+-			ret = esp_flash_write(NULL, cmd->data, cmd->addr, cmd->size);
++		case ESP_IPC_FLASH_CMD_WRITE: {
++			uint32_t done = 0;
++
++			ret = ESP_OK;
++			while (done < cmd->size) {
++				uint32_t n = cmd->size - done;
++
++				if (n > FLASH_CHUNK)
++					n = FLASH_CHUNK;
++
++				int64_t t0 = esp_timer_get_time();
++
++				g_spi_flash_skip_ipc = 1;
++				ret = esp_flash_write(NULL, cmd->data + done,
++						      cmd->addr + done, n);
++				g_spi_flash_skip_ipc = 0;
++				flash_record(cmd->code, n, esp_timer_get_time() - t0);
++
++				if (ret != ESP_OK)
++					break;
++				done += n;
++			}
+ 			break;
++		}
+ 
+ 		default:
+ 			ret = ESP_FAIL;
+ 			break;
+ 		}
+-		g_spi_flash_skip_ipc = 0;
+ 		if (cmd->code == ESP_IPC_FLASH_CMD_ERASE ||
+ 		    cmd->code == ESP_IPC_FLASH_CMD_WRITE)
+ 			linux_flash_invalidate(cmd->addr, cmd->size);
+
+--- esp-idf spi_flash/cache_utils.c (nested submodule) ---
+diff --git a/components/spi_flash/cache_utils.c b/components/spi_flash/cache_utils.c
+index d235a41e..e467a077 100644
+--- a/components/spi_flash/cache_utils.c
++++ b/components/spi_flash/cache_utils.c
+@@ -151,8 +151,38 @@ void IRAM_ATTR spi_flash_op_block_func(void *arg)
+ 
+ int g_spi_flash_skip_ipc;
+ 
++/*
++ * LOCAL INSTRUMENTATION (Escapement), never upstream.
++ *
++ * Records every caller of this function into the shared diagnostics block in
++ * PSRAM, which survives a reset. This is the only place that catches EVERY
++ * cache-disabling flash operation -- the earlier instrument only covered this
++ * project's own linux_flash.c handler, and did not explain a board that froze
++ * with that handler idle.
++ *
++ * A flash operation here turns the external-memory cache off for the whole
++ * chip. Linux on core 1 executes from PSRAM with no cache of its own, so any
++ * pass through this function while core 1 is running kills it. The count says
++ * whether it happens at all after Linux starts; ret0 says who called it.
++ *
++ * Writes are plain stores to PSRAM while the cache is still on. They may sit in
++ * core 0's D-cache if the board dies immediately, but they are flushed by the
++ * next msync -- enough to find out whether this path is taken during play.
++ */
++#define ESC_DIAG_BASE       0x3df70000u
++#define ESC_DIAG_FLASH_N    0x3df70110u   /* call count */
++#define ESC_DIAG_FLASH_RET  0x3df70114u   /* caller's return address */
++#define ESC_DIAG_FLASH_LIVE 0x3df70118u   /* set once Linux is up */
++
+ void IRAM_ATTR spi_flash_disable_interrupts_caches_and_other_cpu(void)
+ {
++    if (*(volatile uint32_t *)ESC_DIAG_FLASH_LIVE) {
++        *(volatile uint32_t *)ESC_DIAG_FLASH_RET =
++            (uint32_t)(uintptr_t)__builtin_return_address(0);
++        *(volatile uint32_t *)ESC_DIAG_FLASH_N =
++            *(volatile uint32_t *)ESC_DIAG_FLASH_N + 1;
++    }
++
+     assert(esp_task_stack_is_sane_cache_disabled());
+ 
+     spi_flash_op_lock();
