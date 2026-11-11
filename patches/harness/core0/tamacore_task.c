@@ -115,6 +115,30 @@ static inline void ctl_read_peer_line(void)
  * earlier one-way probe used this flag and was visible, which is the evidence.
  * Invalidating our own lines costs a refill on the next read and nothing else.
  */
+static struct shm_diag *const diag = (struct shm_diag *)(SHM_BASE + SHM_DIAG_OFF);
+
+/*
+ * Record which phase core 0 is in, and make it durable before entering it.
+ *
+ * The point is what happens if the board resets mid-operation: `phase` is in
+ * PSRAM, PSRAM survives a reset, so after a reboot this says whether the death
+ * was in the draw, in the cache writeback or in the invalidate. Without it a
+ * reset is indistinguishable across all three.
+ *
+ * 32 bytes, so this is a cache-line flush and costs nothing measurable next to
+ * the operations it brackets.
+ */
+static inline void diag_phase(uint32_t phase)
+{
+	diag->phase = phase;
+	esp_cache_msync((void *)diag, 32, ESP_CACHE_MSYNC_FLAG_INVALIDATE);
+}
+
+static inline void diag_publish(void)
+{
+	esp_cache_msync((void *)diag, sizeof(*diag), ESP_CACHE_MSYNC_FLAG_INVALIDATE);
+}
+
 static inline void ctl_publish(void)
 {
 	esp_cache_msync((void *)ctl, 32, ESP_CACHE_MSYNC_FLAG_INVALIDATE);
@@ -193,24 +217,83 @@ static void ctl_init_own(void)
 	ctl_publish();
 }
 
-static void draw_frame(uint16_t *px, const uint8_t *dpram)
+/*
+ * Which framebuffer rows can a change to display-RAM byte N affect?
+ *
+ * Precomputed once from the segment map: a byte's rows are the rows of every run
+ * of every segment that reads it, plus the dot height. This is what lets a frame
+ * repaint only what moved instead of all 301 rows.
+ */
+static uint16_t byte_row_lo[0x200];
+static uint16_t byte_row_hi[0x200];
+
+/* Display RAM as it was when the frame buffer was last known correct. */
+static uint8_t dpram_shadow[0x200];
+static int dpram_shadow_valid;
+
+static void build_byte_rows(void)
 {
-	lcd_fb fb = { px, SHM_FRAME_W, SHM_FRAME_H };
 	int i;
 
-	/*
-	 * Bezel first, in a colour distinct from the LCD background. Filling
-	 * this with SHM_LCD_OFF made the surround and the LCD the same shade,
-	 * so a blank screen and a screen full of pixels looked alike -- and
-	 * because core 1 blits a full-width strip, the surround appeared as a
-	 * flat band across the whole framebuffer. Black surrounds match the
-	 * console background, so only the LCD itself is visible.
-	 */
-	for (i = 0; i < SHM_FRAME_W * SHM_FRAME_H; i++)
-		px[i] = SHM_BEZEL;
+	for (i = 0; i < 0x200; i++) {
+		byte_row_lo[i] = SHM_FRAME_H;      /* empty */
+		byte_row_hi[i] = 0;
+	}
 
-	lcd_draw_dots(&fb, dpram, SHM_FRAME_PAD, SHM_FRAME_PAD,
-		      SHM_DOT, SHM_GAP);
+	for (i = 0; i < SEG_COUNT; i++) {
+		const seg_entry *e = &seg_map[i];
+		const seg_run *r = &seg_runs[e->run_start];
+		int k;
+
+		for (k = 0; k < e->run_count; k++, r++) {
+			int y0 = SHM_FRAME_PAD + r->y * (SHM_DOT + SHM_GAP);
+			int y1 = y0 + SHM_DOT;
+
+			if (y0 < byte_row_lo[e->byte])
+				byte_row_lo[e->byte] = (uint16_t)y0;
+			if (y1 > byte_row_hi[e->byte])
+				byte_row_hi[e->byte] = (uint16_t)y1;
+		}
+	}
+}
+
+/*
+ * Draw rows [yl, yh). `full` paints the bezel too, which is only needed when
+ * the frame buffer is not yet known-good.
+ */
+static void draw_rows(uint16_t *px, const uint8_t *dpram, int yl, int yh, int full)
+{
+	lcd_fb fb = { px, SHM_FRAME_W, SHM_FRAME_H };
+	int y, x;
+
+	if (full) {
+		int i;
+
+		/*
+		 * Bezel first, in a colour distinct from the LCD background.
+		 * Filling this with SHM_LCD_OFF made the surround and the LCD
+		 * the same shade, so a blank screen and a screen full of
+		 * pixels looked alike -- and because core 1 blits whole rows at
+		 * full width, the surround appeared as a flat band across the
+		 * framebuffer. Black surrounds match the console background, so
+		 * only the LCD itself is visible.
+		 */
+		for (i = 0; i < SHM_FRAME_W * SHM_FRAME_H; i++)
+			px[i] = SHM_BEZEL;
+	} else {
+		/* Horizontal bezel margins of the dirty rows only. */
+		for (y = yl; y < yh; y++) {
+			uint16_t *row = px + (size_t)y * SHM_FRAME_W;
+
+			for (x = 0; x < SHM_FRAME_PAD; x++) {
+				row[x] = SHM_BEZEL;
+				row[SHM_FRAME_W - 1 - x] = SHM_BEZEL;
+			}
+		}
+	}
+
+	lcd_draw_dots_rows(&fb, dpram, SHM_FRAME_PAD, SHM_FRAME_PAD,
+			   SHM_DOT, SHM_GAP, yl, yh);
 }
 
 static void apply_buttons(splb32 *cpu, uint32_t mask, uint32_t *applied)
@@ -280,6 +363,8 @@ static void tamacore_session(uint32_t served, uint32_t *served_out)
 	uint64_t last_hz_cycles = 0;
 	uint32_t idx = 0;
 	uint32_t buttons = 0, applied = 0;
+	int64_t last_pub_us = 0;
+	int painted;
 
 	/* Nothing below may touch the window until the boot map has given way to
 	 * Linux's. See the gate comment above. */
@@ -338,6 +423,34 @@ static void tamacore_session(uint32_t served, uint32_t *served_out)
 	splb32_eeprom_load(cpu, eeprom_image);
 	splb32_attach_ir(cpu, 0x04, 0x04);
 	memcpy(eeprom_shadow, eeprom_image, sizeof(eeprom_shadow));
+
+	/*
+	 * Zero the per-session diagnostics. The maxima are `if (x > max) max = x`,
+	 * so a power-on PSRAM fill is not merely wrong for a moment -- it is a
+	 * ceiling nothing can beat and the field reports garbage forever. Both
+	 * earlier attempts at this instrument read 0 or 0x55555555 for that
+	 * reason. `phase` is deliberately NOT cleared: it is the record of where
+	 * the previous boot died, and it outlives the reset.
+	 */
+	diag->frames = 0;
+	diag->draw_us = 0;
+	diag->wb_us = 0;
+	diag->inv_us = 0;
+	diag->gap_us = 0;
+	diag->draw_max = 0;
+	diag->wb_max = 0;
+	diag->inv_max = 0;
+	diag->gap_max = 0;
+	diag->total_max = 0;
+	diag->chunk_max = 0;
+	diag_publish();
+
+	/* The frame buffer is not known-good until the first full paint, and the
+	 * byte->row table is built once per session rather than per frame. */
+	dpram_shadow_valid = 0;
+	build_byte_rows();
+	ctl->dirty_lo = 0;
+	ctl->dirty_hi = SHM_FRAME_H;
 
 	ctl->stage = SHM_STAGE_RUNNING;
 	ctl_publish();
@@ -421,10 +534,172 @@ static void tamacore_session(uint32_t served, uint32_t *served_out)
 			int64_t late_ms;
 			int n;
 
-			draw_frame(frame[idx], dp);
-			esp_cache_msync(frame[idx], SHM_FRAME_STRIDE,
-					ESP_CACHE_MSYNC_FLAG_INVALIDATE);
+			/*
+			 * Each phase is timed and its start is made durable first,
+			 * so a reset leaves a record of which one it was in.
+			 */
+			{
+				int64_t t0, t1, t2;
+				uint32_t d;
+				int64_t now = esp_timer_get_time();
 
+				painted = 0;
+				if (diag->frames) {
+					d = (uint32_t)(now - last_pub_us);
+					diag->gap_us = d;
+					if (d > diag->gap_max)
+						diag->gap_max = d;
+				}
+				last_pub_us = now;
+
+				/*
+				 * Work out what actually changed before drawing
+				 * anything.
+				 *
+				 * If nothing did, the frame is skipped entirely: no
+				 * draw, no flush, no publish. That is the common
+				 * case -- a pet sitting still changes a handful of
+				 * display bytes, and a sleeping one changes none.
+				 */
+				{
+					int b, lo = SHM_FRAME_H, hi = 0;
+
+					if (dpram_shadow_valid) {
+						for (b = 0; b < 0x200; b++) {
+							if (dp[b] == dpram_shadow[b])
+								continue;
+							if (byte_row_lo[b] < lo)
+								lo = byte_row_lo[b];
+							if (byte_row_hi[b] > hi)
+								hi = byte_row_hi[b];
+						}
+						if (hi <= lo) {
+							/* Nothing moved. */
+							diag_phase(SHM_PHASE_IDLE);
+							goto no_paint;
+						}
+					} else {
+						lo = 0;
+						hi = SHM_FRAME_H;
+					}
+
+					/*
+					 * Draw and flush in SMALL CHUNKS, interleaved.
+					 *
+					 * This is the fix for the reset, and the
+					 * reasoning matters because the obvious
+					 * version is wrong.
+					 *
+					 * esp_cache_msync() runs its writeback and
+					 * its invalidate each inside
+					 * portENTER_CRITICAL_SAFE -- interrupts
+					 * disabled on this core for the whole
+					 * range. Flushing a full 5x5 frame is one
+					 * call over 181,216 bytes. The interrupt
+					 * watchdog resets the chip if interrupts
+					 * stay off for 800 ms, and ESP-IDF's own
+					 * int_wdt.c documents a cache *livelock*
+					 * mode: cache maintenance on one core
+					 * contending with external-memory traffic
+					 * on the other can retry far longer than
+					 * the transfer itself would take.
+					 *
+					 * That is precisely the reported symptom.
+					 * It resets on the status screen and the
+					 * menus -- the screens that change every
+					 * pixel -- and not while the pet idles,
+					 * because only then is the whole frame
+					 * dirty and only then is there one large
+					 * flush for core 1's large blit to contend
+					 * with. The earlier measurement missed it
+					 * for the same reason: 2.1 ms was the
+					 * worst flush in a run where nobody opened
+					 * a menu.
+					 *
+					 * So no single cache operation spans more
+					 * than SHM_PAINT_ROWS rows. A full-screen
+					 * update still flushes 181 KB in total, but
+					 * as twelve ~15 KB operations with a gap
+					 * between them, instead of one. Whatever
+					 * the livelock needs, it does not get an
+					 * 800 ms window.
+					 */
+					{
+						int r;
+
+						diag_phase(SHM_PHASE_DRAW);
+						t0 = esp_timer_get_time();
+
+						for (r = lo; r < hi; r += SHM_PAINT_ROWS) {
+							int rows = hi - r;
+							unsigned long base, off, len;
+
+							if (rows > SHM_PAINT_ROWS)
+								rows = SHM_PAINT_ROWS;
+
+							draw_rows(frame[idx], dp, r, r + rows,
+								  !dpram_shadow_valid && r == lo);
+
+							base = (unsigned long)frame[idx];
+							off = (unsigned long)r * SHM_FRAME_W * 2;
+							len = (unsigned long)rows * SHM_FRAME_W * 2;
+
+							/* Whole cache lines only: esp_cache_msync
+							 * rejects anything unaligned, and it would
+							 * return an error this code never checks. */
+							off &= ~31ul;
+							len = (len + 31ul) & ~31ul;
+							if (off + len > SHM_FRAME_STRIDE)
+								len = SHM_FRAME_STRIDE - off;
+
+							diag_phase(SHM_PHASE_WRITEBACK);
+							{
+								int64_t c0 = esp_timer_get_time();
+								int64_t c1;
+								uint32_t d;
+
+								esp_cache_msync((void *)(base + off), len,
+										ESP_CACHE_MSYNC_FLAG_INVALIDATE);
+								c1 = esp_timer_get_time();
+								d = (uint32_t)(c1 - c0);
+								if (d > diag->chunk_max)
+									diag->chunk_max = d;
+							}
+						}
+
+						t1 = esp_timer_get_time();
+						t2 = t1;
+					}
+
+					painted = 1;
+					memcpy(dpram_shadow, dp, sizeof(dpram_shadow));
+					dpram_shadow_valid = 1;
+					ctl->dirty_lo = (uint32_t)lo;
+					ctl->dirty_hi = (uint32_t)hi;
+				}
+
+				diag->draw_us = (uint32_t)(t1 - t0);   /* draw + flush */
+				diag->wb_us = 0;                        /* folded into draw */
+				diag->inv_us = 0;
+				if (diag->draw_us > diag->draw_max)
+					diag->draw_max = diag->draw_us;
+				if (diag->wb_us > diag->wb_max)
+					diag->wb_max = diag->wb_us;
+				if ((uint32_t)(t2 - t0) > diag->total_max)
+					diag->total_max = (uint32_t)(t2 - t0);
+
+				diag->frames = diag->frames + 1;
+				diag_publish();
+				diag_phase(SHM_PHASE_IDLE);
+			}
+no_paint:
+			/*
+			 * Housekeeping runs whether or not anything was painted, but
+			 * frame_seq only moves when the frame buffer changed. Moving
+			 * it on a skipped frame would tell core 1 to blit
+			 * dirty_lo..dirty_hi again -- the *previous* frame's range,
+			 * over pixels that are already correct.
+			 */
 			for (n = 0; n < 0x200; n++)
 				if (dp[n])
 					lit++;
@@ -434,8 +709,6 @@ static void tamacore_session(uint32_t served, uint32_t *served_out)
 			ctl->guest_pc = st.pc;
 			ctl->instrs_lo = st.instrs;
 			ctl->dpram_lit = lit;
-			ctl->frame_idx = idx;
-			ctl->frames = ctl->frames + 1;
 			ctl->guest_cycles = (uint32_t)cycles_done;
 
 			deadline_us = (int64_t)(next_frame_cycle * 1000000ull /
@@ -453,7 +726,11 @@ static void tamacore_session(uint32_t served, uint32_t *served_out)
 				last_hz_cycles = cycles_done;
 			}
 
-			ctl->frame_seq = ctl->frame_seq + 1;  /* last: readers gate on it */
+			if (painted) {
+				ctl->frame_idx = idx;
+				ctl->frames = ctl->frames + 1;
+				ctl->frame_seq = ctl->frame_seq + 1;  /* readers gate on this */
+			}
 			ctl_publish();
 
 			idx ^= 1;
@@ -510,6 +787,16 @@ static void ctl_boot_once(void)
 
 	esp_cache_msync((void *)((uint8_t *)ctl + 96), 32,
 			ESP_CACHE_MSYNC_FLAG_INVALIDATE);
+
+	/*
+	 * The diagnostics keep their maxima across a session (and across a
+	 * reboot, which is the point), so only the identity is set here. `phase`
+	 * is deliberately NOT cleared: it is the record of where the last boot
+	 * died, and clearing it would erase the evidence before it is read.
+	 */
+	diag->magic = SHM_DIAG_MAGIC;
+	diag->version = SHM_DIAG_VERSION;
+	diag_publish();
 }
 
 static void tamacore_task(void *arg)

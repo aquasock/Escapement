@@ -76,15 +76,30 @@ static inline void lcd_rect(const lcd_fb *fb, int x0, int y0, int x1, int y1, ui
  * dots is W*dot + (W-1)*gap wide -- the grid ends with a dot, not with a margin.
  * That is what makes the block read as a dot matrix rather than as a waffle.
  */
-static inline void lcd_draw_dots(const lcd_fb *fb, const uint8_t *dpram,
-                                 int ox, int oy, int dot, int gap)
+/*
+ * Draw rows [yl, yh) of the LCD only, in framebuffer coordinates. Used by the
+ * blitter path, which repaints just the rows whose pixels changed.
+ *
+ * The background is repainted for those rows first, so a segment that turned
+ * OFF is erased -- which is the half that a "draw only what is lit" renderer
+ * gets wrong.
+ */
+static inline void lcd_draw_dots_rows(const lcd_fb *fb, const uint8_t *dpram,
+                                      int ox, int oy, int dot, int gap,
+                                      int yl, int yh)
 {
     const int pitch = dot + gap;
     const int lcd_w = LCD_DOTS_W(dot, gap);
-    const int lcd_h = LCD_DOTS_H(dot, gap);
     int i;
 
-    lcd_rect(fb, ox, oy, ox + lcd_w, oy + lcd_h, LCD_OFF);
+    if (yl < oy)
+        yl = oy;
+    if (yh > oy + LCD_DOTS_H(dot, gap))
+        yh = oy + LCD_DOTS_H(dot, gap);
+    if (yl >= yh)
+        return;
+
+    lcd_rect(fb, ox, yl, ox + lcd_w, yh, LCD_OFF);
 
     for (i = 0; i < SEG_COUNT; i++) {
         const seg_entry *e = &seg_map[i];
@@ -97,8 +112,14 @@ static inline void lcd_draw_dots(const lcd_fb *fb, const uint8_t *dpram,
         for (int k = 0; k < e->run_count; k++, r++) {
             int y0 = oy + r->y * pitch;
 
+            if (y0 + dot <= yl || y0 >= yh)
+                continue;                   /* this run misses the range */
+
             for (int dy = 0; dy < dot; dy++) {
                 int yy = y0 + dy;
+
+                if (yy < yl || yy >= yh)
+                    continue;
 
                 for (int x = r->x0; x < r->x1; x++) {
                     int xx = ox + x * pitch;
@@ -108,6 +129,13 @@ static inline void lcd_draw_dots(const lcd_fb *fb, const uint8_t *dpram,
             }
         }
     }
+}
+
+static inline void lcd_draw_dots(const lcd_fb *fb, const uint8_t *dpram,
+                                 int ox, int oy, int dot, int gap)
+{
+    lcd_draw_dots_rows(fb, dpram, ox, oy, dot, gap,
+                       oy, oy + LCD_DOTS_H(dot, gap));
 }
 
 /* True-hardware look: dot blocks touching, no grid. */

@@ -226,122 +226,74 @@ static int input_poll(uint32_t *mask)
 /* ---- panel --------------------------------------------------------------- */
 
 /*
- * Banded blit to /dev/fb0, with no large heap allocation anywhere.
+ * Blit rows [lo, hi) of the frame to /dev/fb0.
  *
  * CO5300_IOC_WRITE_RECT is not available here and it is not a fallback that was
- * missed: the driver refuses any rectangle that intersects fb0, on purpose, so
- * a userspace bug cannot paint over the console. The game lives *inside* fb0,
- * so the only path onto the glass is fb_write(), which blits whole rows at full
+ * missed: the driver refuses any rectangle that intersects fb0, on purpose, so a
+ * userspace bug cannot paint over the console. The game lives *inside* fb0, so
+ * the only path onto the glass is fb_write(), which blits whole rows at full
  * width.
  *
- * That was fine at 1x: a 320x57 strip cost 17 ms, and a frame fit in one write.
- * At 4x the frame is 204 rows and one write would be 130,560 bytes -- measured
- * at 79 ms. At 16 fps that is 1264 ms of every second on core 1, so the frame is
- * written in four bands of 51 rows and only the bands that changed are sent.
- * One band is about 20 ms, which is what the 1x build paid for a whole frame.
+ * WHICH rows is core 0's decision, not this program's. Core 0 owns the emulated
+ * display RAM, so it is the only side that knows what changed; it publishes the
+ * dirty range in dirty_lo/dirty_hi and skips the frame entirely when nothing
+ * moved. An earlier version recomputed this here by hashing every row against a
+ * shadow -- two sources of truth for one fact, and the slower side deciding.
  *
- * Why no 83 KB buffers. The obvious implementation keeps the whole frame plus a
- * shadow of what was sent, and 2 x 83,232 bytes does not allocate on this board:
+ * Done in chunks of SHM_BAND_ROWS because of memory, not taste: a whole 5x5
+ * frame is 181,202 bytes and this board will not hand out allocations that size
+ * (NOMMU wants one contiguous block, KRN-001). Two chunk-sized buffers are
+ * 94 KB of static BSS, which exec supplies in one piece from a fresh heap.
  *
- *     tamacore: cannot allocate a 83232 byte frame: Cannot allocate memory
- *
- * with 1228 kB free and an order-6 block available, so it is the NOMMU
- * contiguity rule (KRN-001), not exhaustion. Rather than retry-and-hope, this
- * reads ONE BAND at a time from the window with pread and keeps only per-row
- * hashes of what was last written -- 54 KB of static buffers and no malloc.
- *
- * The comparison is against what was last WRITTEN, not against the other frame
- * buffer in the window. Core 0 double-buffers, so the other buffer is tempting,
- * but it holds a frame that may already be half-overwritten: if a row changed
- * and then changed back, comparing against that would call it unchanged and
- * leave the previous row on the glass.
+ * The strip is full width because fb_write() blits whole rows, so the pixels
+ * either side of the LCD have to be something. They are the console background,
+ * not a picture element: filling them with the LCD colour once produced a flat
+ * band across the whole framebuffer with the LCD invisible inside it.
  */
-static uint16_t g_band[SHM_FB_W * SHM_BAND_ROWS];   /* 320 x 51, the strip  */
-static uint16_t g_rows[SHM_BAND_ROWS * SHM_FRAME_W]; /* 51 x 204, the frame */
-static uint32_t g_rowsum[SHM_FRAME_H];              /* per-row, last sent   */
-static int g_rowsum_valid;
+static uint16_t g_strip[SHM_FB_W * SHM_BAND_ROWS];
+static uint16_t g_tile[SHM_FRAME_W * SHM_BAND_ROWS];
 
-/* FNV-1a over one row of the frame. 408 bytes at 4x. */
-static uint32_t row_hash(const uint16_t *row, int w)
+static int panel_blit(unsigned long frame_off, int lo, int hi)
 {
-	const uint8_t *p = (const uint8_t *)row;
-	uint32_t h = 2166136261u;
-	int i;
+	int r;
 
-	for (i = 0; i < w * 2; i++)
-		h = (h ^ p[i]) * 16777619u;
-	return h;
-}
+	if (lo < 0)
+		lo = 0;
+	if (hi > SHM_FRAME_H)
+		hi = SHM_FRAME_H;
 
-/* Build the 320-wide framebuffer strip for rows [y0, y0+rows) of the frame. */
-static void compose_band(int y0, int rows)
-{
-	int y;
-
-	for (y = 0; y < SHM_FB_W * rows; y++)
-		g_band[y] = SHM_BEZEL;
-
-	for (y = 0; y < rows; y++) {
-		memcpy(&g_band[(size_t)y * SHM_FB_W + SHM_ORIGIN_X],
-		       &g_rows[(size_t)y * SHM_FRAME_W],
-		       SHM_FRAME_W * sizeof(uint16_t));
-	}
-
-	(void)y0;
-}
-
-/*
- * `force` sends every band regardless of the hashes. The bench needs it: with
- * an accurate shadow a repeated identical frame costs nothing after the first,
- * which would make the measurement meaningless.
- */
-static int panel_blit(unsigned long frame_off, int force)
-{
-	int y0, failed = 0;
-
-	for (y0 = 0; y0 < SHM_FRAME_H; y0 += SHM_BAND_ROWS) {
-		int rows = SHM_FRAME_H - y0;
-		int dirty = force, y;
+	for (r = lo; r < hi; r += SHM_BAND_ROWS) {
+		int rows = hi - r;
+		int y, x;
 
 		if (rows > SHM_BAND_ROWS)
 			rows = SHM_BAND_ROWS;
 
-		/* One pread per band: 20,808 bytes, a small part of the cost of
-		 * writing the same rows to the panel. */
-		if (shared_read(frame_off + (unsigned long)y0 * SHM_FRAME_W * 2,
-				g_rows, (size_t)rows * SHM_FRAME_W * 2) != 0) {
-			failed = 1;
-			continue;
+		if (shared_read(frame_off + (unsigned long)r * SHM_FRAME_W * 2,
+				g_tile, (size_t)rows * SHM_FRAME_W * 2) != 0)
+			return -1;
+
+		for (y = 0; y < rows; y++) {
+			uint16_t *dst = g_strip + (size_t)y * SHM_FB_W;
+
+			for (x = 0; x < SHM_ORIGIN_X; x++)
+				dst[x] = SHM_BEZEL;
+
+			memcpy(dst + SHM_ORIGIN_X,
+			       g_tile + (size_t)y * SHM_FRAME_W,
+			       SHM_FRAME_W * sizeof(uint16_t));
+
+			for (x = SHM_ORIGIN_X + SHM_FRAME_W; x < SHM_FB_W; x++)
+				dst[x] = SHM_BEZEL;
 		}
 
-		if (!g_rowsum_valid)
-			dirty = 1;
-
-		for (y = 0; y < rows && !dirty; y++)
-			if (row_hash(&g_rows[(size_t)y * SHM_FRAME_W],
-				     SHM_FRAME_W) != g_rowsum[y0 + y])
-				dirty = 1;
-
-		if (!dirty)
-			continue;
-
-		compose_band(y0, rows);
-
-		/* fb rows are framebuffer rows, offset by where the frame sits */
-		if (pwrite(g_fb, g_band, (size_t)rows * SHM_FB_W * 2,
-			   (off_t)(SHM_ORIGIN_Y + y0) * SHM_FB_W * 2)
-		    != (ssize_t)((size_t)rows * SHM_FB_W * 2)) {
-			failed = 1;
-			continue;
-		}
-
-		for (y = 0; y < rows; y++)
-			g_rowsum[y0 + y] = row_hash(&g_rows[(size_t)y * SHM_FRAME_W],
-						    SHM_FRAME_W);
-		g_rowsum_valid = 1;
+		if (pwrite(g_fb, g_strip, (size_t)rows * SHM_FB_W * 2,
+			   (off_t)(SHM_ORIGIN_Y + r) * SHM_FB_W * 2)
+		    != (ssize_t)((size_t)rows * SHM_FB_W * 2))
+			return -1;
 	}
 
-	return failed ? -1 : 0;
+	return 0;
 }
 
 /* ---- startup ------------------------------------------------------------- */
@@ -448,28 +400,26 @@ static int set_field(unsigned long off, uint32_t value)
 static uint32_t frame_sum(uint32_t *idx_out)
 {
 	uint32_t idx, sum = 0;
-	unsigned long off;
+	unsigned long off, i;
 	int y0;
 
 	if (shared_read(SHM_CTL_OFF + 68, &idx, sizeof(idx)) != 0)
 		idx = 0;
 	off = idx ? SHM_FRAME1_OFF : SHM_FRAME0_OFF;
 
-	/* Band by band, so this needs no whole-frame buffer. */
+	/* Chunk by chunk through g_tile, so this needs no whole-frame buffer. */
 	for (y0 = 0; y0 < SHM_FRAME_H; y0 += SHM_BAND_ROWS) {
 		int rows = SHM_FRAME_H - y0;
-		int y;
 
 		if (rows > SHM_BAND_ROWS)
 			rows = SHM_BAND_ROWS;
 
-		if (shared_read(off + (unsigned long)y0 * SHM_FRAME_W * 2, g_rows,
+		if (shared_read(off + (unsigned long)y0 * SHM_FRAME_W * 2, g_tile,
 				(size_t)rows * SHM_FRAME_W * 2) != 0)
 			return 0;
 
-		for (y = 0; y < rows; y++)
-			sum ^= row_hash(&g_rows[(size_t)y * SHM_FRAME_W],
-					SHM_FRAME_W);
+		for (i = 0; i < (unsigned long)rows * SHM_FRAME_W * 2; i++)
+			sum = (sum ^ ((const uint8_t *)g_tile)[i]) * 16777619u;
 	}
 	sum ^= (uint32_t)off;
 
@@ -606,7 +556,7 @@ int main(int argc, char **argv)
 
 		t0 = now_us();
 		for (n = 0; n < bench; n++) {
-			if (panel_blit(SHM_FRAME0_OFF, 1) < 0) {
+			if (panel_blit(SHM_FRAME0_OFF, 0, SHM_FRAME_H) < 0) {
 				fprintf(stderr, "tamacore: bench blit: %s\n",
 					strerror(errno));
 				return 1;
@@ -812,7 +762,7 @@ int main(int argc, char **argv)
 			unsigned long off = ctl.frame_idx ? SHM_FRAME1_OFF
 							  : SHM_FRAME0_OFF;
 
-			if (panel_blit(off, 0) < 0 && !quiet)
+			if (panel_blit(off, (int)ctl.dirty_lo, (int)ctl.dirty_hi) < 0 && !quiet)
 				fprintf(stderr, "tamacore: blit: %s\n",
 					strerror(errno));
 			frames++;

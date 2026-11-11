@@ -53,6 +53,75 @@
 #define SHM_ROM_OFF         0x80000u
 
 /*
+ * Diagnostics, in the free gap between the save image and the ROM. It gets its
+ * own area rather than sharing the control block's spare words because it is
+ * written on a different cadence (every phase of every frame) and, crucially,
+ * because PSRAM SURVIVES A RESET: `phase` is the only record of what core 0 was
+ * doing when the board went down, and it has to be somewhere nothing else
+ * clears.
+ */
+#define SHM_DIAG_OFF        0x70000u
+#define SHM_DIAG_MAGIC      0x44494147u     /* 'DIAG' */
+#define SHM_DIAG_VERSION    1u
+
+/*
+ * Core 0 publishes only the rows it changed, and core 1 blits only those.
+ *
+ * This is not an optimisation for its own sake. A 5-dot frame is 181,202 bytes,
+ * and flushing it costs a cache writeback plus invalidate inside a critical
+ * section -- interrupts disabled -- for the whole range, 16 times a second.
+ * Measured, that was only 2.1 ms, so it is not a stall on its own; but ESP-IDF
+ * has a documented cache *livelock* mode where cache maintenance on one core
+ * contends with external-memory traffic on the other, and the interrupt
+ * watchdog is the thing that catches it. Flushing a few hundred bytes instead of
+ * 181 KB removes that exposure by ~100x, and it also stops core 1 spending
+ * ~90 ms a frame re-blitting rows that did not change.
+ *
+ * dirty_lo..dirty_hi is one contiguous range rather than a band bitmap: the
+ * panel write is one fb_write() over whole rows, so a contiguous range is
+ * exactly the transfer shape, and coalescing scattered changes into one range
+ * costs a little extra drawing instead of a second transfer.
+ */
+
+/*
+ * Rows per draw+flush chunk. A full 5x5 frame is 181,216 bytes, and
+ * esp_cache_msync() disables interrupts on core 0 for the whole range it is
+ * given. 16 rows is 9,632 bytes -- short enough that no single critical section
+ * can reach the interrupt watchdog's 800 ms, however much of the screen changed.
+ * See the long comment in tamacore_task.c for why this is the fix and not an
+ * optimisation.
+ */
+#define SHM_PAINT_ROWS      16
+
+/* What core 0 is in the middle of. Left behind by a reset. */
+enum shm_phase {
+	SHM_PHASE_IDLE = 0,
+	SHM_PHASE_DRAW = 1,
+	SHM_PHASE_WRITEBACK = 2,
+	SHM_PHASE_INVALIDATE = 3,
+};
+
+struct shm_diag {
+	volatile uint32_t magic;
+	volatile uint32_t version;
+	volatile uint32_t phase;        /* survives a reset: where it died */
+	volatile uint32_t frames;
+
+	volatile uint32_t draw_us;      /* last frame, each phase */
+	volatile uint32_t wb_us;
+	volatile uint32_t inv_us;
+	volatile uint32_t gap_us;       /* since the previous publish */
+
+	volatile uint32_t draw_max;     /* worst since boot */
+	volatile uint32_t wb_max;
+	volatile uint32_t inv_max;
+	volatile uint32_t gap_max;
+	volatile uint32_t total_max;    /* whole publish, worst */
+	volatile uint32_t chunk_max;    /* longest SINGLE esp_cache_msync */
+	volatile uint32_t reserved[2];
+};
+
+/*
  * Where the frame sits inside the watch's 320x400 framebuffer, and how big the
  * LCD itself is. These come first because the frame macros are derived from
  * them; defining SHM_FRAME_W in terms of a SHM_LCD_W declared later would not
@@ -203,7 +272,8 @@ struct shm_ctl {
 	volatile uint32_t btn_events;   /* pin changes applied from `buttons` */
 	volatile uint32_t reset_reason; /* esp_reset_reason() for THIS boot */
 	volatile uint32_t boot_count;   /* firmware boots, increments per reset */
-	volatile uint32_t reserved3[2];
+	volatile uint32_t dirty_lo;     /* first frame row core 0 changed */
+	volatile uint32_t dirty_hi;     /* one past the last changed row */
 };
 
 #endif /* SHMPROTO_H */
