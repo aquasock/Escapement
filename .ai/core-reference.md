@@ -154,6 +154,7 @@ Topic IDs are the `record_id` prefix. An entry reserves a name; it does not clai
 | Why does the status menu run at half speed when play is fine? | EMU | EMU-014 |
 | Where do the 464 cycles per emulated instruction actually go? | EMU | EMU-015 |
 | Is there 2x left in the interpreter, or is 0.52x near the floor? | EMU | EMU-016 |
+| Did the core-0 shared-memory probe work? | EMU | EMU-017 |
 | Why did the emulator speed up when the touch daemon was retired? | EMU | EMU-012 |
 | Why does a 512 KB allocation work once and then fail? | KERNEL | KRN-004 |
 | Why not put the hardware behind the RTOS on core 0? | KERNEL | KRN-005 |
@@ -1450,6 +1451,22 @@ EMU-010: "The touch daemon costs the emulator about 30 percent of its throughput
     - "EMU-014 for the ~520k instructions/s the status menu needs, EMU-005 for the 1181-cycle basis this corrects"
     - "EMU-004 for the core-0-design consequence and its three constraints"
   verification: "Measured on hardware 2026-11-10 across four boots, one binary per boot because the 512 KB ROM allocation is a one-shot per boot: baseline 516887 and 517948, coverage-guarded 521199, -O3 514700, timers compiled out 557764. The throwaway build was removed from the watch and the tree afterwards. The 63-host-operations figure is derived from the measured 464 cycles and EMU-007's measured per-operation cost, not counted directly -- a host-instruction counter would settle it, and is not needed to support the conclusion, which is that the remaining suspects are small and the per-instruction cost is architectural."
+
+
+- record_id: EMU-017
+  kind: EMU
+  topic_id: EMU
+  status: OPEN
+  verified_date: 2026-11-10
+  title: "A firmware task writing PSRAM put the board in a boot loop, and the leading cause is that both cores' PSRAM use overlaps"
+  statement: "A probe was added to the firmware: a 256-byte buffer from `heap_caps_aligned_alloc(64, ..., MALLOC_CAP_SPIRAM)` written with an incrementing counter every 100 ms and flushed with `esp_cache_msync(..., ESP_CACHE_MSYNC_FLAG_INVALIDATE)`, intended to test whether core 1 can read what core 0 writes. Flashing it produced a boot loop: the console showed a normal Linux boot reaching `Chipset=ESP32-S3 ID=09 detected over shmem IPC` at 4.198 s and then `rst:0xc (RTC_SW_CPU_RST)`, repeatedly. Reverting the firmware change restored normal boot immediately, so the probe was the cause and the kernel was not involved."
+  consequence: "The experiment did not answer the cache-coherency question because it did not survive long enough to be read, and the failure is itself the important result. The leading hypothesis, not yet confirmed, is address-space collision: `init_linux_mmap()` identity-maps the whole 8 MB of PSRAM into Linux's range (`CONFIG_LINUX_PSRAM_8M=y`, MMU entries 0x180..0x1ff for `0x3d800000..0x3e000000`), and the firmware's own PSRAM heap is allocated from the same silicon. If the two overlap, a firmware task writing its heap corrupts memory Linux is actively using, which produces exactly this signature: a working boot until the writes begin, then a software reset. If that is right it reframes the whole core-0 design -- a shared display buffer cannot be an ordinary firmware heap allocation, it has to be a region carved out of Linux's memory map by a `reserved-memory` node and handed to the firmware explicitly, and the firmware must not use PSRAM heap at all once Linux is up. The measurement that would settle it is to have the firmware print its PSRAM heap base and compare it against Linux's 0x3d800000 window before writing anything. Two things this cycle did establish: the firmware toolchain builds and flashes from this machine (the ESP gcc lives at build/idf-tools/tools/xtensa-esp32s3-elf/esp-12.2.0_20230208, not in ~/.espressif, and an incremental `ninja` in the existing build dir works), and `esp_cache_msync()` exists in this IDF with writeback and invalidate flags. The kernel-side half of the experiment was also built and reverted: `CONFIG_DEVMEM` was temporarily enabled to let Linux read arbitrary physical memory, and the recorded reason for it being off still stands, so it was turned back off rather than left as a standing security regression."
+  sources:
+    - "patches/harness/core0/shmprobe.c: the probe as written, kept for the retry"
+    - "build/esp-hosted/esp_hosted_ng/esp/esp_driver/network_adapter/main/linux_ll_esp32s3.c: init_linux_mmap() and CONFIG_LINUX_PSRAM_8M's identity mapping"
+    - "console capture during the loop: a clean boot to 4.198 s then rst:0xc (RTC_SW_CPU_RST)"
+    - "patches/kernel/config/devkit_c1_16m_linux.config: the recorded reason CONFIG_DEVMEM is off"
+  verification: "Observed on hardware 2026-11-10: the boot loop reproduced and then stopped exactly when the firmware change was reverted, which isolates it to the probe. The overlap hypothesis is NOT verified -- it is the leading explanation and the next measurement, listed above, would confirm or refute it. After the revert the watch boots normally with PMU 100 percent, rtc0 working, touch on IRQ 33 and drv2605 bound, and /dev/mem is absent again."
 
 - record_id: EMU-012
   kind: EMU

@@ -1,3 +1,34 @@
+## 50 COMMIT Unreleased 2026-11-10T18:53:16-07:00
+
+#### Coming From:
+
+Unreleased cb9e984
+
+#### Purpose:
+
+Test whether core 1 can read a PSRAM buffer that core 0 writes, which is the gate on the whole core-0 emulator architecture.
+
+#### Outcome:
+
+**The probe put the board in a boot loop, and the loop is the result worth having.** The firmware gained a task writing an incrementing counter into a 256-byte PSRAM buffer every 100 ms with `esp_cache_msync(..., ESP_CACHE_MSYNC_FLAG_INVALIDATE)`, and the kernel gained `CONFIG_DEVMEM` so Linux could read the same physical address. Flashed together, the console showed a clean Linux boot reaching `Chipset=ESP32-S3 ID=09 detected over shmem IPC` at 4.198 s and then `rst:0xc (RTC_SW_CPU_RST)`, repeatedly. Reverting the firmware change restored boot immediately, which isolates the cause to the probe and clears the kernel. The leading hypothesis, and it reframes the design rather than merely reporting a bug: **the two cores' PSRAM use may overlap.** `init_linux_mmap()` identity-maps all 8 MB of PSRAM into Linux's window (`CONFIG_LINUX_PSRAM_8M=y`, MMU entries 0x180..0x1ff covering `0x3d800000..0x3e000000`), while the firmware's own `heap_caps` PSRAM heap comes from the same silicon. If they overlap, a firmware task writing its heap corrupts memory Linux is running from, which produces exactly the observed signature -- a working boot until the writes begin, then a software reset. That would mean a shared display buffer cannot be an ordinary firmware heap allocation: it has to be a `reserved-memory` region carved out of Linux's map and handed to the firmware explicitly, and the firmware must not touch PSRAM heap once Linux is up. The measurement that settles it is cheap -- have the firmware print its PSRAM heap base and compare it against Linux's window before writing anything -- and it is the first thing the next attempt should do. Two things the cycle did establish. The firmware toolchain builds and flashes from this machine: the ESP gcc is at `build/idf-tools/tools/xtensa-esp32s3-elf/esp-12.2.0_20230208` rather than in `~/.espressif`, and an incremental `ninja` in the existing build directory works in about a minute. And `esp_cache_msync()` exists in this IDF with both writeback and invalidate flags, so the coherency primitive is available. Everything was reverted to the safe state before the cycle closed: the firmware change is out, `CONFIG_DEVMEM` is off again with the recorded reason still standing, the kernel rebuilt and reflashed so source and flash agree, and the watch was verified booting with PMU 100 percent, `rtc0` working, touch on IRQ 33 and `drv2605` bound. The probe source is kept at `patches/harness/core0/shmprobe.c` so the retry starts from it rather than from scratch. The core-syntax audit passed: `.ai/core.md` and `.ai/core-syntax.md` were re-read, the complete `.ai/` diff was inspected, `.ai/core.md` was not modified, all YAML blocks in the reference parse and all 85 records carry the ten required fields with unique ids, and this entry was validated against the template with six sections in canonical order, sequential numbering from 49, an ISO-8601 timestamp carrying the America/Phoenix offset, prose-only Outcome and Next Steps, and Status values within the allowed set.
+
+#### Next Steps:
+
+The first step of the next attempt is not the probe but a print: have the firmware log the base and size of its PSRAM heap, and compare that number against Linux's `0x3d800000..0x3e000000` window. If they overlap, the architecture needs a `reserved-memory` node in the device tree (with `no-map` so Linux does not touch it) plus a fixed physical address the firmware can be compiled to use, and the ordinary PSRAM heap must be considered off-limits once Linux is up. If they do not overlap, then the boot loop has another cause -- a task or stack problem in the probe, an `esp_cache_msync` misuse, or a watchdog -- and that gets diagnosed before any further attempt. Either way the coherency question itself remains unanswered and the core-0 design remains unvalidated. Worth stating plainly: this is the first cycle in the session that made the hardware worse rather than better, it was recovered without a full restore, and the reason it was recoverable is that `working-2026-11-10-1756.bin` existed and the firmware app can be reflashed alone without touching `/etc` or `/home`. The deferred items are unchanged and none should be started without asking: BLE media keys, the Rii K06 touchpad and Logitech keyboard, firmware-side BLE bond persistence, wake-from-sleep, and moving the Tamagotchi emulator to core 0.
+
+#### Files Modified:
+
+- patches/harness/core0/shmprobe.c
+- .ai/core-reference.md
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: PASS
+
+---
+
 ## 49 COMMIT Unreleased 2026-11-10T18:30:39-07:00
 
 #### Coming From:

@@ -1,10 +1,10 @@
-# Handoff — Escapement, 2026-11-10T18:30
+# Handoff — Escapement, 2026-11-10T18:54
 
 Linux 7.2.4 on a T-Watch Ultra (ESP32-S3). Real Linux on the watch's own Xtensa
 cores, not emulated. This file is orientation; verify before acting on it.
 
-Canonical detail lives in `.ai/core-reference.md` (84 records, fourteen topics).
-Project history lives in `.ai/core-log.md` (49 entries; newest first — 49, 48, 47, 46, 45, 44, 43, 42, 41, 40, 39, 38, 37, 36, 35, 34, 33, 32,
+Canonical detail lives in `.ai/core-reference.md` (85 records, fourteen topics).
+Project history lives in `.ai/core-log.md` (50 entries; newest first — 50, 49, 48, 47, 46, 45, 44, 43, 42, 41, 40, 39, 38, 37, 36, 35, 34, 33, 32,
 31, 30, 29, 28, 27, 26, 25, 24, 23, 22, 21, 20, 19, 18, 17, then 1 through 16).
 Do not re-derive what those hold.
 
@@ -18,10 +18,10 @@ persistence, any wake-from-sleep path, and moving the emulator to core 0.
 
 ## Reconstruct (in this order)
 
-1. `git log --oneline -8` — `main` was at `cc5a7de`, clean and fully pushed,
+1. `git log --oneline -8` — `main` was at `cb9e984`, clean and fully pushed,
    before the commit carrying this file.
 2. `.ai/core.md` (policy), then `.ai/core-reference.md` (hardware facts — open
-   the record, not the index line), then `.ai/core-log.md` entries 49, 48, 47.
+   the record, not the index line), then `.ai/core-log.md` entries 50, 49, 48.
 3. `git -C build/esp-hosted/esp_hosted_ng branch --show-current` — expect
    `ble-bond-wip`, five local-only commits.
 
@@ -262,6 +262,27 @@ interpreter cannot change that. **EMU-004's core-0 design is the 4-7x** (core 0
 has cache + internal SRAM), still deferred, with its three constraints.
 
 Baseline to beat if anything is attempted: **517,948 instr/s** headless.
+
+**Core-0 shared memory: FAILED FIRST TRY, cause likely PSRAM overlap** (EMU-017,
+OPEN). A firmware task writing a PSRAM buffer boot-looped the board
+(`rst:0xc RTC_SW_CPU_RST` right after the writes begin). Reverted; board is fine.
+
+**Leading hypothesis, unverified:** `init_linux_mmap()` identity-maps ALL 8 MB of
+PSRAM into Linux's window, and firmware's `heap_caps` PSRAM heap comes from the
+same silicon — so firmware writes corrupt Linux. **A shared buffer must be a
+`reserved-memory` (no-map) region, not a firmware heap allocation.**
+
+NEXT ATTEMPT STARTS WITH A PRINT, NOT A PROBE: log the firmware PSRAM heap base
+and compare against Linux's `0x3d800000..0x3e000000` before writing anything.
+Probe source kept at `patches/harness/core0/shmprobe.c`.
+
+Firmware toolchain: gcc at
+`build/idf-tools/tools/xtensa-esp32s3-elf/esp-12.2.0_20230208` (NOT
+~/.espressif); incremental `ninja` in `network_adapter/build` works in ~1 min.
+`esp_cache_msync()` exists with writeback+invalidate.
+
+**`CONFIG_DEVMEM` is OFF again** — it was enabled for this test and the recorded
+reason for it being off still stands. Do not leave it on.
 
 **Stalls are the open thread** (next up by operator request). 29 in an otherwise
 faster emulator, 14 on `dirty 0xFC`, longest early ones 286 and 211 ms wall with
