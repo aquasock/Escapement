@@ -48,8 +48,8 @@
 
 #define SHM_CTL_OFF         0x00000u
 #define SHM_FRAME0_OFF      0x01000u
-#define SHM_FRAME1_OFF      0x1b000u
-#define SHM_EEPROM_OFF      0x35000u
+#define SHM_FRAME1_OFF      0x30000u
+#define SHM_EEPROM_OFF      0x60000u
 #define SHM_ROM_OFF         0x80000u
 
 /*
@@ -59,9 +59,28 @@
  * compile, and ordering them wrongly is exactly the kind of mistake the
  * static asserts below are there to catch.
  */
-#define SHM_LCD_SCALE       4
-#define SHM_LCD_W           (49 * SHM_LCD_SCALE)
-#define SHM_LCD_H           (49 * SHM_LCD_SCALE)
+/*
+ * Each real LCD dot is a SHM_DOT x SHM_DOT block of pixels, separated by
+ * SHM_GAP pixels. 5 and 1 is the harness's original look: the dot matrix is
+ * visible as a grid, which is what makes the pet readable across a room.
+ *
+ * At 5/1 an LCD of 49x49 dots is 293x293 pixels -- 49 dots of 5 px plus 48 gaps
+ * of 1 px, because the grid ends with a dot rather than a margin. That fits the
+ * 320-pixel width with 27 px to spare, which is where the side of the surround
+ * comes from.
+ *
+ * SET BOTH TO THE SAME VALUE for the true-hardware look (gap 0), and the image
+ * shrinks accordingly. The blitter measures its bandwidth from SHM_FRAME_BYTES,
+ * so nothing downstream has to know which was chosen.
+ */
+#define SHM_DOT             5
+#define SHM_GAP             1
+#define SHM_LCD_DOTS_W      49
+#define SHM_LCD_DOTS_H      49
+#define SHM_LCD_W           (SHM_LCD_DOTS_W * SHM_DOT + \
+			     (SHM_LCD_DOTS_W - 1) * SHM_GAP)
+#define SHM_LCD_H           (SHM_LCD_DOTS_H * SHM_DOT + \
+			     (SHM_LCD_DOTS_H - 1) * SHM_GAP)
 #define SHM_FB_W            320
 #define SHM_FB_H            400
 #define SHM_FRAME_PAD       4           /* LCD surround, in pixels */
@@ -103,6 +122,8 @@ _Static_assert(SHM_ORIGIN_X >= 0 && SHM_ORIGIN_X + SHM_FRAME_W <= SHM_FB_W,
 _Static_assert(SHM_ORIGIN_Y >= 0 && SHM_ORIGIN_Y + SHM_FRAME_H <= SHM_FB_H,
 	       "the frame does not fit down the framebuffer");
 _Static_assert(SHM_BAND_ROWS * 4 >= SHM_FRAME_H, "four bands must cover a frame");
+_Static_assert(SHM_LCD_W <= SHM_FB_W && SHM_LCD_H <= SHM_FB_H,
+	       "the LCD does not fit on the glass");
 _Static_assert(SHM_EEPROM_OFF + SHM_EEPROM_BYTES <= SHM_ROM_OFF,
 	       "the EEPROM image overlaps the ROM");
 

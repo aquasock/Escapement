@@ -79,6 +79,83 @@ static void note(const char *msg)
 	fprintf(stderr, "tamacore: %s\n", msg);
 }
 
+/*
+ * Detach fbcon for the lifetime of this program.
+ *
+ * The framebuffer console and this program both paint the same rows of fb0. The
+ * console repaints a row whenever it prints; the blitter skips rows whose
+ * pixels have not changed. When both happen, the console's black survives in a
+ * row the blitter decided not to resend -- visible on the glass as bands of
+ * console flickering through the pet. It is not a rendering bug, it is two
+ * writers with no agreement about who owns the framebuffer.
+ *
+ * The kernel can resolve that properly: /sys/class/vtconsole/vtconN/bind
+ * unbinds a console driver, and every vtconsole that supports it exposes a
+ * writable bind. Unbinding the "frame buffer device" entry hands fbcon's rows
+ * over completely, so nothing repaints underneath us. Binding it back on exit
+ * restores the console exactly as it was.
+ *
+ * This is better than blanking (/sys/class/graphics/fb0/blank), which only
+ * stops fbcon's *own* repaint timer: a kernel printk would still reach the
+ * console and draw. Unbinding removes the writer.
+ *
+ * Returns the vtcon index it unbound, or -1 if there was nothing to unbind. A
+ * failure here is not fatal -- the pet still runs, with the flicker.
+ */
+static int vtcon_index = -1;
+
+static int fbcon_detach(void)
+{
+	char path[64], name[64];
+	FILE *f;
+	int i;
+
+	for (i = 0; i < 8; i++) {
+		int fd;
+
+		snprintf(path, sizeof(path), "/sys/class/vtconsole/vtcon%d/name", i);
+		f = fopen(path, "r");
+		if (!f)
+			continue;
+		name[0] = 0;
+		if (!fgets(name, sizeof(name), f)) {
+			fclose(f);
+			continue;
+		}
+		fclose(f);
+
+		if (!strstr(name, "frame buffer"))
+			continue;
+
+		snprintf(path, sizeof(path), "/sys/class/vtconsole/vtcon%d/bind", i);
+		fd = open(path, O_WRONLY);
+		if (fd < 0)
+			continue;
+		if (write(fd, "0", 1) == 1) {
+			close(fd);
+			return i;
+		}
+		close(fd);
+	}
+	return -1;
+}
+
+static void fbcon_attach(int idx)
+{
+	char path[64];
+	int fd;
+
+	if (idx < 0)
+		return;
+
+	snprintf(path, sizeof(path), "/sys/class/vtconsole/vtcon%d/bind", idx);
+	fd = open(path, O_WRONLY);
+	if (fd < 0)
+		return;
+	(void)!write(fd, "1", 1);
+	close(fd);
+}
+
 static int shared_write(unsigned long off, const void *buf, size_t len)
 {
 	ssize_t n = pwrite(g_shared, buf, len, (off_t)off);
@@ -505,6 +582,16 @@ int main(int argc, char **argv)
 		note("no touch-buttons device; the bars will do nothing");
 
 	/*
+	 * Take the framebuffer away from the console before the first blit, so
+	 * there is never a moment when both are painting. The bench does not
+	 * need it -- it writes and exits -- but doing it unconditionally keeps
+	 * the two paths identical, which is worth more than the microseconds.
+	 */
+	vtcon_index = fbcon_detach();
+	if (vtcon_index < 0 && !quiet)
+		note("could not unbind fbcon; the console may show through");
+
+	/*
 	 * -b N: time N strip writes and stop.
 	 *
 	 * The panel is write-only and never acknowledges, so the only honest way
@@ -530,6 +617,7 @@ int main(int argc, char **argv)
 		       "(%d bands)\n", bench, (int)SHM_FRAME_BYTES,
 		       (double)(t1 - t0) / 1000.0 / bench,
 		       (int)((SHM_FRAME_H + SHM_BAND_ROWS - 1) / SHM_BAND_ROWS));
+		fbcon_attach(vtcon_index);
 		return 0;
 	}
 
@@ -688,6 +776,7 @@ int main(int argc, char **argv)
 		}
 
 		set_field((unsigned long)offsetof(struct shm_ctl, quit), 1);
+		fbcon_attach(vtcon_index);
 		return rc;
 	}
 
@@ -739,6 +828,7 @@ int main(int argc, char **argv)
 	}
 
 	set_field((unsigned long)offsetof(struct shm_ctl, quit), 1);
+	fbcon_attach(vtcon_index);
 
 	if (!quiet) {
 		printf("tamacore: %lu frames blitted of %u published, "

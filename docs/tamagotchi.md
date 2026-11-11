@@ -739,5 +739,30 @@ band at a time from the window and keeps a per-row hash of what it last wrote:
 Measured with the emulator up, 40 s: **690 of 690 frames delivered** at ~15 fps,
 core 0 at 3,999,088 cycles/s, worst frame 15 ms late.
 
+## Dot grid: 5 px dots with a 1 px gap, and who owns the framebuffer
+
+The dot matrix is back to the harness's original look -- each of the 49x49 LCD
+dots is a 5x5 block with a 1 px gap -- which is what makes the pet readable
+across a room. An LCD of 49 dots is 49*5 + 48*1 = 293 px, so the frame is
+301x301 with the surround and 181,202 bytes.
+
+`SHM_DOT` and `SHM_GAP` in shmproto.h are the only knobs. Setting the gap to 0
+gives the true-hardware look and shrinks the frame accordingly; nothing
+downstream has to know which was chosen, because the blitter measures its own
+bandwidth from `SHM_FRAME_BYTES`.
+
+**The flicker, and who caused it.** Two writers were painting fb0: fbcon, which
+repaints a row whenever the console prints, and this program, which skips rows
+whose pixels have not changed. Where they collided, the console's black survived
+in a row the blitter had decided not to resend -- read on the glass as bands of
+console flickering through the pet. It is not a rendering bug; it is two writers
+with no agreement.
+
+The fix is to remove one of them. `/sys/class/vtconsole/vtconN/bind` unbinds a
+console driver, and fbcon exposes it as writable, so `tamacore` unbinds the
+"frame buffer device" entry on startup and binds it back on every exit path.
+That is better than blanking `/sys/class/graphics/fb0/blank`, which only stops
+fbcon's own repaint timer -- a kernel printk would still draw.
+
 **Still open.** Two `tamacore` instances race for the window; there is no
 mutual exclusion.

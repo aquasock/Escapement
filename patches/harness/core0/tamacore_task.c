@@ -42,11 +42,11 @@
 #include "shmproto.h"
 
 /*
- * The renderer scales the 49x49 map at draw time, so no second copy of it has
- * to be built. SEG_SCALE has to be a plain integer constant with no header
- * dependency, and render.h picks it up after this line.
+ * The renderer scales the 49x49 map at draw time, so no second copy of it has to
+ * be built. The dot size and the gap between dots come from the protocol header
+ * because core 1 has to know the frame size to blit it, and one number in one
+ * place is the only way those two can stay in step.
  */
-#define SEG_SCALE SHM_LCD_SCALE
 #include "render.h"
 
 /* 16 fps: the real hardware redraws its LCD at about 32 Hz and the guest only
@@ -209,7 +209,8 @@ static void draw_frame(uint16_t *px, const uint8_t *dpram)
 	for (i = 0; i < SHM_FRAME_W * SHM_FRAME_H; i++)
 		px[i] = SHM_BEZEL;
 
-	lcd_draw(&fb, dpram, SHM_FRAME_PAD, SHM_FRAME_PAD);
+	lcd_draw_dots(&fb, dpram, SHM_FRAME_PAD, SHM_FRAME_PAD,
+		      SHM_DOT, SHM_GAP);
 }
 
 static void apply_buttons(splb32 *cpu, uint32_t mask, uint32_t *applied)

@@ -41,22 +41,23 @@
 #define SHM_BASE	0x3df00000UL
 #define SHM_SIZE	0x00100000UL
 #define SHM_FRAME0	0x00001000UL
-#define SHM_FRAME1	0x0001b000UL
-#define SHM_EEPROM	0x00035000UL
+#define SHM_FRAME1	0x00030000UL
+#define SHM_EEPROM	0x00060000UL
 #define SHM_ROM		0x00080000UL
 
 /*
- * A frame at 4x is 204x204 RGB565, which is 83,232 bytes.
+ * At a 5 px dot with a 1 px gap the frame is 301x301 RGB565, which is 181,202
+ * bytes -- 28x the original 57x57 one.
  *
  * The first layout put the frames one page apart while a frame was 6498 bytes,
  * so every write to frame B ran past its slot and landed on the EEPROM image --
- * which then read back 18 c6 18 c6, i.e. pixel data. The frame is now 12.8x
- * larger and the slots grew with it. These asserts check the arithmetic against
- * the frame size rather than against a guess; the same numbers are asserted in
+ * which then read back 18 c6 18 c6, i.e. pixel data. The slots grew with the
+ * frame each time it grew. These asserts check the arithmetic against the frame
+ * size rather than against a guess; the same numbers are asserted in
  * shmproto.h, which is the head of the contract.
  */
-#define SHM_FRAME_BYTES	83232UL
-#define SHM_FRAME_STRIDE	83232UL		/* padded to the 32-byte line */
+#define SHM_FRAME_BYTES	181202UL
+#define SHM_FRAME_STRIDE	181216UL	/* padded to the 32-byte line */
 
 _Static_assert(SHM_FRAME1 - SHM_FRAME0 >= SHM_FRAME_STRIDE,
 	       "a frame does not fit in its slot");
