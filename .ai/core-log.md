@@ -1,3 +1,33 @@
+## 55 COMMIT Unreleased 2026-11-11T09:50:00-07:00
+
+#### Coming From:
+
+Unreleased d8b7ec0
+
+#### Purpose:
+
+Close the 23-commit gap between core-log entry 50 and entry 51, so a session following the recovery policy no longer finds the log describing a tree that stopped existing a day earlier.
+
+#### Outcome:
+
+This entry is a retrospective, not a cycle record, and it is written to be read as one: the 23 commits between de41dbc and 35010bf were landed without log entries, so what follows is reconstructed from the commits themselves, from `docs/cores.md`, and from the tracked handoff at `.codewhale/handoff.md`. Git holds the authoritative detail and these commit hashes are the way in, not a substitute for it. Nothing here is a measurement taken by this cycle, and no figure is stated that is not already written in one of those artefacts. **What those commits did.** They moved the Tamagotchi emulator from core 1 to core 0, which is the design EMU-004 had recorded and deferred. `399669b` gave Linux 7 MB of PSRAM and turned the top megabyte into a window both cores can reach, `2f0ec53` established that core 0's writes into that window arrive on core 1 and that core 1 needs no cache maintenance of its own, and `46e459e` then put the guest on core 0 with core 1 reduced to blitting. `docs/cores.md` records the measured result of that stage as 4,038,199 emulated cycles per second against a 4,000,000 target, 159 frames in 10 seconds, a worst frame 11 ms late and 17 ms per strip write. Four commits worked through a display problem: `c6db1b9` found the guest alive on core 0 with the fault being a single `+=` in the pacing loop, `7ef4cb5` made the handshake session-numbered so a second run starts rather than deadlocking, `4e27475` fixed a smear and three bugs it had been hiding, and `c258529` and `1edde10` changed the dot pitch, ending at 5 px dots with a 1 px gap and fbcon yielding the framebuffer. `b0d8950` and the handoff record the glass verification as buttons responding, menus good, and 1416 frames published and 1416 blitted over 90 seconds at about 15.6 fps with 8 ms worst jitter. `8e78e2d` made `tamacore` an ordinary command rather than a boot service, deliberately with no `/etc/init.d` entry. Then the reboots, which is where the gap's own account diverges from what is now known: `3e23b40` bounded cache operations to 16 rows, `7c51d0a` added a core-1 diagnostic record, `e1358fa` chunked flash operations on the belief that a long uninterruptible window was resetting the board, `32304ee` preserved the previous boot's diagnostic record across a reset, and `35010bf` wrote the handoff naming flash operations as the partly-fixed cause. Entry 54 later established that the real fault was core 0 reading a PSRAM write source while the shared cache was off, which is why chunking bounded the window and changed nothing. That is recorded here as a correction of the gap's own conclusion, not as a criticism of it -- it was the best available reading at the time and it is what pointed at flash at all. One thing the gap did leave correct and useful: `32304ee`'s preserved-record idea is the same idea entry 52 needed for the flash instrument, and it was already in the tree. **Why this entry exists in this shape.** The alternative was to write 23 entries, one per commit, in the canonical six-section form. That would have manufactured Outcome prose, Status lines and Files Modified lists for cycles nobody logged, and the status values in particular would be invented: no one can now say whether the user tested `c258529`. The reference library carries a rule against recording what has not been looked up, and the same reasoning applies here. The log is a ring buffer of cycles; the honest way to restore it is one entry that says where the detail lives and what it concluded, which is what this is. The core-syntax audit passed: `.ai/core.md` and `.ai/core-syntax.md` were re-read, the complete `.ai/` diff was inspected, `.ai/core.md` was not modified, and this entry was validated against the template with six sections in canonical order, sequential numbering from 54, an ISO-8601 timestamp carrying the America/Phoenix offset, prose-only Outcome and Next Steps, and Status values within the allowed set.
+
+#### Next Steps:
+
+The gap is closed as a pointer and not as a history, so the remaining question is whether anything in those 23 commits is still load-bearing and unrecorded. Two candidates are worth checking against the tree rather than against the log. `8e78e2d` made `tamacore` an ordinary command with no autostart, which means the emulator does not start itself and a user has to type it -- that is a deliberate decision that no log entry states, and it should be confirmed as still intended before anyone assumes the watch boots into the pet. And `e1358fa`'s chunking was justified by a diagnosis entry 54 disproved, though the code is still correct and still needed for bounding the window; the comment in `linux_flash.c` that explains chunking as the fix for the reboots should be re-read, because it now states the wrong reason for a right change and that is exactly the kind of stale rationale that misled this session about the instrument. Beyond those, the four cleanup items requested with this entry are now done: the regenerated patch was verified to apply cleanly to a clean `c5423bd` and to produce files byte-identical to the verified deployment, with the esp-idf half also confirmed to apply to a clean `cache_utils.c`; JFS-001 was revised because its claim that firmware must never write flash is contradicted by the project's own working code, and KRN-005's citation of it was narrowed to match; and the twenty records that lacked a fast lookup index line now have one, taking the file to 86 records with 86 index keys, no record without an index line, no index line without a record, every routing target resolving and all YAML parsing. Nothing is known to be left over from this list.
+
+#### Files Modified:
+
+None.
+
+#### Status:
+
+- Build: N/A
+- Deployment: N/A
+- User Test: N/A
+
+---
+
 ## 54 COMMIT Unreleased 2026-11-11T09:35:00-07:00
 
 #### Coming From:
