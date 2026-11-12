@@ -1,3 +1,33 @@
+## 80 COMMIT Unreleased 2026-11-12T07:00:00-07:00
+
+#### Coming From:
+
+Unreleased c8eb51e
+
+#### Purpose:
+
+Record the Users app's reflow, the first one where a two-column layout could not be rescued by moving controls.
+
+#### Outcome:
+
+At 94ec356 on branch `t-watch-ultra`, `apps/users.c` stacks its form on a narrow window. Upstream is an account list at x 1 width 20 beside a form column at x 25 width 44; on a 40-column panel the client is 38 wide, so the form column had thirteen columns and most of it was cut -- "Administr", "Manage ac", "System se", "Current passw", "Change pass", "Require pas" -- while the 44-column text fields ran off the glass and the status line stopped at "password m". This was the first app of the six where the layout could not be fixed by moving controls: a two-column split leaves 13 columns for the wider half, and no arrangement of a name field, seven checkboxes, three password fields and six buttons fits in that. So the columns are replaced rather than rebalanced: the account list takes three rows across the top, the form is one control per row with the inline labels Name, Cur, New and Con, and the permission checkboxes pair up two to a row. The short permission captions -- Accounts, System, Hardware, Shared, Clock, Apps -- are used on the narrow window only, because the full forms are 19 columns each and two of them exactly fill a 38-column row with no gap, which reads worse than the shorter pair; beside a Users dialog's own checkboxes they are unambiguous. Two placement errors were caught by reading the glass: "Create / Apply" is 18 columns at x 1 and "New account" was placed at x 18, so the second overlapped the first by a column, and the status line was still the 55-column wording. Both were fixed and the layout re-read. This is also where the operator's decision to check every app on the glass rather than trusting the survey paid off for the second time: the survey from entry 78 flagged Users by its widgets, but only the glass showed which control was overlapping which. Verified: host suite 37 of 37; the account list, name, administrator and all seven permissions, both buttons, three password fields, three action buttons, the hint and a fitting status line, all read back over the USB link.
+
+#### Next Steps:
+
+`trash` is next and is positioning rather than restructuring. Then `store` and `update`, which have captions longer than the screen and need rewording, and `settings`, which is a list of controls and may be closer to Users than to the ones already done. Log Viewer, Task Manager, Keyboard, Image Viewer, Search and Pixels still need a look on the glass; the operator is checking each app in turn, so no further survey is needed -- the glass is finding more than the grep did, twice now. The parked redraw fault from entry 74 is untouched; forcing `td_full_redraw()` with the garbage visible is still the experiment that would localise it. The remaining port overrides `TD_SIZE_POLL_MS=0` and `TD_ACK_TIMEOUT_MS=0` are still untested against the current tree, and the three capacitive bars under the glass still act on stretches of taskbar rather than three fixed cells, awaiting the vendor map. The Linux side stays parked; its last code commit is 8645a82 and everything after it in this repository is the project log.
+
+#### Files Modified:
+
+- apps/users.c
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: PASS
+
+---
+
 ## 79 COMMIT Unreleased 2026-11-12T06:20:00-07:00
 
 #### Coming From:
