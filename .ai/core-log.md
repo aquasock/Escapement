@@ -1,3 +1,34 @@
+## 85 COMMIT Unreleased 2026-11-12T10:30:00-07:00
+
+#### Coming From:
+
+Unreleased bf9ea8c
+
+#### Purpose:
+
+Record the Software Update app's reflow, which needed rewording as well as layout.
+
+#### Outcome:
+
+At ec52df1 on branch `t-watch-ultra`, `apps/update.c` stacks its form on a narrow window. Every field was 62 or 74 columns on a window that asks for 78: the URL field ran from column 13 to 74, the four buttons on row 6 came to 63 with "Check for official updates" alone at 28, the daily-check checkbox was 47 and the progress bar was 74 -- so on a 38-column client Check, Install, Cancel and the official button were all off the glass and the app could not update anything. Narrow windows put the URL field on its own row, Check/Install/Cancel under it, then "Official..." and the daily check, with the progress bar sized to the client. Three text lines also had to be reworded, and the third is the interesting one: "Other slot ota_1 is empty (updates go there)" was cut to "Other slot ota_1 is empty (updates g", losing the only reason the line exists -- where the next update lands -- and now reads "Next ota_1: empty". The installed line dropped its SDK version and keeps the date only, since the time of day is never wanted; the running line drops the explanation of what "on trial" means. One build error was made and caught: trimming the build date by copying it into a smaller buffer is rejected by `-Werror=format-truncation`, and the fix is to use a precision in the `printf` rather than a copy, which says what is meant anyway. Software Update is deleted from `s_narrow_todo[]`, leaving three: Settings, Recycle Bin and Date and time. Cancel and "Restart now" are absent from the reading below and that is correct -- they are shown only while an update is running or after one finished, and neither applies. Verified: host suite 37 of 37 including the 40x26 pass; flashed and read on the glass -- the three status lines, the URL field, Check and Install, Official..., the daily check and the progress bar, all inside the frame.
+
+#### Next Steps:
+
+Three apps remain on the narrow work list: Recycle Bin, which is positioning (Refresh at column 38 and a 23-column "Delete after: never" at 18), and Settings and Date and time, both of which were reported as passing on the glass and which the 40x26 pass says otherwise. After those the list should be empty and the guard becomes a plain regression test for every app at this board's grid. The parked redraw fault from entry 74 is untouched; forcing `td_full_redraw()` with the garbage visible is still the experiment that would localise it. The remaining port overrides `TD_SIZE_POLL_MS=0` and `TD_ACK_TIMEOUT_MS=0` are still untested against the current tree, and the three capacitive bars under the glass still act on stretches of taskbar rather than three fixed cells, awaiting the vendor map. The Linux side stays parked; its last code commit is 8645a82 and everything after it in this repository is the project log.
+
+#### Files Modified:
+
+- apps/update.c
+- tests/test_native_apps.c
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: PASS
+
+---
+
 ## 84 COMMIT Unreleased 2026-11-12T09:50:00-07:00
 
 #### Coming From:
