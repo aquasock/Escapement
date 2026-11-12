@@ -1,3 +1,36 @@
+## 93 COMMIT Unreleased 2026-11-11T21:27:12-07:00
+
+#### Coming From:
+
+Unreleased 5996031
+
+#### Purpose:
+
+Record the margin buttons' duties, which replaced a mapping that spent all five left buttons on keys the desktop never uses.
+
+#### Outcome:
+
+At ad2798b on branch `t-watch-ultra`, the five left margin buttons are F10 for the Start menu, Esc for cancel, F6 for the window switcher, Super+D for show desktop and F11 for full screen, and the bottom strip is Tab, Enter and Ctrl+Q for back. The mapping they replaced was F1 to F5, and the fault was the same one that retired the pointer: those are application keys, not desktop keys. On the desktop they do nothing at all, and inside a window they are already spoken for -- Files renames on F2 and reloads on F5, Editor finds on F3 and runs on F5, Terminal forwards them to the shell -- so five physical buttons were carrying functions that only ever fire inside a window while the desktop's own actions, which are the ones that lost their mouse, went unmapped. The five chosen are the ones without which the desktop cannot be used pointerless: the Start menu is otherwise reachable only from the taskbar or a desktop icon and both need a mouse, F6 is the only way to change focus, and Super+D is the only way to restore a minimised window because F6 skips hidden ones. Back is Ctrl+Q rather than Alt+F4 because the window manager already treats Ctrl+Q as "close the focused window" and routes it through td_win_request_close(), so a window with something to lose can refuse: Editor asks about unsaved changes and everything else closes outright. Esc moved from the bottom strip to the left column to make room for it, which is the cost of the arrangement and was accepted. One shared-code addition went with the port change: Ctrl+Q now closes the open Start menu, because otherwise the one place a back button is most obviously wanted is the one place it did nothing. Two checks were worth their cost. The first: every sequence the touch driver injects was fed through the desktop's input parser on the host and compared against the TD_KEY_* enum, because a margin button whose bytes decode to nothing looks on the glass exactly like a button whose duty is missing -- F10 decodes to 0x110018, Esc to 0x110004, F6 to 0x110014, F11 to 0x110019, Tab to 0x110002, Enter to 0x110001, Super+D to 'd' with the Super modifier and Ctrl+Q to 'q' with Control. The second: the menu change got a test rather than a look on the glass, and it was run against the old code to prove it was not vacuous -- `test_menu_back` fails with two assertions when the new branch is removed and passes with it. Noticed and not changed: on a bare desktop with no window open, Esc toggles the Start menu, because the window manager already treats Enter and Esc as the same thing there for icon-keyboard use. That makes the cancel button open the launcher when nothing is running, which is worth deciding about rather than silently changing in shared code that every port inherits. Verified: host suite 37 of 37, flashed, and the operator confirmed the mapping is the one wanted; the feel of each key on the glass is the operator's report, not a reading. What is still unproven is the right column, which is live and scrolls but has nothing painted in it.
+
+#### Next Steps:
+
+The right column is a live touch region with nothing drawn in it and should be painted next, in the same green and with the same corner treatment as the other two margins. The top margin is classified in `edges.h` as `EDGE_TOP` and inert, intended for status icons. Then decide the bare-desktop Esc question recorded above: it currently opens the Start menu, which was sensible when Enter and Esc were a keyboard pair for the icon grid and is odd now that Esc means cancel. Also open: the parked redraw fault from entry 74, the two port overrides `TD_SIZE_POLL_MS=0` and `TD_ACK_TIMEOUT_MS=0` still untested against the current tree, the RTC write path written but not exercised, and the margin buttons staying painted while a full-screen application owns the screen, where they are no longer buttons. The Linux side stays parked; its last code commit is 8645a82 and everything after it in this repository is the project log.
+
+#### Files Modified:
+
+- ports/twatchultra/main/touch.c
+- ports/twatchultra/README.md
+- src/wm.c
+- tests/test_wm.c
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: PASS
+
+---
+
 ## 92 COMMIT Unreleased 2026-11-11T21:13:24-07:00
 
 #### Coming From:
