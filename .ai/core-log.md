@@ -1,3 +1,33 @@
+## 86 COMMIT Unreleased 2026-11-12T11:10:00-07:00
+
+#### Coming From:
+
+Unreleased 2e68014
+
+#### Purpose:
+
+Record the collision in Software Update that the operator found on the glass, which the layout test could not see.
+
+#### Outcome:
+
+At 5e905a6 on branch `t-watch-ultra`, `apps/update.c` anchors its status lines to the bottom of the client on a narrow window. The previous entry's form rows and the app's own status lines collided: `on_draw` writes the official-release line at fixed rows 9 and 10, the "Image" line at 11, the progress percent at 13 and the outcome message at 14, all chosen for the 78-column layout where the form ended at row 7. On a narrow window the Official button is at row 9 and "Check daily" at 10, so a failed check drew "Official: ..." straight through the checkbox and the outcome message landed in the middle of the form -- exactly what the operator reported as "check daily and cannot reach the update are on the same row and overlap". The status lines are bottom-anchored now -- the release/image line at h-6, the progress bar at h-5, its percent at h-4, the message at h-2 and the root warning at h-1 -- so a form that grows from the top cannot collide with them however either side changes later. Two validation messages were also longer than 37 columns and read as though cut mid-sentence: "Type a URL (http:// or https://) or a .bin file, or check for official updates." is 91 columns. They are shortened in both layouts, which costs nothing because the hint line above the field already carries the "http:// or https://" detail. What this entry should record about method: the 40x26 layout test checks that widgets lie inside the client, and every one of these did -- it cannot see a widget colliding with text that `on_draw` paints, because that text is not a widget. Two of the last three defects (this one and the earlier `td_progress` bar in Mouse) were invisible to a test that only knows about widgets, which is the argument for the operator checking each app on the glass rather than trusting a green suite. Verified: host suite 37 of 37; flashed and read on the glass with a failed check deliberately triggered -- "Check daily" on row 11, the outcome message on row 23, no overlap, and the message reads as a complete sentence.
+
+#### Next Steps:
+
+Two apps remain on the narrow work list: Recycle Bin, which is positioning, and Settings and Date and time, both of which were reported as passing on the glass and which the 40x26 pass says otherwise. A gap in the test is now known and worth closing if it is cheap: `test_native_apps` checks widget rectangles against the client but not text painted by `on_draw`, and two of the recent defects were of that kind. A check for a widget overlapping a drawn line would need the app's drawing to be recorded, which the composed buffer already does -- comparing a widget's cells against what `on_draw` wrote is possible in principle and is the next thing to consider after the app list is empty. The parked redraw fault from entry 74 is untouched; forcing `td_full_redraw()` with the garbage visible is still the experiment that would localise it. The remaining port overrides `TD_SIZE_POLL_MS=0` and `TD_ACK_TIMEOUT_MS=0` are still untested against the current tree, and the three capacitive bars under the glass still act on stretches of taskbar rather than three fixed cells, awaiting the vendor map. The Linux side stays parked; its last code commit is 8645a82 and everything after it in this repository is the project log.
+
+#### Files Modified:
+
+- apps/update.c
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: PASS
+
+---
+
 ## 85 COMMIT Unreleased 2026-11-12T10:30:00-07:00
 
 #### Coming From:
