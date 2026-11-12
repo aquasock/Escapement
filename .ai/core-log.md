@@ -1,3 +1,34 @@
+## 91 COMMIT Unreleased 2026-11-12T15:40:00-07:00
+
+#### Coming From:
+
+Unreleased 6434dc5
+
+#### Purpose:
+
+Record the three button bars painted below the framebuffer, and the two geometry faults that only the glass revealed.
+
+#### Outcome:
+
+At de40514 on branch `t-watch-ultra`, `ports/twatchultra/main/display.c` paints the red/green/blue strip under the desktop that the Linux build carried for the board's three capacitive buttons. The geometry is that build's measured values: controller columns 0 to 431, thirds at 158 and 295, two black pixels between, full primaries rather than the desktop palette. It starts at glass row 461 rather than 445 because this framebuffer is 416 rows tall where Linux's was 400, so the bars are 41 rows instead of 57 -- shorter, which the operator expected. Images only: nothing reads them, and a touch on the strip still maps to a taskbar cell, so making them real buttons is a separate job. Two faults were found on the glass and neither was visible from the code. The first: the strip was divided by `DISPLAY_W` (320) instead of `PANEL_W` (410), which made each third 106 columns instead of 136 and left the right-hand 90 unpainted -- three bars shifted left with the green/blue separator near the middle of the glass. The framebuffer is a window onto the glass and the buttons belong to the glass, a distinction the Linux driver's own comment makes and this port collapsed. The second: painted as four separate 11-row windows it came out with two thin black lines across it, and the rows were contiguous in the code, so the loss had to be the panel's -- `docs/panel-geometry.md` records that the first row of a window is swallowed, so four windows swallowed four rows. It is one window with chip select held across every transfer now. A third change followed from the second: a 432-column strip no longer fits sixteen rows in the 10 KB transmit buffer, so a band is eleven rows and `s_tx` is refilled between transfers rather than filled once, which costs nothing at boot. The operator confirmed the alignment and then the absence of the lines.
+
+#### Next Steps:
+
+The bars are images; making them buttons is the next step and is a touch-side job rather than a display one. `touch.c` currently maps a press on the strip through the framebuffer grid, which gives stretches of taskbar -- columns 0 to 14, 14 to 31, and a single pixel column at 31 -- rather than three buttons; the strip should fire three fixed cells (or three key codes) instead. The recorded edges in TCH-004 divide 22..294 into two equal zones plus a one-pixel third, which is more likely a transcription artefact than the real geometry, and the strip now painted here uses 0..431 with thirds at 158 and 295, so the touch mapping should be reconciled with what is actually painted rather than with that record. Also open: the parked redraw fault from entry 74, the two port overrides `TD_SIZE_POLL_MS=0` and `TD_ACK_TIMEOUT_MS=0` still untested against the current tree, and the RTC write path written but not exercised. The Linux side stays parked; its last code commit is 8645a82 and everything after it in this repository is the project log.
+
+#### Files Modified:
+
+- ports/twatchultra/main/display.c
+- ports/twatchultra/README.md
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: PASS
+
+---
+
 ## 90 COMMIT Unreleased 2026-11-12T14:30:00-07:00
 
 #### Coming From:
