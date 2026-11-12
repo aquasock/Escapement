@@ -61,13 +61,81 @@ timeout 3 bash -c "exec 3<>$PORT" 2>/dev/null \
 PY=build/idf-tools/python_env/idf5.1_py3.14_env/bin/python
 [ -x "$PY" ] || die "no python env at $PY; run ./scripts/build.sh once"
 
-printf 'reading 16 MiB from %s -> %s\n' "$PORT" "$OUT"
-"$PY" -m esptool --chip esp32s3 --port "$PORT" --baud 921600 \
-    read_flash 0 0x1000000 "$OUT" 2>&1 | tr '\r' '\n' | tail -2
+#
+# READ, THEN VERIFY, WITH THE BOARD HELD IN THE BOOTLOADER THROUGHOUT.
+#
+# `verify_flash` compares a file against the LIVE chip, so it can only pass if
+# nothing writes to the flash between the read and the compare. On this board
+# something does: the watch boots, the firmware runs, and NVS -- shell history,
+# TinyDesk settings -- is written, partly at power-down. Measured on
+# 2026-11-12: a backup taken at 23:58 no longer matched the chip four minutes
+# later, and 3 of the NVS partition's 6 blocks had changed. The first three
+# backups on this board verified only because they were checked before the write
+# landed, which is a race the script won by being quick, not a check.
+#
+# So the read leaves the board in esptool's stub instead of resetting it, and the
+# verify connects to that stub without sending a reset pulse. The board never
+# runs firmware between the two, and the compare is against the same flash the
+# read came from. The reset happens at the very end, once the verify has passed.
+#
+# This is two invocations and not one because esptool 4.13 does not chain
+# commands: `read_flash ... verify_flash ...` fails with "unrecognized
+# arguments". Both flags below were chosen to make the split safe rather than
+# because chaining would have been convenient -- `--before no_reset` is what
+# stops the second invocation from rebooting the board.
+#
+reset_board() {
+    "$PY" -m esptool --chip esp32s3 --port "$PORT" --before no_reset \
+        --after hard_reset run >/dev/null 2>&1 || true
+}
 
-size=$(stat -c %s "$OUT")
+#
+# If anything between the read and the reset fails, the board is left in the
+# bootloader -- which looks exactly like a dead watch until it is power cycled.
+# The trap puts it back however this exits.
+#
+trap 'reset_board' EXIT
+
+printf 'reading 16 MiB from %s -> %s\n' "$PORT" "$OUT"
+printf 'the board stays in the bootloader until the verify has passed\n'
+
+log=$(mktemp)
+trap 'reset_board; rm -f "$log"' EXIT
+
+#
+# esptool's status is captured to a file and checked directly. A pipeline would
+# report the status of its LAST stage -- `tail` -- which is 0 whether or not the
+# read worked, so `if ! cmd | tail` is a check that cannot fail.
+#
+if ! "$PY" -m esptool --chip esp32s3 --port "$PORT" --baud 921600 \
+        --before default_reset --after no_reset \
+        read_flash 0 0x1000000 "$OUT" > "$log" 2>&1
+then
+    tr '\r' '\n' < "$log" | tail -5 >&2
+    die "the flash read failed; $OUT is not a backup"
+fi
+tr '\r' '\n' < "$log" | grep -E 'Read [0-9]+ bytes' | tail -1
+
+#
+# Size before verify: a short read is worth catching before spending another
+# four minutes comparing it.
+#
+size=$(stat -c %s "$OUT" 2>/dev/null || echo 0)
 [ "$size" = "16777216" ] || die "backup is $size bytes, expected 16777216"
+
+printf 'verifying against the chip, which has not been allowed to boot\n'
+if ! "$PY" -m esptool --chip esp32s3 --port "$PORT" --baud 921600 \
+        --before no_reset --after hard_reset \
+        verify_flash 0 "$OUT" > "$log" 2>&1
+then
+    tr '\r' '\n' < "$log" | tail -5 >&2
+    die "verify FAILED: $OUT does not match the chip"
+fi
+tr '\r' '\n' < "$log" | grep -E 'Verifying|verify (OK|FAILED)' | tail -2
+grep -q 'verify OK' <(tr '\r' '\n' < "$log") \
+    || die "esptool exited 0 but never said 'verify OK'; treat the image as unverified"
 
 (cd "$(dirname "$OUT")" && sha256sum "$(basename "$OUT")" > "$(basename "$OUT").sha256")
 printf 'OK: %s\n' "$OUT"
 cat "$(dirname "$OUT")/$(basename "$OUT").sha256"
+exit 0
