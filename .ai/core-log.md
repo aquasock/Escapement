@@ -1,3 +1,36 @@
+## 95 COMMIT Unreleased 2026-11-11T21:46:36-07:00
+
+#### Coming From:
+
+Unreleased 0c5524d
+
+#### Purpose:
+
+Record the right margin becoming five arrow buttons in place of the scroll column, painted as the mirror of the left one.
+
+#### Outcome:
+
+At 263468f on branch `t-watch-ultra`, the right margin carries five green buttons in the same treatment as the left column, and the scroll column is gone. Top to bottom they are a reserved slot, Left, Right, Up and Down, sent as the CSI sequences a keyboard sends, so they reach whatever has the focus: the icon grid when no window is open, a list or a form inside one. That completes the pointer replacement as a set rather than as one edge -- the left column is what windows do, the right is where the cursor goes, and the strip is typing and back. `paint_left_buttons()` became `paint_column(x0, x1, desk_right)`, because the two margins are the same object seen from opposite sides and that flag is the only difference: it decides which edge the separator arcs are cut on and which edge the end buttons cap against. `edges.h` folded the two columns onto shared vertical bounds and a shared button count, `COL_Y0`, `COL_Y1` and `COL_N`, since both are five buttons over the same 416 rows, and the hit test now gives `EDGE_RIGHT` an index the way `EDGE_LEFT` has one rather than treating the whole column as a single control. Three checks, all without a finger on the glass. The four arrow sequences were decoded through the real input parser: Up is 0x110005, Down 0x110006, Right 0x110007, Left 0x110008, which is the enum's order and not something to assume. The glass was swept again at 205,820 points with no region or index disagreement, and the right column resolves on 18,720 of its 18,720 painted points. The two columns were then compared point by point against a mirror and disagree nowhere. That last check failed first, and the fault was the check: it mapped left x to right x as an offset, which lines the surfaces up but does not mirror them, so the arcs faced the same way on both sides and 496 pixels disagreed. A mirror is `x_right = 453 - x_left`. Worth recording because it is the same shape of error as the one entry 94 fixed, a comparison made in the wrong space, and it was caught only because the two implementations were required to agree rather than inspected. Two things are deliberate and worth stating. The reserved button is painted like the others and does nothing, which the operator asked for and which means it looks live; that is a trap for whoever presses it, and blanking it is a one-line change if it becomes annoying. And the right column's window begins one column early, at controller 386, so that the pixel the panel swallows at a window's top-left is a sacrificed one rather than the first green column; 386 is the framebuffer's last column, which is repainted by the desktop's first frame moments later, and the bottom strip already pays its column the same way at 66 with no artefact seen. Verified: host suite 37 of 37, flashed and hash-confirmed in four sections. The finger test is the operator's; this cycle's evidence is the sweep, the sequence decode and the mirror comparison.
+
+#### Next Steps:
+
+The five right buttons and the reserved slot need checking on the glass, and the press log's `e4 i<n>` line names which one fired. The top margin is classified in `edges.h` as `EDGE_TOP` and inert, intended for status icons, and is the last unpainted region. Two open questions from earlier still stand: Esc on a bare desktop opens the Start menu, which was sensible while Enter and Esc were a keyboard pair for the icon grid, and the margin buttons stay painted while a full-screen application owns the screen where they are no longer buttons. Also open: the parked redraw fault from entry 74, the two port overrides `TD_SIZE_POLL_MS=0` and `TD_ACK_TIMEOUT_MS=0` still untested against the current tree, and the RTC write path written but not exercised. The sweep from entry 94 paid for itself twice in one cycle -- it found a stale reference at the first run and a wrong mirror axis at the second -- and belongs in the port as a real test rather than as a throwaway in a temporary directory. The Linux side stays parked; its last code commit is 8645a82 and everything after it in this repository is the project log.
+
+#### Files Modified:
+
+- ports/twatchultra/main/display.c
+- ports/twatchultra/main/edges.h
+- ports/twatchultra/main/touch.c
+- ports/twatchultra/README.md
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: PASS
+
+---
+
 ## 94 COMMIT Unreleased 2026-11-11T21:36:49-07:00
 
 #### Coming From:
