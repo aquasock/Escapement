@@ -1,3 +1,34 @@
+## 87 COMMIT Unreleased 2026-11-12T11:50:00-07:00
+
+#### Coming From:
+
+Unreleased f9fa6e1
+
+#### Purpose:
+
+Record the Recycle Bin's reflow, which leaves two apps on the narrow work list.
+
+#### Outcome:
+
+At ed80729 on branch `t-watch-ultra`, `apps/trash.c` lays its buttons out for the width it gets. Upstream puts Restore, Delete, Empty bin and Refresh at columns 1, 13, 24 and 38 -- Refresh alone is 11 wide from column 38 -- and "Delete after: never" at 18, reaching column 40; on a 38-column client Refresh was off the glass and the retention phrase cut. Narrow windows take three buttons on one row and Refresh on the next, then the size and retention buttons each on their own row, because 11 + 10 + 13 is already 34 and the fourth does not fit whatever is done with it. The status line had been sharing a row with the retention button at column 24, which left it 13 columns for "0 items, 0 B of 1 MB" and cut it to "0 items, 0 B o"; it has its own row now. Two mistakes were made and caught by the 40x26 test rather than by eye: the list was given seven rows below the client while the window's own minimum height allowed for fewer, so at its minimum the list resolved to zero rows -- the minimum is raised -- and the column header is one 78-column string of titles, which a narrow window now replaces with the two it can show. Recycle Bin is deleted from `s_narrow_todo[]`, leaving Settings and Date and time, both of which were reported as passing on the glass and which the test says otherwise. The operator separately confirmed Pixels and Counter as correct with no change. Verified: host suite 37 of 37 including the 40x26 pass; flashed and read on the glass -- all four buttons, the size and retention controls and a full status line.
+
+#### Next Steps:
+
+Two apps left on the narrow work list: Settings and Date and time, both reported as passing on the glass before the 40x26 pass contradicted it. When those are done the list is empty and the guard becomes a plain regression test at this board's grid for every app. The known gap recorded in entry 86 still stands -- the test checks widget rectangles and cannot see a widget colliding with text that `on_draw` paints, which is how two recent defects slipped through -- and it is worth closing once the app list is done, since the composed buffer holds both and the comparison is possible. The parked redraw fault from entry 74 is untouched; forcing `td_full_redraw()` with the garbage visible is still the experiment that would localise it. The remaining port overrides `TD_SIZE_POLL_MS=0` and `TD_ACK_TIMEOUT_MS=0` are still untested against the current tree, and the three capacitive bars under the glass still act on stretches of taskbar rather than three fixed cells, awaiting the vendor map. The Linux side stays parked; its last code commit is 8645a82 and everything after it in this repository is the project log.
+
+#### Files Modified:
+
+- apps/trash.c
+- tests/test_native_apps.c
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: PASS
+
+---
+
 ## 86 COMMIT Unreleased 2026-11-12T11:10:00-07:00
 
 #### Coming From:
