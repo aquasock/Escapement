@@ -1,3 +1,38 @@
+## 90 COMMIT Unreleased 2026-11-12T14:30:00-07:00
+
+#### Coming From:
+
+Unreleased ecd2e73
+
+#### Purpose:
+
+Record the PCF85063A driver in the TinyDesk port, which gives the watch a clock with no network.
+
+#### Outcome:
+
+At d2b0464 on branch `t-watch-ultra`, `ports/twatchultra/main/rtc.c` reads the board's battery-backed RTC at I2C 0x51 and seeds the system clock at boot. The gap it closes is one the operator spotted on the glass: TinyDesk takes its time from SNTP and has no RTC hook, so with Wi-Fi not associating the desktop showed "--:--" and "no clock" while a correct time sat two millimetres away in a chip that was already proven on the Linux side (RTC-001 to RTC-004). The driver is transcribed from mainline's `rtc-pcf85063.c`, not inferred: the time starts at register 0x04 as seven BCD bytes -- second, minute, hour, day, weekday, month, year -- with bit 7 of the seconds register the oscillator-stop flag. A stopped part is treated as no clock at all, which is what mainline does by returning -EINVAL, because a watch that boots to a confidently wrong 1970 is worse than one that admits it does not know; times before 2020 are rejected for the same reason. `rtc_seed_system_clock()` runs in `link_init()` before the display and before TinyDesk starts, so the desktop has a time from its first frame. SNTP still wins: the shared code's `time_set()` calls a weak `board_time_set_post()`, the pattern this tree already uses for `board_maintenance_start`, and the port writes the new time back to the chip, so a correction made in Date and time survives a power cycle. That weak hook is the only shared-code change in this cycle, one function and two lines. Verified on the glass: with Wi-Fi offline and no SNTP, the taskbar read "03:04 12-11-2026" against a host UTC of 2026-11-12 03:04:22 -- the chip's time to the minute. NOT verified: the write path, which is the same register map in reverse and is called and compiles but has not been exercised by writing a changed time and reading it back, because reaching Date and time's "Change..." needed more than the desktop's controls allowed from here. One thing observed while checking and worth recording as a fault of method rather than of code: the desktop appeared to have lost all its icons after the RTC change, and the cause was that earlier blind clicking in Settings had switched "Desktop icons" off. The stream contained no icon text at all, which is what ruled out the RTC driver and pointed at a setting. It was toggled back on and the icons returned. The desktop also displayed UTC rather than local time, which is the time zone setting and not the RTC -- the chip stores UTC and the zone is applied above it, exactly as RTC-002 describes for the Linux side.
+
+#### Next Steps:
+
+The RTC write path should be exercised when it is convenient: set the clock in Date and time, power cycle, and confirm both that the new time is what the chip holds and that it comes back. Until then it is written but unproven, and the README says "writes back when the time is set" on the strength of the code alone. The time zone is a separate matter and is unset in this build, so the desktop shows UTC; Settings has a Time zone control and RTC-002 records that America/Phoenix is the POSIX string MST7 -- UTC-7 all year with no DST -- not MST7MDT. The parked redraw fault from entry 74 is untouched; forcing `td_full_redraw()` with the garbage visible is still the experiment that would localise it. The remaining port overrides `TD_SIZE_POLL_MS=0` and `TD_ACK_TIMEOUT_MS=0` are still untested against the current tree, and the three capacitive bars under the glass still act on stretches of taskbar rather than three fixed cells, awaiting the vendor map. The Linux side stays parked; its last code commit is 8645a82 and everything after it in this repository is the project log.
+
+#### Files Modified:
+
+- ports/twatchultra/main/rtc.c
+- ports/twatchultra/main/rtc.h
+- ports/twatchultra/main/link_twatch.c
+- ports/twatchultra/main/CMakeLists.txt
+- ports/esp_idf/app/main.c
+- ports/twatchultra/README.md
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: PASS
+
+---
+
 ## 89 COMMIT Unreleased 2026-11-12T13:30:00-07:00
 
 #### Coming From:
