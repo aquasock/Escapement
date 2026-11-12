@@ -1,3 +1,37 @@
+## 25 COMMIT Unreleased 2026-11-12T09:22:30-07:00
+
+#### Coming From:
+
+Unreleased 41d3c92
+
+#### Purpose:
+
+Make the watch react to the charger rather than merely observe the cable, and put the die temperature on the screen instead of letting the window cut it off.
+
+#### Outcome:
+
+At `3a71c6d` on branch `t-watch-ultra`, the AXP2101's own charge start and finish events are enabled and handled, and System Monitor shows the chip's temperature on a row of its own. THE CHARGE WORK STARTED FROM A DISTINCTION THE PORT COULD NOT MAKE. `vbus in` reported that a cable had arrived, which is not the same as charging: a cable in a dead charger, a cell that never starts taking current, and a healthy charge all look identical if only VBUS is watched. The part reports three separate things and the port was listening to one of them. Bank 1 of the status block carries the VBUS edges at bits 7 and 6, and bank 2 carries CHARG at bit 3 and CHARG_DONE at bit 4, with enable partners at 0x40..0x42; the measured bank 2 enable was 0x5f and the two charge bits were off. They are enabled now and VERIFIED BY READBACK rather than by the write returning OK -- `irq2 5f c1` where the c1 means both bits are in the register -- because this project has already been taught that lesson once, when the speaker rail's log line printed the values read before the write and an earlier claim that it confirmed the rail was wrong on that basis. THE HANDLING MOVED OUT OF pwrkey.c. The button driver owns the pin and is the thing that clears the status, so it keeps that job and hands its three status bytes to `charge_on_irq()`; what a VBUS or charger edge MEANS now lives in charge.c with the rest of the charging knowledge, and pwrkey.c lost its own copy of the VBUS bits so the two cannot drift. The handler logs transitions only -- `vbus in`, `vbus out`, `chg go`, `chg done` -- comparing against what it last saw, so a bouncing charger cannot repeat a line, and the boot state is fed through the same path so the log starts from what the part reports rather than from unknown and the first line is never a removal with no matching arrival. ORDERING IS LOAD-BEARING AND WAS REASONED ABOUT BEFORE THE FIRST FLASH: `charge_watch_enable()` runs before `pwrkey_init()`, because enabling a source can make a status bit pending and `pwrkey_init()` is what clears the status and refuses to arm while the line reads low -- arming first would have left that guard looking at a line the very next call was about to pull down. THE RESULT IS THE SEQUENCE THAT PROVES THE DISTINCTION IS REAL, and it is better evidence than the cycle expected. The operator unplugged and replugged the watch, and the log reads `chg done` at 186711 ms while the cable was still attached, `vbus out` at 188450, `vbus in` at 192482, `chg go` at 192497 and `chg done` again at 202616. So the charger finished its cycle before the cable came out, started again fifteen milliseconds after it went back in, and completed ten seconds later against a cell that was already near full -- which is a working charge controller doing exactly what the three bits say it should, and it also corrects a prediction this session made in advance: a full cell does NOT necessarily skip CHARG, it charges briefly and finishes. THE DIE TEMPERATURE WAS ALREADY READ AND ALREADY BROKEN ON THE GLASS. `chip_temp` existed in the shared ESP-IDF app and System Monitor called it, but the value shared the Tasks line and the window clipped it, so the screen showed `Tasks: 18  CPU: 240 MHz  Chip` with no number after it -- worse than not showing it at all, because it reads as a reading of nothing. It has its own row now, created only when the sensor actually answers, probed once in `launch()` because that question decides the layout rather than the reading; the window grows by that row and `on_close()` clears the new pointer, which is the use-after-free shape this file records from the battery row. Live on the watch: `Chip: 37.8 °C`, a plausible idle temperature for this part with the panel lit. Both changes build clean under `-Werror` and the host suite is 38 of 38. `PMU-005` was revised in place to carry the bank 2 bits and the observed sequence, since it is the same subject and a second record for two more bits of the same register block would have split one fact in two. The required `core-syntax.md` audit was run against the whole `.ai/` diff: `core.md` was untouched, the entry follows the six-section template and the canonical order, its number is the highest present plus one at 25, and the reference change is a revision inside one record with all 87 records still parsing and no duplicate ids.
+
+#### Next Steps:
+
+A fresh backup is due and is the next action with real value, since this build carries `charge.c`'s transition handling and the System Monitor temperature row and `working-2026-11-12-0859.bin` predates both. What charging leaves open is smaller than it was and none of it is blocked: the cell's NTC thermistor is still unconfirmed -- TS measurement is enabled and reads 0xff in the enable byte, but a missing thermistor produces a plausible-looking temperature rather than an error, so the check is to read the TS ADC channel and compare it against a value the die sensor can corroborate, which is now easy because that sensor works; and the reported capacity is still unverified beyond 100 percent, which only draining the watch can settle. Both are measurements rather than code. Two design questions remain open by the operator's choice: both pushers send Enter and the useful shape is probably F10 on the BOOT pusher, since it is global in the window manager and works with nothing focused; and what the desktop should do with the charge transitions now that it can see them, which so far is a log line and nothing more -- refreshing the battery row at the moment a charge starts would be the smallest visible version of that. Everything else is unchanged and unblocked: audio is a beep with no playback path, the display's tearing-effect line is configured and unread, the screen model that reads the Log Viewer over USB is in a temporary directory for the seventh cycle and belongs in the fork under a tools directory, and the unbuilt outboard parts are as they were, with the BHI260AP at 0x28 answering and undriven, the LoRa radio needing ALDO3 and XL9555 P05, the NFC reader needing DLDO1, and the GNSS and microphone with no code. The standing queue is otherwise as it was: the bell seam is parked with its finding recorded, the top margin is the last unpainted region, the full-screen margin question waits for something to go full screen, Store installs to the card and the image cache have never run against a card, `TD_SIZE_POLL_MS=0` and `TD_ACK_TIMEOUT_MS=0` remain untested against the current tree, the RTC write path has never been exercised by setting a time and power-cycling, and the pre-existing YAML fence defect in `core-reference.md` is untouched.
+
+#### Files Modified:
+
+- ports/twatchultra/main/charge.c
+- ports/twatchultra/main/charge.h
+- ports/twatchultra/main/pwrkey.c
+- ports/twatchultra/main/link_twatch.c
+- apps/sysmon.c
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: PASS
+
+---
+
 ## 24 COMMIT Unreleased 2026-11-12T09:11:48-07:00
 
 #### Coming From:
