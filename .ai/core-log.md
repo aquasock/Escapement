@@ -1,3 +1,40 @@
+## 22 COMMIT Unreleased 2026-11-12T08:58:25-07:00
+
+#### Coming From:
+
+Unreleased b54fc6b
+
+#### Purpose:
+
+Make Pusher A, the watch's power key, reach the desktop, which means driving the AXP2101's interrupt line for the first time in this port.
+
+#### Outcome:
+
+At `715c7b4` on branch `t-watch-ultra`, `ports/twatchultra/main/pwrkey.c` configures GPIO 7 as a pulled-up input with a falling-edge interrupt, reads and clears the AXP2101's interrupt status on every wake, and sends one key per short press into the same `inject()` queue everything else uses. Pusher A is not a GPIO at all: it is the PMU's PEK input and reaches the SoC only as the PMU's own interrupt, `PMU_IRQ` on GPIO 7 -- confirmed in the schematic net list as `PMU_IRQ------IO7` and already used by this project's Linux port as `interrupts = <7 IRQ_TYPE_LEVEL_LOW>` -- so this is an I2C driver with a GPIO wake-up rather than a button driver. THE FACT THAT DECIDES THE WHOLE DESIGN IS THAT THE LINE STAYS LOW UNTIL THE STATUS IS CLEARED. The AXP2101 asserts IRQ while any enabled source is pending, and the pending bits at 0x48..0x4a are write-1-to-clear, so a handler that wakes, reads and returns without clearing is called again immediately and for ever. Every wake here reads all three status bytes and writes them straight back, which is the same thing the PMU's own driver does through regmap-irq with `ack_base` at the status register. That is also why the pull-up is part of the contract rather than a nicety: the line is open drain and the board carries no external resistor, so the internal one is the only thing holding it high, exactly as Linux supplies `PIN(7) FUN0_20MA_IE_WPU`. THE GUARD EARNED ITS PLACE ON THE FIRST BOOT. Before arming, anything pending is cleared and the line is then read; if it is still low the driver declines to arm and says `line low, not armed`, because a lost button is a nuisance while an interrupt that never returns is an unbootable watch. On this boot it printed `st 008030` -- bank 1 bit 7, VBUS_PLUGIN, pending precisely because USB was attached -- cleared it, and armed cleanly. Without that clear the VBUS bit would have held the line low and a falling-edge handler would have stormed, which is the failure BRD-002 records hanging a boot on the Linux side; the guard is the mechanism that makes that history unable to repeat rather than a note about it. A SHORT PRESS AND NOT THE EDGE, for a reason the part forces: the PMU reports both edges and a separate short-press event, and acting on the falling edge would fire on touch but would also fire during a long hold, which on this part is the hardware power-off gesture. The short-press event fires once, on release, with no bounce and no repeat while held; its cost is that the action lands on release, which is what every device's power key does. The measured default enable mask is `0xc3` -- both edges plus VBUS -- so this adds the one bit the part leaves off. VBUS plug and removal arrive on the same interrupt and are logged as `vbus in` and `vbus out` without being acted on, and are the only path this port has ever had to notice the charger; a long press is logged as `key long` and not intercepted, so a shutdown explains itself in the log rather than looking like a crash. `pwrkey.pin` is the board key, 7 by default and -1 to turn the key off without disabling VBUS reporting, and the `board_keys` check caught it as it caught the other two. Verified on the board: `twatch-pwrkey: st 008030` with the pending VBUS bit, `gpio: GPIO[7]| InputEn: 1`, and `twatch-pwrkey: p7 enter` with no storm and the desktop up, so the guard passed with real evidence rather than trivially; and the operator short-pressed twice, which produced `k1` and `k2`, buzzed each time, and then opened Files with a third press logged as `k3` -- three presses, three consecutive lines, no duplicates and no repeats while held, which is the evidence that the short-press event and not the edge is what fires. The one thing checked afterwards and found wanting was my own verification: a read of the desktop to confirm Files was open found it bare, because the operator had already closed it, so that particular confirmation rests on their report and not on a capture -- the log lines are the machine evidence and they are consistent with three presses. Build is clean under `-Werror`, the host suite is 38 of 38 including the board-keys gate, and only the app region at 0x10000 was written with the hash verified. The required `core-syntax.md` audit was run against the whole `.ai/` diff, which is this entry alone: `core.md` was untouched, the entry follows the six-section template and the canonical order, its number is the highest present plus one at 22, Coming From names the pre-cycle `HEAD`, Files Modified lists only port files and no `.ai/` path or generated artifact, Status uses allowed values, and the active log holds 22 entries against the 100-entry limit.
+
+#### Next Steps:
+
+A fresh backup is now overdue and is the only item with real value, because two firmware writes have landed since `working-2026-11-12-0820.bin` was taken -- the BOOT pusher and the power key -- and neither is in that image. After it, what this driver makes possible is larger than what it currently does: VBUS plug and removal are now observable for the first time, and charging remains read-but-never-configured, so the natural next step is to act on `vbus in` by starting a charge and to surface the state System Monitor already reads. The key itself remains Enter while the operator decides what the two pushers should mean between them; now that both work, the useful question is whether they should differ -- with the BOOT pusher free to be something else, F10 for the launcher is the shape that makes a physical home button, and Esc is the one to avoid on a bare desktop because it goes to the focused window first and would do nothing. Elsewhere nothing is blocked. Audio remains a beep with no playback path, and the display's tearing-effect line is configured in `board.conf` and read by nothing. Two smaller items persist: the screen model that reads the Log Viewer over USB is in a temporary directory for the fifth cycle running and belongs in the fork under a tools directory, and `scripts/watch-backup.sh` still does not confirm the board came back after its trailing reset, which has been silent twice and is hidden behind `|| true` in the trap -- and both pushers now give that script a cheap way to check, since a key injected at start-up would appear in the log. The standing queue is otherwise as it was: the bell seam is parked with its finding recorded, the top margin is the last unpainted region, the full-screen margin question waits for something to go full screen, Store installs to the card and the image cache have never run against a card, `TD_SIZE_POLL_MS=0` and `TD_ACK_TIMEOUT_MS=0` remain untested against the current tree, the RTC write path has never been exercised by setting a time and power-cycling, and the pre-existing YAML fence defect in `core-reference.md` is untouched. The unbuilt outboard parts are unchanged: the BHI260AP at 0x28 answering with no driver, the LoRa radio needing ALDO3 and XL9555 P05 before it is powered, the NFC reader needing DLDO1 with its earlier absence verdict still suspect, and the GNSS and microphone with no code and, for the microphone, no evidence that a part is fitted.
+
+#### Files Modified:
+
+- ports/twatchultra/main/pwrkey.c
+- ports/twatchultra/main/pwrkey.h
+- ports/twatchultra/main/link_twatch.c
+- ports/twatchultra/main/power.c
+- ports/twatchultra/main/power.h
+- ports/twatchultra/main/CMakeLists.txt
+- ports/twatchultra/board.example.conf
+- api/board_keys.txt
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: PASS
+
+---
+
 ## 21 COMMIT Unreleased 2026-11-12T08:42:04-07:00
 
 #### Coming From:
