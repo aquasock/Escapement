@@ -1,3 +1,42 @@
+## 14 COMMIT Unreleased 2026-11-12T01:08:34-07:00
+
+#### Coming From:
+
+Unreleased 4a16a2d
+
+#### Purpose:
+
+Record BEL reaching the speaker, and the three separate faults that stood between a working hook and a sound.
+
+#### Outcome:
+
+At ed3f88f on branch `t-watch-ultra`, `py -c "print(chr(7))"` in the Terminal beeps. The operator heard it and the log records `twatch-sound: beep 16000/16000 ok`, so the sample count and the write result are both confirmed rather than inferred. Getting there took three cycles and three distinct faults, and only the first was in the amplifier code. THE TERMINAL HAS ITS OWN vterm. `apps/terminal.c` keeps a static `td_vterm_t` and initialises it itself; the renderer's `s_vt` in `display.c` is a different object, the mirror. A bell callback installed on the renderer's copy is therefore never called for terminal output, which is exactly what happened in entry 12: the hook was installed, a host test proved the emulator fires it, and the watch stayed silent because `apps/terminal.c` never knew. The port's hook is a `bell()` member on `td_sysinfo_t` now, so any app's emulator can ring it without knowing what hardware is behind it -- the same shape as `drives()`, `batteries()` and the weak board hooks. `td_vterm_init()` DISCARDED THE CALLBACK. It preserves `reply` and `reply_user` across the `memset` and did not preserve `bell`, and `td_terminal_reset()` re-initialises on every session change, so the callback would have worked until the first session switch and then silently stopped -- a fault that would have looked intermittent and been blamed on anything but this. Both callbacks are configuration rather than content, and both survive a re-init now; `test_bell` gained an assertion for it whose negative control takes the fix back out and fails exactly once. THE BELL INSIDE A CSI SEQUENCE RINGS, and that was right all along. My first version of the test asserted it should be silent, failed, and the code was correct: ECMA-48 makes BEL a control function executed wherever it appears, and xterm rings for it mid-sequence too. Recorded because the tempting response to a failing test is to change the code, and here that would have broken working behaviour to satisfy a wrong expectation. Two smaller things were fixed on the way. The I2S write timeout was 200 ms, which sat exactly on the boundary of a 200 ms tone with four DMA buffers, so it could fail or truncate by timing alone; it is 1000 ms now and the write reports how many bytes of how many it accepted. And the temporary probe that beeped on a margin button press -- added in entry 13 to test the amplifier with the shell out of the way -- is removed, because it proved the hardware and has no business buzzing on every press now that the real path works. The hardware questions the earlier cycles could not settle were settled by reading LilyGo's schematic rather than by code: BCLK IO9, LRCLK IO10 and DIN IO11 match this port, SD_MODE is pulled to SPK_VDD through R43 560K so the amplifier is enabled in hardware rather than by a GPIO, GAIN is set by R13, and BLDO2 feeds SPK_VDD. The rail is verified by readback, `bldo2 3300mV en37`, where bit 5 of 0x37 is the enable. One self-correction is worth keeping: the emission log used to print the registers read BEFORE the write, so it reported what the rail had been and said nothing about whether the write landed, and an earlier claim that it confirmed the rail was wrong on that basis.
+
+#### Next Steps:
+
+Audio is proven end to end and can be parked at the operator's direction, with the state to resume from being this: BEL works, sampled playback does not exist, and the desktop has no audio interface beyond the new `bell()` hook, which is a minor API addition `STABILITY.md` sanctions and which the author should be told about. The three API changes this fork now carries -- the `td_vterm_t.bell` callback, `batteries()`, and the `bell()` member on `td_sysinfo_t` -- are a single conversation with TinyDesk's author, and the `td_vterm_t.bell` callback is arguably redundant now that `td_sysinfo_t.bell` exists and is the path that works; keeping both was a hedge during debugging and is worth revisiting rather than defending. Remaining work is otherwise unchanged and unblocked: the top margin is the last unpainted region; the deferred question of what the margins should do under a full-screen application waits for something to go full screen; `board.example.conf` still calls the SD keys unproven when they work; and the pre-existing YAML defect in `.ai/core-reference.md`, where a code fence after the last record stops the sequence parsing as one document, remains unfixed. A fresh backup was taken at 0009 and verifies, but four cycles of firmware change have landed since -- haptics, BEL, the battery line and the backup-script fix -- so another is due before anything risky. The Linux side stays parked; its last code commit is 8645a82 and everything after it in this repository is the project log.
+
+#### Files Modified:
+
+- src/vterm.c
+- apps/terminal.c
+- include/tinydesk/td_sysinfo.h
+- tests/test_vterm.c
+- ports/esp_idf/app/main.c
+- ports/twatchultra/main/sound.c
+- ports/twatchultra/main/sound.h
+- ports/twatchultra/main/link_twatch.c
+- ports/twatchultra/main/touch.c
+- api/tinydesk.api
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: PASS
+
+---
+
 ## 13 COMMIT Unreleased 2026-11-12T00:32:52-07:00
 
 #### Coming From:
