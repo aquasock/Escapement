@@ -1,3 +1,40 @@
+## 92 COMMIT Unreleased 2026-11-11T21:13:24-07:00
+
+#### Coming From:
+
+Unreleased 84a7278
+
+#### Purpose:
+
+Record the end of the touch panel as a pointer on the desktop, and the three margins that take its place.
+
+#### Outcome:
+
+At 97a779a on branch `t-watch-ultra`, the T-Watch Ultra's touch panel stopped being a mouse: while the desktop is showing, a press on the framebuffer does nothing at all, and the only touch targets are the margins around it -- the left column, the bottom strip and the right column. The reason is arithmetic rather than taste. A cell of the 40x26 grid is 8 by 16 px, so the desktop's own controls are one or two cells tall; the operator put it as "using your finger in the tiny fb is just not feasible, and increasing the size of buttons would take up too much real estate". The margins are 45 px wide and 41 px tall, are painted, and sit in the same place every time, which is what a finger needs. The duties are the ones the operator set out: `F1` to `F5` down the left column, `Tab`, `Enter` and `Esc` across the bottom strip, and the wheel on the right -- upper half up, lower half down, sent at the middle of the desktop because the window manager routes a wheel to the window under it and there is no pointer on the glass any more to take a position from. An application that owns the whole screen gets the panel back as an absolute pointer, margins included, which is the half of the request about a game that wants raw touch: kiosk mode and a full-screen window are exactly the cases where the glass belongs to the application rather than to the desktop. The state to ask is `td_wm_app_owns_screen()`, new in the shared layer, and `taskbar_visible()` is now written in terms of it rather than repeating the test, so the port and the window manager cannot come to different conclusions about whether the desktop is showing. Two things about the mechanism are worth recording. First, the geometry moved into `main/edges.h`, used by both the painter and the hit test, because that is the second time this port has had two copies of it and the first time they drifted: the strip was briefly divided by the glass width in one place and the desktop width in another, which moved every button and left the right 90 columns unpainted, and nothing in either file showed it. Second, the hit test has to invert the painter's floor boundaries exactly, and the obvious division by the span is off by one against two of the four separators; the exact inverse is `((p - start + 1) * n - 1) / span`, checked on the host by compiling `edges.h` into a test that probes every boundary and every slot. A press fires once per touch rather than once per report, since the controller re-reports a held finger about every 66 ms, which on a held `Tab` would otherwise be a hundred keys a second. The host suite caught the one shared-code consequence that mattered: adding a public function failed `api_stable`, and the recorded snapshot gained exactly one line with nothing removed, so no 1.x caller is affected. Verified: host suite 37 of 37 after re-recording; flashed and read back on the glass by the operator, who asked for this. What is NOT verified is the feel of the right column, which is live but unpainted -- nothing is drawn in that margin yet, so it scrolls without showing that it is there.
+
+#### Next Steps:
+
+The right column is a live touch region with nothing drawn in it, so it should be painted next, in the same green and with the same corner treatment as the other two margins, before anyone relies on it. The top margin is classified in `edges.h` as `EDGE_TOP` and inert: the operator intends it for status icons, which is a painting job. After that the margins need their duties checked on the glass one at a time -- the five function keys, `Tab`, `Enter` and `Esc` -- because a key that the desktop's input parser does not decode would look exactly like a dead button. `F1` to `F5` arrive as CSI 11~ to 15~, the same form a terminal sends, so they are indistinguishable from a keyboard; a lone `Esc` is resolved by the parser's own timeout and is therefore the one worth watching for lag. Also open: the parked redraw fault from entry 74, the two port overrides `TD_SIZE_POLL_MS=0` and `TD_ACK_TIMEOUT_MS=0` still untested against the current tree, the RTC write path written but not exercised, and the fact that the margin buttons stay painted while a full-screen application owns the screen, where they are no longer buttons -- hiding them in that state is a display-side job for when an application actually wants it. The Linux side stays parked; its last code commit is 8645a82 and everything after it in this repository is the project log.
+
+#### Files Modified:
+
+- ports/twatchultra/main/edges.h
+- ports/twatchultra/main/touch.c
+- ports/twatchultra/main/display.c
+- ports/twatchultra/main/display.h
+- ports/twatchultra/README.md
+- include/tinydesk/td_wm.h
+- src/wm.c
+- api/tinydesk.api
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: PASS
+
+---
+
 ## 91 COMMIT Unreleased 2026-11-12T15:40:00-07:00
 
 #### Coming From:
