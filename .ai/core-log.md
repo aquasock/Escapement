@@ -1,3 +1,36 @@
+## 82 COMMIT Unreleased 2026-11-12T08:20:00-07:00
+
+#### Coming From:
+
+Unreleased ac20481
+
+#### Purpose:
+
+Record hiding the On-screen keyboard's Start-menu entry on this board, and answer what the Store app does.
+
+#### Outcome:
+
+At 1afae54 on branch `t-watch-ultra`, `TD_HIDE_OSK_APP=1` removes the On-screen keyboard from the Start menu. The keyboard itself is untouched: Sign in and the kiosk way out call `td_osk_show()` directly and still get it, so what is gone is the icon and not the feature. That distinction is the point of doing it with a flag rather than by deleting the app -- a 40-column panel cannot hold keys at a size a finger can hit, and this board has a Bluetooth keyboard, but a board with neither still needs the mechanism. Off by default, so every other port is unaffected, and additive to the public API where the snapshot records it. The Start menu also gained room: with the entry gone its remaining items fit without a scrollbar. One build error came out of this and was caught before flashing: guarding the `td_app_register` call left `s_app` defined but unused, which the component's `-Werror` rejects, so both are under the same guard now. Separately, the operator asked what the Store app is, and the answer is worth recording because it is the one app in the tree that does something the others do not: it is a package installer. It reads a catalogue from `tinydesk-project.github.io/tinydesk-apps/catalog.txt`, downloads a `NAME.tdapp` package into `~/Apps`, checks its size and SHA-256 against the catalogue, unpacks it and adds an entry to the user's Start menu. It refuses packages the board cannot run -- a newer tdui API, more canvas cells than the panel has -- and it can install onto a mounted drive such as the SD card instead, which matters for room. What it depends on is exactly what this port has least of: an internet connection through the port's fetch operations, and a drive. Installing needs the Apps permission. On a watch with an unproven SD slot and no network at boot, most of the Store is therefore not exercised, and its layout is one of the ones still on the list.
+
+#### Next Steps:
+
+`trash` is next and is positioning rather than restructuring. Then `store` and `update`, whose captions are longer than the screen and need rewording -- and `store` additionally cannot be exercised here without a network and a working drive, so its check is layout only. `settings` is a list of controls and may resemble Users. The parked redraw fault from entry 74 is untouched; forcing `td_full_redraw()` with the garbage visible is still the experiment that would localise it. The remaining port overrides `TD_SIZE_POLL_MS=0` and `TD_ACK_TIMEOUT_MS=0` are still untested against the current tree, and the three capacitive bars under the glass still act on stretches of taskbar rather than three fixed cells, awaiting the vendor map. The Linux side stays parked; its last code commit is 8645a82 and everything after it in this repository is the project log.
+
+#### Files Modified:
+
+- apps/osk.c
+- include/tinydesk/td_config.h
+- ports/twatchultra/main/project_include.cmake
+- api/tinydesk.api
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: PASS
+
+---
+
 ## 81 COMMIT Unreleased 2026-11-12T07:45:00-07:00
 
 #### Coming From:
