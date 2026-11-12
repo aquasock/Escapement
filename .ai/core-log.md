@@ -1,3 +1,34 @@
+## 99 COMMIT Unreleased 2026-11-11T22:17:47-07:00
+
+#### Coming From:
+
+Unreleased 403fa47
+
+#### Purpose:
+
+Record the two greys darkening and the right column's four arrow buttons gaining their labels.
+
+#### Outcome:
+
+At 8b5b816 on branch `t-watch-ultra`, the button face went from about thirteen per cent grey to about eight, `0x2104` to `0x10A2`, and the border from about fifty-one to about thirty-five, `0x8410` to `0x58CB`, so the margins sit further back from the desktop again without losing the outline that says where one button ends. The right column's four arrow buttons now read Left, Right, Up and Down, and the reserved top slot stays blank. The labels are words rather than arrow glyphs on purpose: the font is the desktop's own 8x16 and may not carry the arrow characters, and a character the font lacks draws as nothing at all, which on the glass is indistinguishable from a button whose hit test has failed. The constraint here is width rather than anything else, and it had to be measured rather than estimated. A column is 45 px across, 41 px inside the border, and the longest label, `Right`, is 40 px -- one pixel of headroom, which is the tightest text anywhere on this glass and is why the bottom strip's labels were checked first and this one was computed before being written. The labels are inset horizontally by the BORDER and not by the RADIUS, which matters because a radius inset would leave 25 px and nothing at all would fit; the radius is unnecessary on that axis for a structural reason, since a label is centred in an 83-row slot and the rounded corners only reach ten rows in from each end, so no glyph can land in one however wide it is, and `button_pixel()` would clip it if it somehow could. The left column passes a label accessor that returns an empty string rather than a null pointer, so an unlabelled column is a deliberate empty table instead of a case the painter has to guard, and giving it labels later is filling that table in and nothing else. Verified at 1:1 on the host before flashing, as with the previous three cycles: every glyph present in the font, no glyph pixel on a border, none inside a rounded corner, and no label overrunning its face, with `Right` reported as spanning rows 34 to 46 of 81 because the descender on its `g` reaches lower than the other letters. Host suite 37 of 37, four sections hash-verified, and all seven label strings confirmed present in the built image. The operator's look on the glass is the acceptance test and had not been given when this entry was written.
+
+#### Next Steps:
+
+The left column is now the only margin without labels, and it needs no machinery: `left_label()` is a table to fill in, with the same 41 px of usable width and the same one-pixel-tight worst case if a duty runs to five characters -- F10, Esc, F6, Super+D and F11 are all four or fewer, so it should be comfortable. Whether `Right` at one pixel of headroom is acceptable is worth an opinion on the glass, because if it is not, the honest fixes are a shorter word or a narrower font rather than shaving the border. After the labels, the top margin is the last unpainted region and is still inert as `EDGE_TOP`, intended for status icons, and the sweep from entry 94 should be landed as a real test in the port rather than remaining a throwaway. Two open questions still want a decision rather than code: Esc on a bare desktop opens the Start menu, and the margin buttons stay painted while a full-screen application owns the screen. Also open: the parked redraw fault from entry 74, the two port overrides `TD_SIZE_POLL_MS=0` and `TD_ACK_TIMEOUT_MS=0` still untested against the current tree, the RTC write path written but not exercised, and `scripts/watch-backup.sh` still lacking the `verify_flash` step that entry 96 used. The log is at 99 entries against the hundred-entry limit, so the next entry rolls it to an archive. The Linux side stays parked; its last code commit is 8645a82 and everything after it in this repository is the project log.
+
+#### Files Modified:
+
+- ports/twatchultra/main/display.c
+- ports/twatchultra/main/edges.h
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: NOT RUN
+
+---
+
 ## 98 COMMIT Unreleased 2026-11-11T22:12:38-07:00
 
 #### Coming From:
