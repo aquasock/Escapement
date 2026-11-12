@@ -1,3 +1,33 @@
+## 96 COMMIT Unreleased 2026-11-11T21:57:05-07:00
+
+#### Coming From:
+
+Unreleased 18faeef
+
+#### Purpose:
+
+Capture a full 16 MiB backup of the state in which all three margins of the T-Watch Ultra glass are painted and live, which the operator adopted as the new baseline.
+
+#### Outcome:
+
+`~/twatch-backup/working-2026-11-11-2149.bin` is the current recoverable state, 16 MiB read at 330.6 kbit/s in 406.0 seconds, sha256 `74009d2955ccd84dc301b12f376037218da4300cbeb9ae5e611eec4b3684e0e6`. It carries TinyDesk at 263468f on branch `t-watch-ultra`, the build in which the left column is F10, Esc, F6, Super+D and F11, the bottom strip is Tab, Enter and Ctrl+Q, and the right column is a reserved slot plus the four arrows, with the touch panel no longer a pointer on the desktop. Nothing about this cycle changed a file in this repository; it produced a recovery artifact, so the Files Modified section says None by the syntax's own rule about generated binaries. The image was verified four ways, and the order matters because the strongest check is not the usual one. `esptool verify_flash` read the chip back a second time and compared it against the file: digest matched, so the dump is byte-identical to what is on the board, which is a stronger statement than a stored hash and is not something the backup script does. The `.sha256` was written by `sha256sum` and matches the file it names. The 2,533,664-byte app region at 0x10000 is byte-identical to the `tinydesk.bin` this machine built, so the dump holds the firmware that was actually flashed rather than an older copy -- the check is a straight comparison of the region against the build output, both hashing to `9b6dba45`. And the extracted app passes its own ESP image validation, checksum `cf` with validation hash `ce0eec70`, which proves the region is a complete image and not a truncated or corrupt read. The partition table at 0x8000 parses cleanly as nvs 24K at 0x9000, phy_init 4K at 0xf000, ota_0 3072K at 0x10000, ota_1 3072K at 0x310000, otadata 8K at 0x610000 and storage 10112K at 0x620000, and the storage partition holds 1,988 non-empty 4K blocks, so the desktop's own filesystem state is captured and not just the firmware. The board was confirmed running afterwards: the read's trailing hard reset rebooted it and the USB port immediately produced terminal output, cursor-positioning sequences from the desktop drawing itself. One process note worth recording rather than hiding: the read was done by hand at 460800 baud, taking 406 seconds, where `scripts/watch-backup.sh` would have used 921600 and its own size and hash checks. The committed script was read first and is runnable -- its interpreter at `build/idf-tools/python_env/idf5.1_py3.14_env` is present -- so nothing about this deviates from the project's method except the baud rate and the extra verification, and the extra verification is the reason not to regret it.
+
+#### Next Steps:
+
+The baseline is now recorded and does not need re-taking until something changes the firmware. The next work is the top margin, which is classified in `edges.h` as `EDGE_TOP` and inert and is the last unpainted region, intended for status icons. Then the sweep from entry 94 should be landed as a real test in the port instead of remaining a throwaway in a temporary directory, since it has now caught three separate faults -- a stale reference, a wrong mirror axis and a coordinate-space error -- in two cycles. Two open questions still want a decision rather than code: Esc on a bare desktop opens the Start menu, which was sensible while Enter and Esc were a keyboard pair for the icon grid and is odd now that Esc means cancel, and the margin buttons stay painted while a full-screen application owns the screen where they are no longer buttons. Also open: the parked redraw fault from entry 74, the two port overrides `TD_SIZE_POLL_MS=0` and `TD_ACK_TIMEOUT_MS=0` still untested against the current tree, and the RTC write path written but not exercised. Separately, the log's earlier deviations from `.ai/core-syntax.md` remain: entries 17 and 18 carry annotated status labels where only PASS, FAIL, NOT RUN or N/A is allowed, fourteen older entries list `.ai/` files under Files Modified, and entries 1 to 16 sit at the bottom in ascending order while the rest are newest-first. They are pre-existing and rewriting settled history is prohibited, so they stand until the operator asks otherwise. The Linux side stays parked; its last code commit is 8645a82 and everything after it in this repository is the project log.
+
+#### Files Modified:
+
+None.
+
+#### Status:
+
+- Build: N/A
+- Deployment: N/A
+- User Test: PASS
+
+---
+
 ## 95 COMMIT Unreleased 2026-11-11T21:46:36-07:00
 
 #### Coming From:
