@@ -1,3 +1,33 @@
+## 11 COMMIT Unreleased 2026-11-11T23:57:09-07:00
+
+#### Coming From:
+
+Unreleased 12e7d06
+
+#### Purpose:
+
+Record a 128 GB card mounting, which settles the capacity question that LilyGo's documentation leaves at 32 GB.
+
+#### Outcome:
+
+A 128 GB FAT32 card mounts in the TinyDesk port and works, with no change to the code or the configuration: `sd` reports `SM128`, SDHC/SDXC, 119 GB with 119 GB free, a file written from the shell read back byte-exact, a second file of 494 bytes written and listed, and the desktop's Files app shows both alongside `TinyDesk`. The 29 GB card that preceded it mounted through the same path. So the answer to whether this port can use more than 32 GB is yes, and the reasons the question arises at all are three conventions stacked on top of each other rather than any limit in the stack. THE FILESYSTEM IS THE ONLY REAL CONSTRAINT. ESP-IDF 5.3 builds FatFs with `FF_FS_EXFAT` hardcoded to 0 in `ffconf.h` and exposes no Kconfig symbol for it, so an exFAT volume cannot mount at any capacity; FAT32 is the requirement and the size is not. The 32 GB figure comes from the SD Association naming 2 to 32 GB as SDHC and above that as SDXC, from cards above 32 GB usually shipping exFAT, and from Windows refusing to format FAT32 above 32 GB -- the last being a limitation of their format tool, which is why `mkfs.vfat` on Linux produced the 128 GB card tested here. THE HEADROOM IS ORDERS OF MAGNITUDE. `sdmmc` holds capacity as uint32 sectors and `FF_LBA64` is 0, which together put the ceiling at 2.2 TB; the card used 250 million sectors of the 4.3 billion available. FAT32's cluster ceiling is 2^28 minus one, and at the 32 KB clusters this card has, that is about 8.8 TB against the 3.9 million clusters in use, a factor of 68. Nothing in the reporting path truncates either: `td_drive_t.total` and `free`, `tdsh_sdcard_space()` and the shell's `print_size()` are all 64 bit. All of that was worked out before the test by reading the stack rather than assumed, and it is recorded in BRD-004 along with the result, but the arithmetic is the weaker half of the evidence -- the same kind of reasoning once said the second SPI bus worked, and it took two bugs to make that true, which is why the card was actually put in. One observation from the test rather than from the design: the shell's `write` command truncates a long argument line at roughly 500 bytes, so it is not a way to check large-file writes, and it should not be read as a filesystem limit. Larger writes remain unexercised, as do Store installs to the card and the image cache at `/sd/TinyDesk/cache`. Verified on the glass: mount, write, read back, listing, and Files navigation, then the test files removed and the card left with only `TinyDesk`. This cycle changed no code; its only repository change is the BRD-004 record, which now states the capacity result and keeps the limits beside it.
+
+#### Next Steps:
+
+The card works at both sizes, so what remains is exercising the things that use it rather than the card itself. In order of value: Store installs to the SD location and the `tde`/`tdapp` image cache at `/sd/TinyDesk/cache`, neither of which has run against a real card at any capacity; and a genuinely large file, since the only writes tested were under a kilobyte and the shell's `write` truncates its own argument line at about 500 bytes, so it cannot be the instrument. Hot-plug is still untested in either direction and is the weakest part of this feature: `sd.cd` is not configured, so removal is detected by polling the card rather than by the insert switch, and the switch is expander pin 10, which is free now that the bogus touch-reset hedge is gone -- wiring `sd.cd` to it would be better than polling and is a small change. Two bookkeeping items are now overdue. A fresh 16 MiB backup, since the last one predates the haptics, the glass sweep, the Escape change and the SD work. And `board.example.conf` still calls the SD keys unproven, which is now false; `board.conf` is gitignored, so a clean checkout builds without SD and reads that stale note as current. Also open from before: `verify_flash` still lives outside `scripts/watch-backup.sh`; the top margin is the last unpainted region; the deferred question of what the margins should do under a full-screen application waits for something to go full screen; and the pre-existing YAML defect in `.ai/core-reference.md` where a code fence after the last record stops the sequence parsing as one document. The Linux side stays parked; its last code commit is 8645a82 and everything after it in this repository is the project log.
+
+#### Files Modified:
+
+None.
+
+#### Status:
+
+- Build: N/A
+- Deployment: N/A
+- User Test: PASS
+
+---
+
 ## 10 COMMIT Unreleased 2026-11-11T23:49:20-07:00
 
 #### Coming From:
