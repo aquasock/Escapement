@@ -355,6 +355,7 @@ GPS-001: "The GNSS receiver is a u-blox MIA-M10Q on UART1 at 38400 8N1, TX 43 / 
 GPS-002: "The receiver emits GGA, RMC, GSA, GSV, GLL and VTG at 1 Hz with 0 checksum failures, and acquiring a UTC time from it proves ephemeris was decoded off the satellites -- a stronger statement about the antenna than a fix, and the evidence that separates 'no antenna' from 'no fix'"
 GPS-003: "The receiver answers NMEA on this unit but NOT the UBX-MON-VER poll, so it never confirms its own model string; NMEA is the working interface and the UBX side (and constellation configuration) is untouched factory default"
 GPS-004: "Indoors the receiver tracks 3 to 5 satellites with a real HDOP around 2.38 and no fix, because a 3D solution needs four; a fix needs sky view and is the one remaining question the bench cannot answer"
+GPS-005: "A GPS time needs no fix: the receiver reports valid UTC at 3 satellites, so `gps time` sets the clock indoors; the value goes through settimeofday AND board_time_set_post, so the PCF85063A holds it and it survives a hard reset, and a GPS time applied from a stale capture is a wrong clock however right the source"
 ```
 
 ---
@@ -1719,6 +1720,21 @@ GPS-004: "Indoors the receiver tracks 3 to 5 satellites with a real HDOP around 
     - "on the watch, TinyDesk port 2026-11-12: `gps monitor 60` written to /sd/m60.txt and read back"
     - "GPS-002 for the same run's UTC acquisition and sentence counts"
   verification: "Verified on hardware 2026-11-12, indoors. The no-fix result is a measurement of the location rather than of the receiver, and is recorded as such: the same code with the same antenna is expected to fix outdoors, which has not been tried."
+
+- record_id: GPS-005
+  kind: BOARD
+  topic_id: GPS
+  title: "GPS time needs no fix and reaches the watch clock through the RTC, so it survives a power cycle"
+  status: VERIFIED
+  verified_date: 2026-11-12
+  statement: "The receiver reports a valid UTC time once it has decoded ephemeris, which happens at three satellites and with no fix -- so a watch held up indoors for a few seconds can be given an accurate clock with no network. The port applies it with `board_time_apply()`, which is settimeofday followed by `board_time_set_post()`, the same two steps the shared app takes for SNTP and for Date & time; the second step writes the PCF85063A. Verified on the board: three corrections thirty seconds apart each reported the clock `was off +0 s`, `+1 s`, `+0 s`; the write logged `twatch-rtc: wrote 2026-11-12 20:34:54 UTC` and the epoch reported decoded back to that exact instant; and after a hard reset the shell read 13:46:16 MST against a host at 13:46:28."
+  consequence: "Two design points follow and both are about where the time is applied rather than how it is computed. First, settimeofday alone is not enough on this board: it would leave the chip holding the previous value and the next boot, which seeds from the chip, would undo the correction -- so any future time source here must write through, and reusing the existing `board_time_set_post` hook is what keeps GPS, SNTP and the Date & time dialog from drifting apart. Second, THE TIME MUST BE APPLIED THE MOMENT IT IS VALID. A version that collected the UTC from the first good sentence and then waited out its listening window before setting the clock produced correction runs reporting `was off +26 s` and then `+1 s` a minute apart, which reads as a clock gaining twenty-five seconds in eighty and was entirely the stale value being applied late. An hour of apparent hardware drift was code. The way it was separated from real drift is worth reusing: the clock ran exactly 60 s across a `sleep 60` and 41 s across a 40 s monitor, which cleared the hardware, and a GPS-referenced delta before and after the apply is a cleaner instrument than comparing against a host whose command latency is unknown."
+  sources:
+    - "on the watch, TinyDesk port 2026-11-12: `gps time 20` three times in /sd/r1..r3.txt, and `date` after a hard reset in /sd/p.txt"
+    - "tinydesk-twatch port: main/gps.c cmd_gps() settime branch, main/rtc.c board_time_apply(), main/nmea.c nmea_utc()/nmea_utc_raw()"
+    - "ports/esp_idf/app/main.c time_set(), the sequence this mirrors for SNTP"
+    - "Epoch cross-checked outside the firmware: 1794515694 decodes to 2026-11-12T20:34:54Z in Python"
+  verification: "Verified on hardware 2026-11-12, indoors, end to end: the system clock, the RTC write-through and survival across a reset were each observed separately rather than inferred from one. The epoch arithmetic has 12 host checks including the 2024 leap day and both century cases, and a mutant dropping the century term fails 2100-12-31 by a day."
 ```
 
 ---

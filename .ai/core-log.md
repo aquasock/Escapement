@@ -1,3 +1,39 @@
+## 39 COMMIT Unreleased 2026-11-12T13:46:57-07:00
+
+#### Coming From:
+
+Unreleased 4e45a08
+
+#### Purpose:
+
+Set the watch's clock from the GNSS receiver, so a watch with no network can still be given an accurate time.
+
+#### Outcome:
+
+At `50d047d` on branch `t-watch-ultra`, `gps time [s]` sets the system clock from the receiver's UTC and writes it through to the PCF85063A. Verified on the hardware: three consecutive corrections thirty seconds apart each reported the clock `was off +0 s`, `+1 s` and `+0 s`; the RTC logged `twatch-rtc: wrote 2026-11-12 20:34:54 UTC`, and the epoch the command reported decodes back to exactly that instant; and after a hard reset the shell read 13:46:16 MST against a host at 13:46:28, the twelve-second gap being this agent's command-injection latency rather than clock error, so the correction survived the power cycle by way of the chip. THE POINT OF THIS IS THAT IT WORKS INDOORS. A fix needs four satellites and sky, but a TIME needs only decoded ephemeris, which this receiver acquires at three satellites behind a windowless ceiling -- so the watch can be given an accurate clock by being held up for a few seconds with no network at all, which is precisely what a watch whose WiFi does not auto-associate needs. THE FIRST VERSION OF THIS SET THE CLOCK TO A STALE VALUE AND THE SYMPTOM LOOKED EXACTLY LIKE HARDWARE DRIFT. It collected the UTC from the first valid sentence and then kept listening until the window expired before calling settimeofday, so it applied a reading already up to twenty seconds old. Measured on the board, correction runs a minute apart reported `was off +26 s` and then `+1 s`, which reads as a clock gaining twenty-five seconds in eighty and was really the setting routine handing the clock a stale number. Two experiments separated it from real drift and are worth recording as method: the clock ran exactly 60 s across a `sleep 60` and 41 s across a 40 s `gps monitor`, which is what proved the hardware was fine and the code was not. The loop now stops the moment it has a valid time, so the window bounds the wait and never delays the write. THE EPOCH CONVERSION IS THE PART THAT COULD BE QUIETLY WRONG, so it is split and swept. Days-from-civil is Hinnant's algorithm written out rather than taken from `timegm()`, because the C library's version honours TZ on some platforms and this must be UTC unconditionally -- a GPS time converted through a local zone is wrong by exactly the offset, seven hours on this watch, and reads as a fault rather than as arithmetic. `nmea_utc()` applies the 2020 plausibility floor and `nmea_utc_raw()` does not, which lets the day-count be checked against 1970 and the floor be checked separately; twelve host checks cover known epochs computed independently in Python, the 2024 leap day, and both century cases, and a mutant dropping the y/100 term was built and fails 2100-12-31 by exactly one day. The write-through reuses a new `board_time_apply()`, which takes the same two steps the shared app's `time_set()` takes for SNTP -- settimeofday, then `board_time_set_post` -- because settimeofday alone would leave the chip holding the old value and the next boot would undo the correction. The host suite is 41 of 41 and `test_nmea` is now 77 checks, up from 56. The required `core-syntax.md` audit was run against the complete `.ai/` diff: `core.md` was untouched; the entry follows the six-section template and the canonical order; its number is the highest present plus one at 39; Files Modified lists port and test paths and no `.ai/` file or generated artifact; and Status records the user test as NOT RUN, because every reading above was taken by this agent over USB rather than by the operator.
+
+#### Next Steps:
+
+The clock is now settable from two independent sources and neither needs the other: the PCF85063A seeds it at boot, and GPS corrects it on demand. What is missing is the automatic half -- `gps time` is a command, so the watch only gets GPS time when someone asks, and the obvious next step is to run it at boot or when the shell starts, bounded and non-fatal, so a watch taken outdoors and reset comes back with the right time. That needs a decision about cost rather than code: the receiver takes a few seconds and tens of milliamps, and it is worth doing only if the operator wants the watch to spend that on every boot. The alternative and cheaper shape is a Settings checkbox that enables it. Beyond time, the receiver's UBX side is still unexplored -- the MON-VER poll goes unanswered on this unit, constellation configuration is untouched, and C/N0 is not extracted from GSV, so the port can say how many satellites are heard and not how well. A fix remains untested because it needs sky. Everything else is unchanged and unblocked: NFC is parked at the operator's direction with the re-read storm kept deliberately; the taskbar edge is settable and left defaulting to bottom; the thermistor reads in degrees; both pushers work and both send Enter, with F10 on the BOOT pusher the shape I would still argue for; audio plays WAV files from the card; the display's tearing-effect line is configured and unread; and the remaining outboard parts are the BHI260AP at 0x28 answering and undriven, the LoRa radio needing ALDO3 and XL9555 P05, and the microphone with no code. The standing queue is otherwise as it was: the bell seam parked with its finding recorded, the top margin as the last unpainted region, the full-screen margin question, Store installs to the card, the two untested port overrides, and the RTC write path -- which this cycle has now exercised in the direction that matters, from a source other than the chip itself.
+
+#### Files Modified:
+
+- ports/twatchultra/main/gps.c
+- ports/twatchultra/main/nmea.c
+- ports/twatchultra/main/nmea.h
+- ports/twatchultra/main/rtc.c
+- ports/twatchultra/main/rtc.h
+- ports/twatchultra/README.md
+- tests/test_nmea.c
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: NOT RUN
+
+---
+
 ## 38 COMMIT Unreleased 2026-11-12T13:29:57-07:00
 
 #### Coming From:
