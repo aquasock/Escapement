@@ -138,4 +138,84 @@ grep -q 'verify OK' <(tr '\r' '\n' < "$log") \
 (cd "$(dirname "$OUT")" && sha256sum "$(basename "$OUT")" > "$(basename "$OUT").sha256")
 printf 'OK: %s\n' "$OUT"
 cat "$(dirname "$OUT")/$(basename "$OUT").sha256"
+
+#
+# CONFIRM THE BOARD CAME BACK, BECAUSE TWICE IT DID NOT AND THE SCRIPT SAID NOTHING.
+#
+# Both resets here can fail without a word: the verify's `--after hard_reset`
+# leaves the board in the stub when it does not take, and `reset_board` runs
+# `--before no_reset` against a board that is by then running firmware rather
+# than a stub, so its own failure is also swallowed by `|| true`. The result on
+# 2026-11-12 (twice, logged as core-log entries 15 and 20) was a script that
+# exited 0 while the watch sat silent on both USB and WiFi -- which is
+# indistinguishable from a brick from the outside, and cost a session each
+# time to notice.
+#
+# The backup itself is NOT in doubt when this fails: the verify passed against
+# the chip before any reset was attempted, so the file is good. What was wrong
+# was claiming success for a board nobody had checked. So the check is here,
+# after the artifact is saved, and it reports rather than dies -- a silent board
+# is a power-cycle, not a failed backup.
+#
+board_alive() {
+    "$PY" - "$PORT" <<'PYEOF'
+import os, select, sys, termios, time, tty
+
+port = sys.argv[1]
+try:
+    fd = os.open(port, os.O_RDWR | os.O_NOCTTY | os.O_NONBLOCK)
+except OSError:
+    sys.exit(1)
+
+# The desktop speaks raw VT100, so no line discipline: reading it the way a
+# terminal reads it is the only way its output arrives unmodified.
+a = termios.tcgetattr(fd)
+a[0] = a[1] = 0
+a[2] = termios.CS8 | termios.CREAD | termios.CLOCAL
+a[3] = 0
+a[4] = a[5] = termios.B115200
+termios.tcsetattr(fd, termios.TCSANOW, a)
+tty.setraw(fd)
+
+# A booting desktop repaints the whole screen, so one byte is enough to know it
+# is running. The window is generous because native USB re-enumerates on reset
+# and the port is briefly absent.
+seen = 0
+end = time.time() + 12
+while time.time() < end and not seen:
+    ready, _, _ = select.select([fd], [], [], 0.25)
+    if ready:
+        try:
+            seen = len(os.read(fd, 65536))
+        except (BlockingIOError, OSError):
+            pass
+
+os.close(fd)
+sys.exit(0 if seen else 1)
+PYEOF
+}
+
+printf 'waiting for the board to come back\n'
+if board_alive; then
+    printf 'board is up\n'
+    # Disarm the reset: it has already happened and the board is running.
+    trap 'rm -f "$log"' EXIT
+else
+    printf 'board stayed silent; resetting it again\n'
+    # A full reset rather than `run`: the board is not in the stub, which is
+    # exactly why `reset_board` above did nothing.
+    "$PY" -m esptool --chip esp32s3 --port "$PORT" --before default_reset \
+        --after hard_reset run >/dev/null 2>&1 || true
+    if board_alive; then
+        printf 'board is up after a second reset\n'
+        trap 'rm -f "$log"' EXIT
+    else
+        printf '%s\n' \
+            "WARNING: $PORT is silent after two resets." \
+            "         The backup is verified and valid -- the compare passed" \
+            "         against the chip before any reset was attempted." \
+            "         The board needs a power cycle to come back." >&2
+    fi
+fi
+
 exit 0
