@@ -1,3 +1,44 @@
+## 31 COMMIT Unreleased 2026-11-12T10:42:47-07:00
+
+#### Coming From:
+
+Unreleased af3d266
+
+#### Purpose:
+
+Convert the battery thermistor's voltage into a real temperature, using the part data found in the previous cycle.
+
+#### Outcome:
+
+At `3bff944` on branch `t-watch-ultra`, System Monitor's battery line reads `Battery:100%  4.18 V full ntc30.0` where it read `ntc494`, and the watch confirms it live: the cell at 30.0 C with the die at 36.8 C, which is both the ordering `PMU-006` established and the value `PMU-007`'s table predicts for that voltage. THE ARITHMETIC IS IN ITS OWN FILE, `ports/twatchultra/main/ts_convert.c`, WITH NO ESP-IDF IN IT, and that is the whole reason the change is shaped this way: the conversion is the one part of the thermistor feature that can be wrong in a plausible way, and leaving it beside the I2C calls would have put it beyond the reach of any test. It is now compiled and swept on a host like any other pure function. The table is reproduced from Table 6-3 of the AXP2101 datasheet rather than curve-fitted, because the Steinhart-Hart coefficients published in public drivers disagree with the vendor's own numbers by about 2.6 C; and the current source is READ from reg50H[1:0] rather than assumed, because this board reports 60 uA where the table assumes 50. The reading is scaled to the table's 50 uA before interpolating, which is exact rather than approximate -- the thermistor's resistance does not depend on the current and the voltage across a resistor is proportional to it -- and skipping that step makes the battery look 4.6 C colder, which is precisely what the test's negative control measures. A TEST WAS WRITTEN THAT COULD ACTUALLY FAIL, and three negative controls each trip a different assertion: dropping the current scaling fails the 60/40/20 uA round-trips; mistyping one table row in the source from 348 to 358 fails at 357 against 350, which is the exact fault the test exists for because a 0.7 C error of that kind reads as plausible in every other way; and moving the absent-reading guard after the mode guard reports a missing reading as NOT_TEMP instead of NONE. The test also restates the datasheet's resistance and ADC columns independently of the implementation, so a transcription slip is caught against a second opinion rather than against a copy of itself, and it holds the board's own recorded readings from `PMU-006` and `PMU-007` -- 494 and 527 mV at 60 uA -- to the values those records state. Two faults were found while writing the code and both are recorded because neither was visible in review: the absent-reading guard originally sat after the mode guard, so a register that did not answer would have been reported as "read, but not a temperature"; and the fault code `0x2000` would have scaled to 4096 mV, above every row of the table, and read as an implausibly cold battery instead of as an open pin. `td_battery_t` gains `ntc_tenths_c` at the end of the struct plus the `TD_NTC_NONE` and `TD_NTC_NOT_TEMP` sentinels, and `api/tinydesk.api` is re-recorded at 701 declarations with three additions and nothing removed -- the minor shape `STABILITY.md` sanctions, with `TD_VERSION` still untouched because that is the author's call. The voltage field STAYS rather than being replaced: a board without the part data can report it honestly, System Monitor falls back to it when a board fills in only the voltage, and `test_native_apps` now covers all three paths -- temperature, voltage fallback, and neither -- which meant updating that test rather than leaving it green against a contract that had changed. The boot log deliberately still prints raw millivolts (`ts 494mV`) because that is the diagnostic and a derived temperature cannot be checked against itself. The full host suite is 39 of 39 with the new test included, the firmware builds clean under `-Werror`, and only the app region at 0x10000 was written with the hash verified. The required `core-syntax.md` audit was run against the whole `.ai/` diff, which is this entry alone: `core.md` was untouched, the entry follows the six-section template and the canonical order, its number is the highest present plus one at 31, and Status uses `PASS` for the user test because the feature was verified on the glass.
+
+#### Next Steps:
+
+The thermistor is now calibrated and visible, which closes the measurement work that began when the schematic marked the position `NC`; what is left of it is small. Logging the TS temperature alongside each `chg go` and `chg done` would give a temperature history for free from events the driver already handles, and it would put a reading next to the moment charging starts, which is the one time the charger's thermal window matters -- and the window itself is now known to be real, since `PMU-007` records that `reg50H[4] = 0` means this reading gates the charger between roughly 0 and 55 C. Separately, the current source sitting at 60 uA rather than its documented 50 uA default deserves one deliberate observation across a battery disconnect: if it is an eFuse value it will persist, and if a previous firmware wrote it then a disconnect restores 50 uA, and the conversion follows it because it reads rather than assumes -- but nobody has watched that happen. A fresh backup is now due and is the most valuable outstanding action, since `working-2026-11-12-1010.bin` predates this build. Everything else is unchanged and unblocked: the taskbar-at-top option is verified at all five points and left defaulting to bottom at the operator's direction, both pushers work and both send Enter, audio is a beep with no playback path, the display's tearing-effect line is configured and unread, the screen reader now lives in the fork under `tools/`, and the unbuilt outboard parts are as they were -- the BHI260AP at 0x28 answering and undriven, the LoRa radio needing ALDO3 and XL9555 P05, the NFC reader needing DLDO1, and the GNSS and microphone with no code. The standing queue is otherwise as it was: the bell seam parked with its finding recorded, the top margin as the last unpainted region, the full-screen margin question, Store installs to the card, the two untested port overrides, the unexercised RTC write path, and the pre-existing YAML fence defect in `core-reference.md`.
+
+#### Files Modified:
+
+- ports/twatchultra/main/ts_convert.c
+- ports/twatchultra/main/ts_convert.h
+- ports/twatchultra/main/charge.c
+- ports/twatchultra/main/charge.h
+- ports/twatchultra/main/power.c
+- ports/twatchultra/main/CMakeLists.txt
+- include/tinydesk/td_sysinfo.h
+- apps/sysmon.c
+- tests/test_ts_convert.c
+- tests/test_native_apps.c
+- api/tinydesk.api
+- CMakeLists.txt
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: PASS
+
+---
+
 ## 30 COMMIT Unreleased 2026-11-12T10:35:44-07:00
 
 #### Coming From:
