@@ -1,3 +1,34 @@
+## 97 COMMIT Unreleased 2026-11-11T22:04:55-07:00
+
+#### Coming From:
+
+Unreleased 096043e
+
+#### Purpose:
+
+Record the bottom strip's three buttons being labelled in the desktop's own font.
+
+#### Outcome:
+
+At c50a004 on branch `t-watch-ultra`, the three bars below the framebuffer read Tab, Enter and Ctrl+Q in yellow, in the port's own 8x16 font at the size the terminal uses, so the margins carry the same typeface as everything else on the glass rather than a second one invented for them. Yellow rather than white because the bars are full-primary green and a green or white label competes with them; yellow is the brightest thing on the glass after the green itself, which is the right emphasis for text meant to be read at a glance. The labels live in `edges.h` beside the geometry, and that placement is the point rather than tidiness: a label and a duty that disagree is the same class of fault as a button and a hit test that disagree, and it is prevented the same way, by keeping them in one place. The table is a function rather than an array because `touch.c` includes that header for the geometry alone and would otherwise carry an unused copy. Each label is centred in its bar's green face computed inside the corner radius rather than in the bar's full rectangle, so a label cannot land in a notch, and the glyph test runs after the notch test so a rounded corner always wins. The per-pixel test takes the string length from the position struct instead of measuring it, because it runs once for every green pixel of every bar and strlen would have been called about forty thousand times at boot. Checked without flashing first: the strip was rendered at 1:1 on the host through the port's real font and the port's real geometry, which reported each bar's face, each label's width and placement, and confirmed zero glyph pixels outside the safe face. The longest label, Ctrl+Q, is 48 px in a 105 px bar and the tallest is the font's own 16 rows in 41, so all three fit with room rather than by a pixel. The same check confirmed the font has every glyph needed, which is worth stating because a missing glyph would have drawn as a blank button and looked exactly like a hit-test fault. Verified: host suite 37 of 37, flashed and hash-confirmed in four sections, and the built image carries all three label strings. The operator's look on the glass is the acceptance test and had not been given when this entry was written.
+
+#### Next Steps:
+
+The two columns still carry no labels and are the obvious next step now that the machinery exists: `label_place()` and `label_bit()` take any rectangle, so a column needs only a label table and the same centring call, keyed by the button index the hit test already returns. Whether to label the columns at all is a separate question from whether the code can, because a column is 45 px wide and the longest duty there is Ctrl, so those labels will want a narrower form than the bottom strip's. After that the top margin, still inert as `EDGE_TOP` and intended for status icons, is the last unpainted region, and the sweep from entry 94 should be landed as a real test in the port. Two open questions still want a decision rather than code: Esc on a bare desktop opens the Start menu, and the margin buttons stay painted while a full-screen application owns the screen. Also open: the parked redraw fault from entry 74, the two port overrides `TD_SIZE_POLL_MS=0` and `TD_ACK_TIMEOUT_MS=0` still untested against the current tree, and the RTC write path written but not exercised. `scripts/watch-backup.sh` still lacks the `verify_flash` step that entry 96 used, so its hash check is weaker than it could be. The Linux side stays parked; its last code commit is 8645a82 and everything after it in this repository is the project log.
+
+#### Files Modified:
+
+- ports/twatchultra/main/display.c
+- ports/twatchultra/main/edges.h
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: NOT RUN
+
+---
+
 ## 96 COMMIT Unreleased 2026-11-11T21:57:05-07:00
 
 #### Coming From:
