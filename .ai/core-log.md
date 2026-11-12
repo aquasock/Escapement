@@ -1,3 +1,33 @@
+## 43 COMMIT Unreleased 2026-11-12T15:46:24-07:00
+
+#### Coming From:
+
+Unreleased d44ba42
+
+#### Purpose:
+
+Capture a full 16 MiB backup before starting the Tamacore port, since that work will change the firmware substantially.
+
+#### Outcome:
+
+`~/twatch-backup/working-2026-11-12-1542.bin` is the current recoverable state: 16 MiB read at 579.8 kbit/s in 231.5 seconds, sha256 `a1bba8faf11c76461f65d738a2e088469b6bf7fad3aff330d8682b350c085ab4`, `verify OK (digest matched)` against the chip with the board held in the stub across read and compare, and the `.sha256` written beside it. The board was rebooted first rather than backed up as found, so the image is a settled state rather than one with a session's filesystem writes half-flushed. The 2,639,168-byte app region at 0x10000 is BYTE-IDENTICAL to the `tinydesk.bin` this machine built, both hashing to `3aed4ad3`, which is the identification that matters because the flashed image carries no symbols; the format strings for the three subsystems are present as a second check (`gps time [s]`, `waiting for UTC`, `card %s uid %s`, `play <file.wav>`). The littlefs partition holds 2,026 written 4 KiB pages against the previous backup's 2,017. Both repositories were clean and pushed at `6f5a382` and `d44ba42` before the backup began, so this cycle produces a recovery artifact and this entry and no engineering change. THE SCRIPT'S RESET WORKED ON THE FIRST ATTEMPT, the fifth consecutive backup to do so, and the board was confirmed running independently of the script's own report by reading its desktop over USB at 15:46 with WiFi associated. The required `core-syntax.md` audit was run against the complete `.ai/` diff, which is this entry alone: `core.md` was untouched; the entry follows the six-section template and the canonical order; its number is the highest present plus one at 43; Files Modified reads `None.` because the cycle generated a recovery artifact outside the repository; and Status uses `N/A` for build and deployment because nothing was compiled or written to the chip.
+
+#### Next Steps:
+
+The Tamacore port is scoped and not started, and the survey that produced the scope is worth carrying into it because it changes what the plan assumes. The emulator is ~4,660 lines but splits unevenly: about 2,560 lines (`splb32.c`, `segmap.c`, `render.h`, `ht24lc08.c`, `con_v3_ir.c`, `splb32_sound.c`) include only libc headers and each other and should compile unchanged, while `tamacore_task.c` at 1,160 lines is the shared-PSRAM window, the `esp_cache` invalidations and the core-0/core-1 handshake -- machinery that exists only because Linux and ESP-IDF had to share one chip and is dead weight inside one image. Four measured facts set the shape: the emulator's frame is 300x308 RGB565 (184 KB) and fits the 320x416 panel at 1:1 centred at (10,54) with no scaling; the ROM is 524,288 bytes against 507,072 bytes of free flash, so it cannot be embedded and must load from the SD card into PSRAM; the segment map is only about 5 KB, not the 32 KB the old comments feared, because that figure described an abandoned 4x variant; and both S3 cores have cache, so the 464-cycles-per-instruction penalty that forced the guest onto core 0 under Linux does not apply here. The one real risk is that `paint_task` repaints the cell grid from `s_shown` and would overwrite pixels a second writer puts in `s_fb`, so the emulator should own the whole panel through `td_wm_app_owns_screen()` rather than share it, and `display_picture_rgb()` is stubbed to return false today and needs about twenty lines to memcpy into `s_fb` and call `flush_rect`. The proposed order is host harness first (run the portable interpreter on the PC and dump frames), then rewrite the glue on the host, then the blit, then a static image on the glass before any timing work. Nothing else is blocked: everything recorded at entries 38 to 42 stands, and the standing queue is unchanged.
+
+#### Files Modified:
+
+None.
+
+#### Status:
+
+- Build: N/A
+- Deployment: N/A
+- User Test: N/A
+
+---
+
 ## 42 COMMIT Unreleased 2026-11-12T14:28:35-07:00
 
 #### Coming From:
