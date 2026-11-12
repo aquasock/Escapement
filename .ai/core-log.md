@@ -1,3 +1,33 @@
+## 98 COMMIT Unreleased 2026-11-11T22:12:38-07:00
+
+#### Coming From:
+
+Unreleased 7b0bcc4
+
+#### Purpose:
+
+Record the margins moving from full-primary green to a dark grey face with a lighter grey border, and the shape helper that made the border exact.
+
+#### Outcome:
+
+At f9da47e on branch `t-watch-ultra`, every button in every margin is a dark grey face with a lighter grey border of two pixels: RGB565 `0x2104` for the face, about thirteen per cent, and `0x8410` for the border, about fifty-one. The green was the Linux build's three-colour scheme and then a deliberate choice while the buttons were images and wanted to be the brightest thing on the glass. Now that they are labelled and pressable that reasoning inverts: a lit-up frame round the desktop competes with the desktop it frames, and a control that looks like a warning light is not what a keyboard substitute should look like. The interesting part is the helper, because a border needs the shape twice. `corner_notch()` is gone, and with it the per-corner arithmetic that both painters carried: a button is now `button_has()`, which bounds-checks and then applies one distance test in the corner quadrants that its `corners_t` marks as round, and the border is that shape minus a copy inset by `BTN_BORDER`. That subtraction is exact rather than a second approximation. Inset every edge of a convex shape by t and reduce the corner radius by t, and the result is the set of points at distance t from the original, so the border is the same width along a straight edge as it is around an arc instead of thickening at the corners as a naive inset would. The refactor removed state without adding any: where a painter used to compute two arc centres per column or two per bar and pass four `corner_notch` arguments by hand, it now calls `button_pixel()` once with a corner set from `bar_corners()`, `column_corners()` or their mirror, and the corner flags are a statement of the design -- round where a button faces the desktop or meets the outside world, square along the run of glass between neighbours -- rather than a consequence of arithmetic. The label is gated on the face colour so a glyph pixel can never eat into the border; with a 16-row font in a 41-row bar and the narrowest label 24 pixels in a 105-pixel face that gate is not load-bearing, and it is there so that it stays true if either number changes. Verified without a finger on the glass, as with the previous two cycles, by rendering the margins at 1:1 on the host through the port's real font and the port's real geometry: the border measured exactly two pixels at every bar's mid-height, no glyph pixel touched it, and every one of the five column buttons came out bordered. Rendered output also confirmed the arcs still close from ten pixels inset at the ends to full width in ten rows, which is what the previous two cycles were accepted on and the thing most likely to have been disturbed by replacing the shape test. The host suite is 37 of 37 and the flash reported four sections hash-verified. The operator's look on the glass is the acceptance test and had not been given when this entry was written.
+
+#### Next Steps:
+
+The two columns are still unlabelled and are the obvious next step, since the label machinery takes any rectangle and a column needs only a table keyed by the index the hit test already returns; the constraint there is width, because a column is 45 px and the longest left-column duty would be at most three characters in a 41-pixel inner face. If the grey reads too dark or the border too faint on the glass, the two colour constants and `BTN_BORDER` are the whole of the adjustment and they are named with their RGB565 composition so the next person can see what they are rather than guess. After that the top margin, still inert as `EDGE_TOP` and intended for status icons, is the last unpainted region, and the sweep from entry 94 should be landed as a real test in the port rather than remaining a throwaway. Two open questions still want a decision rather than code: Esc on a bare desktop opens the Start menu, and the margin buttons stay painted while a full-screen application owns the screen. Also open: the parked redraw fault from entry 74, the two port overrides `TD_SIZE_POLL_MS=0` and `TD_ACK_TIMEOUT_MS=0` still untested against the current tree, the RTC write path written but not exercised, and `scripts/watch-backup.sh` still lacking the `verify_flash` step that entry 96 used. The Linux side stays parked; its last code commit is 8645a82 and everything after it in this repository is the project log.
+
+#### Files Modified:
+
+- ports/twatchultra/main/display.c
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: NOT RUN
+
+---
+
 ## 97 COMMIT Unreleased 2026-11-11T22:04:55-07:00
 
 #### Coming From:
