@@ -1,3 +1,33 @@
+## 28 COMMIT Unreleased 2026-11-12T10:15:13-07:00
+
+#### Coming From:
+
+Unreleased e3d8baa
+
+#### Purpose:
+
+Capture a full 16 MiB backup of the state the operator accepted, and find the root cause of the silent reset that had now recurred three times.
+
+#### Outcome:
+
+`~/twatch-backup/working-2026-11-12-1010.bin` is the current recoverable state, 16 MiB read at 576.6 kbit/s in 232.8 seconds, sha256 `ad82e52ca5d3fc29cbbdd0ca72574fd56fe33dfb329d5d49e7b484c6e37ba3ab`, verify OK against the chip with the board held in the stub across read and compare, and the stored `.sha256` re-checked afterwards. The 2,565,216-byte app region at 0x10000 is byte-identical to the `tinydesk.bin` this machine built, both hashing to `ab7bbd12`, so the image holds the firmware that was running rather than an older build; the strings this session's work introduced are all present -- `ntc%d`, `Taskbar at the top`, `chg go`, `vbus out`, `ts %dmV`, `twatch-pwrkey` and `twatch-pusher` -- both image magics are 0xe9, and the partition table parses as nvs, phy_init, ota_0, ota_1, otadata and storage at the offsets `partitions.csv` declares. The littlefs partition holds 1,995 written blocks of 2,528 against the previous backup's 1,993, which is the two blocks of NVS and settings writes this session produced. THE SCRIPT'S RESET WAS FINALLY DIAGNOSED RATHER THAN RECOVERED FROM. Three consecutive backups had printed `board stayed silent` and then brought the board back on a second attempt, so the fault was visible, the artifact was always sound, and the cause stayed hidden behind a recovery path that worked. It is `--before no_reset`, which is wrong in both directions, and both were measured. From the stub it CONNECTS AND EXITS 0 while performing no effective reset, because this board is on a native USB-JTAG port where RTS is not wired to EN -- the pulse is not felt, the stub keeps running and the desktop never appears, so the failure is silent and looks like the board's fault. From a running board it cannot even connect, failing its sync with `Invalid head of packet` because the desktop is speaking raw VT100. `--before default_reset` works from either state, so `reset_board` now uses that and nothing else, and `verify_flash` stopped asking for `--after hard_reset`, which was the same broken pulse from the same stub and bought nothing. The tail is simpler as a result -- reset, check, retry once, warn -- instead of relying on a fallback that had become the normal path. PROVEN END TO END RATHER THAN ARGUED: the run after the change printed `resetting the board`, `waiting for the board to come back` and `board is up`, which is the first attempt with no fallback used, against three consecutive earlier runs that had all needed the second. An isolated harness had already confirmed the fixed function returns 0 and reboots a running board -- `Uptime: 00:00:17` after the call -- and that isolation is what showed the first attempt had been reporting success without doing anything, since a `no_reset` connection to a stub returns 0 whether or not the board wakes. Two further backups were taken during the investigation, at 0959 and 1005, and both are sound and verified; 1010 is the one to restore because it is the first taken with the reset working, and the earlier two are kept rather than deleted since a backup is cheap and a deleted one is not recoverable. Nothing was built or flashed this cycle. The required `core-syntax.md` audit was run against the whole `.ai/` diff, which is this entry alone: `core.md` was untouched, the entry follows the six-section template and the canonical order, its number is the highest present plus one at 28, Files Modified lists one deterministic tool and no `.ai/` path or generated artifact, and Status uses `N/A` for build and deployment because this cycle changed a script and read the flash without building anything.
+
+#### Next Steps:
+
+The backup situation is now correct and the script can be trusted to say whether the board came back, which closes an item that had been carried forward since entry 7 and had been "fixed" twice without the root cause being found -- a warning worth carrying: both earlier fixes made the symptom survivable and neither made it absent, and the thing that finally found it was an isolated harness rather than reading the script again. What remains on the watch is the thermistor calibration, which needs the NTC's nominal resistance and beta and the charger's excitation current; logging the TS voltage alongside each `chg go` and `chg done` would give a temperature history for free in the meantime, from events the driver already handles. The taskbar-at-top option is flashed and still waiting on the operator's four checks -- the bar moves, the Start menu hangs downward from it, a maximised window does not hide under it, and the desktop's top row of icons is not behind it -- followed by a reboot to confirm the setting persists. Both pushers work and both send Enter, with F10 on the BOOT pusher the shape I would argue for. Audio is a beep with no playback path, and the display's tearing-effect line is configured and unread. The screen model that reads the Log Viewer over USB is in a temporary directory for the tenth cycle and belongs in the fork under a tools directory; it has now been rebuilt or reused in every cycle this session and moved nowhere. The unbuilt outboard parts are as they were: the BHI260AP at 0x28 answering and undriven, the LoRa radio needing ALDO3 and XL9555 P05, the NFC reader needing DLDO1, and the GNSS and microphone with no code. The standing queue is otherwise as it was: the bell seam parked with its finding recorded, the top margin as the last unpainted region, the full-screen margin question, Store installs to the card and the image cache, the two untested port overrides, the unexercised RTC write path, and the pre-existing YAML fence defect in `core-reference.md`.
+
+#### Files Modified:
+
+- scripts/watch-backup.sh
+
+#### Status:
+
+- Build: N/A
+- Deployment: N/A
+- User Test: N/A
+
+---
+
 ## 27 COMMIT Unreleased 2026-11-12T09:58:30-07:00
 
 #### Coming From:
