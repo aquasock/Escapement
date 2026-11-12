@@ -1,3 +1,34 @@
+## 100 COMMIT Unreleased 2026-11-11T22:22:43-07:00
+
+#### Coming From:
+
+Unreleased 298200e
+
+#### Purpose:
+
+Record the right column's labels becoming arrow glyphs, the labels turning white, and the outline colour being recorded as the violet it actually is.
+
+#### Outcome:
+
+At 1890bf8 on branch `t-watch-ultra`, the right column's four buttons are labelled with the arrows themselves, U+2190 to U+2193, and every label on the glass is white. Three things about that are worth keeping. The first is that the previous cycle's choice of words over glyphs was wrong for a reason worth recording as method rather than as an unfortunate decision: it rested on a guess that the desktop's 8x16 font might not carry the arrow characters, and the guess was never tested. All four arrows were in the font, and a four-line program against `font8x16_glyph()` would have said so in less time than it took to reason about it. The consequence on the glass is not cosmetic either: "Right" was 40 px in a 41 px inner face, one pixel of headroom, and an arrow is 8 px, so the tightest text on the board stopped being tight. The second is the machinery that change needed. An arrow is three bytes in UTF-8 and the font is indexed by code point, so the label path decodes once at placement time into a fixed array of code points, which keeps the per-pixel test at a subtraction, a divide and a table lookup while making the width calculation count the same units the renderer draws. Counting bytes would have made every arrow four cells wide and pushed it out of its button, and it is the kind of error that would have looked like a centring bug. A malformed sequence decodes to a visible question mark rather than being skipped, on the same reasoning used for the greys: a silently missing character is indistinguishable from a button that does nothing. The third is the colour, and this one is a correction of my own error rather than a change of mind. The border shipped as `0x58CB` while its comment claimed `RGB565(11,22,11)`. It actually packs to R=11, G=6, B=11, because a grey needs all three equal and this does not: the operator saw a violet outline on the glass, which is exactly what that constant is, and asked to keep it. The neutral grey the comment described would have been `0x5ACB`, G=22. The constant is unchanged at the operator's request and the comment now states the arithmetic rather than the intent, with the neutral value recorded beside it, because a comment that describes a colour the code does not produce is worse than no comment -- the next person to change it would have trusted the comment. Verified at 1:1 on the host before flashing: all four arrow code points present in the font, no glyph pixel on a border, none inside a rounded corner, and no label wider than its face, on top of the same checks the last three cycles used. Host suite 37 of 37, four sections hash-verified, and all four arrow strings confirmed present in the built image. The operator's look on the glass is the acceptance test and had not been given when this entry was written.
+
+#### Next Steps:
+
+The left column is the last margin without labels, and it now needs only a table: F10, Esc, F6, Super+D and F11 are all four characters or fewer, so the 41 px inner face takes them with room, and the UTF-8 path already handles them. The top margin is still inert as `EDGE_TOP` and is the last unpainted region, intended for status icons. When the top margin is done the margins are finished as a set and the next question is behaviour rather than appearance, of which two are already open by decision: Esc on a bare desktop opens the Start menu, which was sensible while Enter and Esc were a keyboard pair for the icon grid, and the margin buttons stay painted while a full-screen application owns the screen where they are no longer buttons. Also open: the parked redraw fault from entry 74, the two port overrides `TD_SIZE_POLL_MS=0` and `TD_ACK_TIMEOUT_MS=0` still untested against the current tree, the RTC write path written but not exercised, and `scripts/watch-backup.sh` still lacking the `verify_flash` step that entry 96 used. The active log is now at exactly its hundred-entry limit, so the next cycle must archive it: tar the current file into `archived_logs` with a timestamp, clear the log, and open it with a handoff entry numbered 1 that names the archive and states the live state of the project. Two older deviations from the syntax still stand untouched, for the same reason they have stood: entries 17 and 18 carry annotated status labels, and fourteen entries before them list `.ai/` files under Files Modified. The Linux side stays parked; its last code commit is 8645a82 and everything after it in this repository is the project log.
+
+#### Files Modified:
+
+- ports/twatchultra/main/display.c
+- ports/twatchultra/main/edges.h
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: NOT RUN
+
+---
+
 ## 99 COMMIT Unreleased 2026-11-11T22:17:47-07:00
 
 #### Coming From:
