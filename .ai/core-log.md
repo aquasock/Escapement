@@ -1,3 +1,46 @@
+## 35 COMMIT Unreleased 2026-11-12T12:34:01-07:00
+
+#### Coming From:
+
+Unreleased 1154f6b
+
+#### Purpose:
+
+Bring the T-Watch Ultra's NFC reader up for the first time and read the tag in hand with it.
+
+#### Outcome:
+
+At `fcd14aa` on branch `t-watch-ultra` the watch reads a tag: `nfc scan` powers the reader, polls, and prints `card A uid 1dd30d9e1c1080` with `sak 00 T2T ndef 19 bytes`, the message decoded as the text record `T Hello LilyGo` and its nineteen bytes in hex, ending `1 card`. THE READER IS NOT WHAT THIS PROJECT EXPECTED and the correction is the most valuable part: it is an ST Microelectronics ST25R3916 on the shared SPI bus -- chip select 4, interrupt 5, MOSI/MISO/SCK shared with the SD card and the LoRa radio -- and not a PN532, not on I2C. Its supply is the AXP2101's DLDO1, voltage register 0x99 and enable bit 7 of 0x90, which nothing in this port had ever raised, making it the third part here whose failure mode is to answer correctly and do nothing with its rail off. Register 0x3F reads 0x2A, which is five in the type field: base silicon rev 2, NOT the 3916B that reads six, and the two carry different antenna tuning in the vendor's analog table, so a driver written for the other would read the identity and still fail on a tag. THE TAG IS NOT BLANK EITHER. `d1 01 0f 54 02 65 6e` is a well-known Text record of fifteen bytes in language `en` carrying `Hello LilyGo`, so the cycle that was set up to exercise the empty-tag path produced content instead and that path stays written and unexercised. The port is a shim rather than a rewrite, and the reason is measured rather than assumed: `components/st25r3916/rfal/` is ST's ST25R3916 driver, RFAL and NDEF stack, about 40 700 lines under ST's SLA0052 licence, byte-identical to lewisxhe/ST25R3916-NFC-RFAL v1.0.1 apart from one line, and the Arduino surface it actually needs is three headers supplying types, GPIO, MIN/MAX and a Serial object. It cost 55 KB of flash -- `tinydesk.bin` from 2,570,352 to 2,628,560 bytes -- against the 517 KB this OTA slot still has free, so keeping it whole was affordable and the hard parts, the analog configuration table and the ISO14443A anticollision sequence, came for free. TWO DEFECTS IN THE VENDOR CODE HAD TO BE HANDLED. `RfalRfClass` declares fifty virtual functions and defines none of them while the concrete class overrides every one, so the link fails with `undefined reference to _ZTV11RfalRfClass`; marking all fifty `= 0` fixes it and is better than the alternatives because the compiler then enforces what the linker was complaining about, turning a future re-vendor's mistake into a named function at compile time instead of a mangled symbol at link time. And `attachInterrupt()` is deliberately a no-op: the stack's own fallback is `isr_pending || digitalRead(int_pin) == HIGH`, so the line is read on every worker call anyway, and a real ISR would call through a `std::function` from interrupt context while an SPI transaction to the same part might be in flight. The worker runs at 1 kHz, far inside the 106 kbit/s framing. TWO TRAPS ARE RECORDED BECAUSE EACH WOULD HAVE COST A CYCLE. The stack drives chip select by hand around each command, so the pin must stay a plain GPIO: handing it to the SPI peripheral as `spics_io_num` routes it to a peripheral output through the GPIO matrix where `gpio_set_level()` has no effect, and the chip then never answers, which is indistinguishable from a dead part. And the read is two bytes wide because the chip cannot drive MISO while it is still receiving the command byte, so a driver that takes the first byte reads the register's own address back and looks plausible. The field is on only while a scan runs, because there is no card-presence circuit on this board and detection therefore means running the radio for as long as it is wanted; a 2 s cooldown is why ten seconds of a tag resting on the glass records `1 card` and not eleven. One instrument was needed and is worth keeping: the desktop Terminal clears on completion, so the count line was lost between polls, and redirecting with `nfc scan 10 > /sd/nfc.txt` made the result durable -- which also re-exercised the SD card on the very bus the reader shares, still mounted at 119 GB, written and read back. Build is clean under `-Werror`, only the app region at 0x10000 was written with the hash verified, and the identity was observed on the glass and in a file read back off the card rather than by eye alone. The required `core-syntax.md` audit was run against the complete `.ai/` diff: `core.md` was untouched; the entry follows the six-section template and the canonical order; its number is the highest present plus one at 35; Files Modified lists only port paths and no `.ai/` file or generated artifact; Status uses allowed values only; and the active log holds 35 entries against the 100-entry limit. Both YAML blocks in `core-reference.md` were re-parsed after the change and all six fenced blocks in the file load, with 93 records and 93 index entries and no record lacking one -- and the PRE-EXISTING YAML FENCE DEFECT this log has carried since entry 16 is now FIXED, the closing fence of the fast-lookup index having sat on the last entry's line where a future edit would eventually have swallowed it.
+
+#### Next Steps:
+
+What the reader still cannot do is larger than what it can, and none of it is blocked. Only NFC-A Type 2 has ever been in the field, so coverage is one tag of one technology; a tag with no NDEF at all, and a bare tag with a formatted but empty container, are both written paths that have never run, and the first is the case the operator believed they were handing over. Writing is not implemented -- the vendored stack can write NDEF, so that is plumbing rather than protocol. Nothing reacts to a tag: the read ends in a printf, and the obvious first consumer is a key injection through the desktop's existing injection path, so that presenting a known tag could do something a person can see. `nfc` is a Terminal command with no way in from the desktop, which is the same shape audio had before the player existed. Two smaller things belong to this work rather than to the queue: the reader's rail is raised by `board_nfc_rail_on()` on demand and left up afterwards, so a future power-budget pass should decide whether it is dropped when a scan ends, and the interrupt pin is read and printed but never armed, which is deliberate and worth re-checking if RFAL ever takes a slow path. Everything else is unchanged and unblocked: the taskbar edge is settable and left defaulting to bottom at the operator's direction; the thermistor reads in degrees; both pushers work and both send Enter, with F10 on the BOOT pusher the shape I would still argue for; audio plays WAV files from the card; the display's tearing-effect line is configured and unread; and the remaining outboard parts are the BHI260AP at 0x28 answering and undriven, the LoRa radio needing ALDO3 and XL9555 P05, and the GNSS and microphone with no code. The standing queue is otherwise as it was: the bell seam parked with its finding recorded, the top margin as the last unpainted region, the full-screen margin question, Store installs to the card, the two untested port overrides, the unexercised RTC write path, and -- withdrawn from that list -- the `core-reference.md` fence defect, now fixed. A fresh backup is due, since `working-2026-11-12-1152.bin` predates the NFC stack.
+
+#### Files Modified:
+
+- ports/twatchultra/main/nfc.c
+- ports/twatchultra/main/nfc.h
+- ports/twatchultra/main/nfc_scan.cpp
+- ports/twatchultra/main/link_twatch.c
+- ports/twatchultra/main/CMakeLists.txt
+- ports/twatchultra/components/st25r3916/CMakeLists.txt
+- ports/twatchultra/components/st25r3916/include/Arduino.h
+- ports/twatchultra/components/st25r3916/include/SPI.h
+- ports/twatchultra/components/st25r3916/include/Wire.h
+- ports/twatchultra/components/st25r3916/shim/arduino_shim.cpp
+- ports/twatchultra/components/st25r3916/rfal/
+- ports/twatchultra/components/st25r3916/LICENSE-NFC-RFAL-fork
+- ports/twatchultra/components/st25r3916/LICENSE-ST25R3916-fork
+- ports/twatchultra/README.md
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: PASS
+
+---
+
 ## 34 COMMIT Unreleased 2026-11-12T11:57:24-07:00
 
 #### Coming From:

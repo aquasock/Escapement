@@ -70,6 +70,10 @@ Topic IDs are the `record_id` prefix. An entry reserves a name; it does not clai
   name: "CO5300 AMOLED and fbdev"
   description: "The panel's controller: SPI framing, window addressing, the byte order the pixel stream needs, which windows it honours, and what the fbdev driver does and does not implement for userspace."
 
+- topic_id: NFC
+  name: "ST25R3916 NFC reader"
+  description: "The reader on the shared SPI bus: the part fitted, which chip select and interrupt it uses, the PMU rail that powers it, the SPI framing it answers, and the vendor stack this project drives it with."
+
 - topic_id: TCH
   name: "CST9217 capacitive touch"
   description: "The touch controller at I2C 0x1A: its address against its neighbours, the unlock handshake that gets it scanning, the report block layout and freshness marker, and the measured read reliability on the bit-banged bus."
@@ -336,7 +340,13 @@ EMU-013: "The guest LCD is really 49x49 dots; rendering it 1:1 instead of at a 5
 EMU-014: "The status menu runs at 0.52x because it needs about 520k instructions/s against a 513k ceiling, not because of the display: cycles per instruction collapse toward 1 while panel time stays at 8-37 ms/s"
 EMU-015: "An emulated instruction executes 258 host instructions containing 86 loads and 30 stores -- 116 host memory operations -- and at 464 cycles per instruction those accesses at about 4 cycles each account for the cost almost exactly"
 EMU-016: "The interpreter is already at normal efficiency: coverage counter +0.8 percent, -O3 -0.5 percent, timers_clock removal +7.7 percent, so about 1.4x is left in userspace and only core 0 has the 4-7x"
-EMU-017: "OPEN and superseded: a firmware task writing a PSRAM buffer from the heap put the board in a boot loop, and the overlap hypothesis this record proposes was NOT confirmed -- coherency was later proven working and the emulator moved to core 0 (EMU-004, docs/cores.md)"```
+EMU-017: "OPEN and superseded: a firmware task writing a PSRAM buffer from the heap put the board in a boot loop, and the overlap hypothesis this record proposes was NOT confirmed -- coherency was later proven working and the emulator moved to core 0 (EMU-004, docs/cores.md)"
+
+NFC-001: "The NFC reader is an ST25R3916, not a PN532 and not on I2C: SPI on the shared bus (SCK 35, MOSI 34, MISO 33) with CS 4 and INT 5, powered by the AXP2101's DLDO1 (voltage 0x99, enable bit 7 of 0x90); on this unit register 0x3F reads 0x2A, which is base silicon rev 2 and not the 3916B"
+NFC-002: "The ST25R3916 answers SPI mode 1 at up to 5 MHz with a one-byte command: write reg = (reg and 0x3F) then data, read reg = that or 0x40 then a dummy byte then data, FIFO load 0x80, FIFO read 0xBF, direct command 0xC0 or cmd; chip select must stay a plain GPIO because the vendor stack drives it by hand around each command"
+NFC-003: "The vendor stack is ST RFAL plus the ST25R3916 driver plus NDEF, ~40k lines, and its RfalRfClass declares 50 virtuals with none defined, so it fails to link until they are marked pure; Arduino coupling is only types, GPIO, MIN/MAX and a Serial object, and attachInterrupt can stay a no-op because the stack falls back to reading the pin"
+NFC-004: "This board has no capacitive card-presence circuit, so the reader must be powered and polling to see a tag; a Type 2 tag reads as `card A uid <hex>`, `sak 00 T2T`, and its NDEF message, and the LilyGo tag in hand carries the text record 'Hello LilyGo' rather than being blank"
+```
 
 ---
 
@@ -1585,6 +1595,65 @@ EMU-017: "OPEN and superseded: a firmware task writing a PSRAM buffer from the h
     - "TamaHarness/portable/tamafb.c: BTN_DEV_NAME \"touch-buttons\" and the BTN_0..BTN_2 read, the contract the device name satisfies"
     - "TCH-004 for the 440 threshold, and EMU-010 for the 30 percent the daemon cost"
   verification: "Verified on hardware 2026-11-10. /proc/bus/input/devices lists a fourth device, Name=\"touch-buttons\", as event3 alongside cst92xx-touch on event2. The emulator's own log confirms `buttons: /dev/input from touch-buttons` rather than its 'buttons will do nothing' error, and the operator confirmed the pet responds to all three bars and that the emulator is materially faster than with the daemon running."
+
+- record_id: NFC-001
+  kind: BOARD
+  topic_id: NFC
+  title: "The NFC reader is an ST25R3916 on the shared SPI bus, powered by DLDO1, and this unit is base silicon rev 2"
+  status: VERIFIED
+  verified_date: 2026-11-12
+  statement: "The reader on this board is an ST Microelectronics ST25R3916-family RF front end, not the PN532 that a T-Watch backplate once carried, and it is not on I2C at all. It sits on the second general-purpose SPI bus that the SD card and the LoRa radio share (SCK 35, MOSI 34, MISO 33) with chip select on GPIO 4 and interrupt on GPIO 5, and its supply is the AXP2101's DLDO1 -- voltage register 0x99 in 100 mV steps from 500 mV, enable bit 7 of 0x90. On this unit the identity register 0x3F reads 0x2A: the type field in bits 7:3 is 5, which is the ST25R3916 and not the 3916B that reads 6, with revision 2 in bits 2:0. Both readings are stable across separate transactions."
+  consequence: "Three things follow, and each replaces a guess this project was carrying. The part is not the PN532 its earlier records hinted at, so no PN532 driver applies. The rail is DLDO1 and not ALDO1..4 or BLDO2, and it is the THIRD part on this board whose failure mode is to answer and do nothing with its supply off -- the haptic driver and the speaker amplifier are the other two -- so a reader that reads correctly and never sees a card is a rail fault before it is a protocol fault. And the two silicon types are not interchangeable at the analog layer: they carry different antenna tuning and different AWS settings in the vendor's configuration table, so a driver written against 0x30 would read this part's identity and still fail on a tag. The rail must also be raised before the first transaction, because DLDO1 is a switched regulator and not a tie to VBAT."
+  sources:
+    - "on the watch, TinyDesk port 2026-11-12: `nfc` reports `rail up`, `bus up cs 4 int 5`, `id 2a type ST25R3916 rev 2`, `io2 04`, `op 00`, `irq 0`"
+    - "BRD-003 for the rail assignment, and BRD-004 for the shared SPI bus and its chip selects"
+    - "LilyGoLib docs/hardware/lilygo-t-watch-ultra.md: the ST25R3916 identification and the CS/INT pin table"
+    - "arduino-esp32 variants/lilygo_twatch_ultra/pins_arduino.h: NFC_CS 4, NFC_INT 5, and USING_ST25R3916"
+    - "tinydesk-twatch port: main/nfc.c board_nfc_rail_on() and nfc_bus()"
+  verification: "Verified on hardware 2026-11-12 in the TinyDesk port, on the glass: the `nfc` command printed the identity above and the SD card mounted at 119 GB and read a directory in the same session with the reader added to its bus, which is the coexistence evidence. The earlier 'absent' verdict this project carried predates the chip-select parking fix and is superseded by BRD-004."
+
+- record_id: NFC-002
+  kind: BOARD
+  topic_id: NFC
+  title: "The ST25R3916 speaks one-byte-command SPI mode 1, and its chip select must stay a plain GPIO"
+  status: VERIFIED
+  verified_date: 2026-11-12
+  statement: "The reader's host interface is SPI mode 1 (CPOL 0, CPHA 1), MSB first, up to 5 MHz, with a one-byte command that encodes the operation in its top bits: a register write sends `(reg & 0x3F)` followed by the data, a register read sends `((reg & 0x3F) | 0x40)` followed by one dummy byte and then returns the value on the second byte, a FIFO load sends 0x80 then data, a FIFO read sends 0xBF then collects data, and a direct command sends `0xC0 | cmd`. Registers in space B require 0xFB first. The vendor stack and this port both drive chip select by hand -- `digitalWrite(cs, LOW)` around the command byte and its data -- rather than handing the pin to the SPI peripheral."
+  consequence: "The two-byte read and the hand-driven chip select are not stylistic and both cost a cycle if assumed otherwise. The chip cannot drive MISO while it is still receiving the command byte, so the first byte clocked back during a read is meaningless and the value is the second; a driver that takes the first byte reads a register's own address back and looks plausible. And a pin handed to the SPI driver as `spics_io_num` is routed to a peripheral output through the GPIO matrix, where `gpio_set_level()` has no effect, so the by-hand toggling the protocol needs silently stops working -- the symptom is a chip that never answers, indistinguishable from a dead part or a wrong mode. Read the identity register twice across separate transactions before believing it: 0x00 and 0xFF are what a floating MISO produces, so a single read cannot separate a missing chip from a missing line. This bus has MISO shared with the SD card and the LoRa radio, which is why that distinction matters here more than on a dedicated bus."
+  sources:
+    - "ST, ST25R3916 datasheet, and the SPI framing as implemented in ST's own driver, st25r3916_com.cpp"
+    - "on the watch, TinyDesk port 2026-11-12: the same register read twice returned 0x2a both times and `io2 04` read back the byte that had been written"
+    - "tinydesk-twatch port: main/nfc.c, the xfer()/nfc_read_reg()/nfc_write_reg() pair and the note on spics_io_num"
+  verification: "Verified on hardware 2026-11-12: the identity read is stable, a write to IO_CONF2 0x01 reads back as written, and the SD card keeps mounting on the same bus with the reader's device added, which is what shows the mode and the hand-driven chip select are both right rather than merely plausible."
+
+- record_id: NFC-003
+  kind: EXTERNAL
+  topic_id: NFC
+  title: "The vendor NFC stack is 40k lines of Arduino code that does not link until its interface class is made abstract"
+  status: VERIFIED
+  verified_date: 2026-11-12
+  statement: "The portable NFC stack for this part is lewisxhe/ST25R3916-NFC-RFAL v1.0.1, which merges ST's ST25R3916 register driver, ST's RFAL abstraction layer and an NDEF reader/writer: about 40 700 lines across 33 .cpp and 35 .h files, carrying ST's SLA0052 / MIX MyLiberty licence rather than a permissive one. Its Arduino dependency is thin -- three `#include <Arduino.h>`, 25 `dev_spi->transfer` calls, 23 `digitalWrite`, 14 `delay`, 6 `millis`, and MIN/MAX -- so it can be built for ESP-IDF behind three small headers. Two defects must be handled before it runs: `RfalRfClass` in rfal_rf.h declares fifty virtual functions and defines none of them, so the link fails with an undefined reference to its vtable under any compiler that emits one, and the fix is to mark all fifty `= 0`; and `attachInterrupt()` can be a no-op, because the stack's fallback is `isr_pending || digitalRead(int_pin) == HIGH` and reads the line on every worker call regardless."
+  consequence: "Porting the vendor stack rather than writing a driver is the cheaper and more honest path, but only because the coupling is this thin: the parts that are hard to get right and impossible to guess -- the analog configuration table with its per-silicon antenna tuning, and the ISO14443A short-frame and anticollision sequence -- are all inside the vendored code, and the parts this port has to supply are types and GPIO. Marking the interface pure is better than the link fix it replaces, because it converts a mangled-symbol failure at link time into a named-function failure at compile time, which is what a future re-vendor needs. The interrupt being unnecessary is worth keeping in view: it means the SPI bus is never touched from interrupt context, and the worker loop's 1 kHz rate is far inside the 106 kbit/s framing. Cost measured: 55 KB of flash on this port, against 517 KB free in its OTA slot, so the whole stack fits with room for the app work still to come. The stack must not be re-vendored without re-checking the base-class edit, because it is the one place this project's copy differs from upstream."
+  sources:
+    - "https://github.com/lewisxhe/ST25R3916-NFC-RFAL tag v1.0.1, vendored at tinydesk-twatch ports/twatchultra/components/st25r3916/rfal/"
+    - "rfal_rf.h: RfalRfClass, the fifty virtual declarations, and the `= 0` edit this project made"
+    - "rfal_rfst25r3916.cpp: isISRPending(), the digitalRead fallback that makes the interrupt optional"
+    - "tinydesk-twatch port: components/st25r3916/include/{Arduino.h,SPI.h,Wire.h} and shim/arduino_shim.cpp"
+  verification: "Verified on hardware 2026-11-12: the port links with the stack vendored, boots, and reads a real tag end to end (`card A uid 1dd30d9e1c1080`, `sak 00 T2T ndef 19 bytes`, decoded as the text record 'Hello LilyGo'). Build evidence: tinydesk.bin grew from 2,570,352 to 2,628,560 bytes, 55 KB, with no change to the panel, the SD card or the shell."
+
+- record_id: NFC-004
+  kind: BOARD
+  topic_id: NFC
+  title: "There is no card-presence circuit on this board, so the reader must be powered and polling to see a tag"
+  status: VERIFIED
+  verified_date: 2026-11-12
+  statement: "LilyGo's own documentation for this board states that the ST25R3916 has no external capacitive card-presence detection circuit and that the reader must be powered to detect a card. Consistent with that, a scan that powers the rail, polls NFC-A/B/F/V in one-second discovery windows and holds the field on reads whatever is on the antenna: on 2026-11-12 a Type 2 tag held against the glass reported as `card A uid 1dd30d9e1c1080`, `sak 00 T2T ndef 19 bytes`, with the NDEF message `d1 01 0f 54 02 65 6e` followed by 'Hello LilyGo' -- a well-known Text record, 15 bytes of payload, language 'en'. The tag in hand is therefore NOT blank despite being described as one; it carries a factory-written text record, which is why the read produced a message rather than an empty answer."
+  consequence: "The consequence for power is direct: there is no way to wait for a card cheaply, so detection means running the radio, and a reader left polling holds tens of milliamps of antenna current for as long as it runs. That is why this project scans on demand rather than in a background task, and why the field is dropped when a scan ends. The consequence for reading is that 'a tag is present' and 'a tag has content' are separate facts and both are worth printing: a Type 2 tag with no NDEF reports zero-length and is not an error, while the tag actually tested returned content, so the no-NDEF path remains written and UNEXERCISED. The record also retires the 'blank tag' premise this cycle started from -- a tag's UID, SAK and NDEF are three independent answers and only reading all three says what is on it."
+  sources:
+    - "LilyGoLib docs/hardware/lilygo-t-watch-ultra.md: 'The ST25R3916 NFC reader has no external capacitive card-presence detection circuit on this board. The reader must be powered to detect a card.'"
+    - "on the watch, TinyDesk port 2026-11-12: `nfc scan 10 > /sd/nfc.txt` then `cat /sd/nfc.txt` gave the card line, the decoded record, the hex and `1 card`"
+    - "tinydesk-twatch port: main/nfc_scan.cpp nfc_scan_step() and main/nfc.c print_ndef_text()/print_ndef_hex()"
+  verification: "Verified on hardware 2026-11-12 with the operator holding the tag against the glass. Two independent scans four minutes apart returned the same UID, and the second run's output was written to /sd and read back, so the evidence is a durable record rather than a scrollback. Not yet exercised: a tag with no NDEF, any technology other than NFC-A Type 2, and writing."
 ```
 
 ---
