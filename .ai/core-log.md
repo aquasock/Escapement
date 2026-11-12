@@ -1,3 +1,33 @@
+## 40 COMMIT Unreleased 2026-11-12T13:55:09-07:00
+
+#### Coming From:
+
+Unreleased 78559bf
+
+#### Purpose:
+
+Capture a full 16 MiB backup of the first build that sets the watch clock from the GNSS receiver, since the previous image predates it.
+
+#### Outcome:
+
+`~/twatch-backup/working-2026-11-12-1352.bin` is the current recoverable state: 16 MiB read at 588.8 kbit/s in 227.9 seconds, sha256 `156e8e4c6a8308d6247e7937f7a4aece7b6ff5e1b2c3d4083deead991031e6f6`, `verify OK (digest matched)` against the chip with the board held in the stub across read and compare, and the stored `.sha256` written beside it. The 2,638,496-byte app region at 0x10000 is BYTE-IDENTICAL to the `tinydesk.bin` this machine built, both hashing to `4688575c`, which is the identification that matters because the flashed image carries no symbols to search. The format strings for this cycle are present as a second check -- `gps time [s]`, `waiting for UTC`, `clock set %lld`, `GGA %d RMC %d`, `gps raw [s]` -- alongside the NFC and audio ones from earlier cycles (`card %s uid %s`, `nfc scan [s]`, `play <file.wav>`), so the image is the one with all three subsystems rather than an earlier one. The partition table parses as the six entries `partitions.csv` declares -- nvs 0x9000, phy_init 0xf000, ota_0 0x10000, ota_1 0x310000, otadata 0x610000, storage 0x620000 -- and the littlefs partition holds 2,017 written 4 KiB pages against the previous backup's 2,013, which is the four pages of session writes this cycle produced. THE SCRIPT'S RESET WORKED ON THE FIRST ATTEMPT, the fourth consecutive backup to do so, and the board was confirmed running independently of the script's own report by reading its desktop over USB at 13:55. Nothing was built, flashed or changed this cycle: both repositories were already clean and pushed at `50d047d` and `78559bf` before the backup began, so this cycle produces a recovery artifact and a log entry and no engineering change. The required `core-syntax.md` audit was run against the complete `.ai/` diff, which is this entry alone: `core.md` was untouched; the entry follows the six-section template and the canonical order; its number is the highest present plus one at 40; Files Modified reads `None.` because the cycle generated a recovery artifact outside the repository; and Status uses `N/A` for build and deployment because nothing was compiled or written to the chip.
+
+#### Next Steps:
+
+The image now holds three subsystems that were each unknown a day ago -- a reader, a receiver and a clock that can be set from it -- and the state is recoverable, so the natural next work is to make the clock's correction automatic rather than a command somebody has to remember. That is a decision about cost and not about code: the receiver takes a few seconds and tens of milliamps, so running it on every boot is a trade only the operator can make, and the cheaper shape is a Settings checkbox or a shell command run once at start-up. Everything else is unchanged and unblocked. NFC is parked at the operator's direction with the re-read storm kept deliberately, and its three established facts are recorded: the capability container is at offset 12, the tag is an NTAG213 with `e1101200` and 126 free bytes, and `ndefPollerCheckPresence()` blocks for ever once a tag is lifted. The GNSS receiver's UBX side is unexplored -- the MON-VER poll goes unanswered, constellation configuration is untouched, and C/N0 is not extracted from GSV, so the port knows how many satellites are heard and not how well. A fix remains untested because it needs sky. The taskbar edge is settable and left defaulting to bottom at the operator's direction; the thermistor reads in degrees; both pushers work and both send Enter, with F10 on the BOOT pusher the shape I would still argue for; audio plays WAV files from the card; the display's tearing-effect line is configured and unread; and the remaining outboard parts are the BHI260AP at 0x28 answering and undriven, the LoRa radio needing ALDO3 and XL9555 P05, and the microphone with no code. The standing queue is otherwise as it was: the bell seam parked with its finding recorded, the top margin as the last unpainted region, the full-screen margin question, Store installs to the card, and the two untested port overrides.
+
+#### Files Modified:
+
+None.
+
+#### Status:
+
+- Build: N/A
+- Deployment: N/A
+- User Test: N/A
+
+---
+
 ## 39 COMMIT Unreleased 2026-11-12T13:46:57-07:00
 
 #### Coming From:
