@@ -1,3 +1,34 @@
+## 84 COMMIT Unreleased 2026-11-12T09:50:00-07:00
+
+#### Coming From:
+
+Unreleased 7e66cf5
+
+#### Purpose:
+
+Record the Remote Desktop app's reflow, which needed a constant to become state because the app draws a terminal below its own controls.
+
+#### Outcome:
+
+At 6570184 on branch `t-watch-ultra`, `apps/remote.c` puts its connection bar on two rows when the client is narrow. Upstream is one row -- "Host" at 0, its field at 5 to 22, "Port" at 24, its field at 29 to 34, "Connect" at 36 to 46 and the state from 52 -- so on a 38-column client Connect was cut to its first two columns and the state label did not exist: the window could take a host and a port and had no visible way to connect. The narrow layout puts Host and Port on the first row with their fields and Connect and the state on the second. That required `BAR_ROWS` to stop being a compile-time constant, because this app is the one that draws something OTHER than widgets: a `td_vterm` for the remote screen, positioned below the bar, with click coordinates offset by the bar's height. A second row had to move the terminal, the click mapping, the fill, the help text and the terminal's own row count together, and they all read a variable set from the client width at creation now. Remote Desktop is deleted from `s_narrow_todo[]` in the layout test, which is the mechanism set up in entry 83: a fix is recorded by removing the name, so the list of known defects is the remaining work and nothing else. Verified: host suite 37 of 37 including the 40x26 pass; flashed and read on the glass -- Host, Port, Connect and the state line all inside the frame, with the remote terminal below them and the app's own help text wrapping where it always did.
+
+#### Next Steps:
+
+Four apps remain on the narrow work list: Settings, Recycle Bin, Software Update and Date and time. Recycle Bin is positioning -- Refresh at column 38 and a 23-column "Delete after: never" at 18. Software Update has a 62-column URL field and a 50-column caption, so it needs rewording as well as layout. Settings and Date and time were both reported as passing on the glass and the 40x26 pass says otherwise. The parked redraw fault from entry 74 is untouched; forcing `td_full_redraw()` with the garbage visible is still the experiment that would localise it. The remaining port overrides `TD_SIZE_POLL_MS=0` and `TD_ACK_TIMEOUT_MS=0` are still untested against the current tree, and the three capacitive bars under the glass still act on stretches of taskbar rather than three fixed cells, awaiting the vendor map. The Linux side stays parked; its last code commit is 8645a82 and everything after it in this repository is the project log.
+
+#### Files Modified:
+
+- apps/remote.c
+- tests/test_native_apps.c
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: PASS
+
+---
+
 ## 83 COMMIT Unreleased 2026-11-12T09:10:00-07:00
 
 #### Coming From:
