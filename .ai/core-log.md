@@ -1,3 +1,33 @@
+## 36 COMMIT Unreleased 2026-11-12T12:43:43-07:00
+
+#### Coming From:
+
+Unreleased 25a26e8
+
+#### Purpose:
+
+Capture a full 16 MiB backup of the first build that reads NFC tags, since the previous image predates the whole reader.
+
+#### Outcome:
+
+`~/twatch-backup/working-2026-11-12-1240.bin` is the current recoverable state: 16 MiB read at 577.2 kbit/s in 232.5 seconds, sha256 `f581d47c4ac5ffa43bd8d82d551d2f0036a64457b9801275cff96307721f50e2`, `verify OK (digest matched)` against the chip with the board held in the stub across read and compare, and the stored `.sha256` written beside it. The 2,631,008-byte app region at 0x10000 is BYTE-IDENTICAL to the `tinydesk.bin` this machine built, both hashing to `7110cf9b`, so the image is the NFC build rather than an earlier one -- and because the flashed image carries no symbols, that comparison rather than a string search is the real identification. The NFC-specific format strings are present as a second check: `nfc up id`, `rfal up, polling`, `card %s uid %s`, `ndef %d bytes`, `nfc scan [s]`, alongside the player's `play <file.wav>`. One string that looked wrong on first pass is recorded so nobody chases it again: `Hello` appears in the image, but it is wolfSSL's "ServerHello" and not the tag's payload, which reached the screen through a `%s` and was never a literal. The partition table parses as the six entries `partitions.csv` declares -- nvs 0x9000, phy_init 0xf000, ota_0 0x10000, ota_1 0x310000, otadata 0x610000, storage 0x620000 -- and the littlefs partition holds 2,013 written 4 KiB pages against the previous backup's 2,004, which is the nine pages of session writes this cycle produced. THE SCRIPT'S RESET WORKED ON THE FIRST ATTEMPT, the third consecutive backup to do so, and the board was confirmed running independently of the script's own report by reading its desktop over USB at 12:43 -- taskbar clock correct, desktop painted. WiFi was also associated, which is the saved-credentials path and not evidence of anything about the image. Nothing was built or flashed this cycle and no tracked file changed. The required `core-syntax.md` audit was run against the complete `.ai/` diff, which is this entry alone: `core.md` was untouched; the entry follows the six-section template and the canonical order; its number is the highest present plus one at 36; Files Modified reads `None.` because the cycle generated a recovery artifact outside the repository; and Status uses `N/A` for build and deployment because nothing was compiled or written to the chip.
+
+#### Next Steps:
+
+The reader is now recoverable but barely exercised, so the work that matters next is coverage rather than capability: only NFC-A Type 2 has ever been in the field, the tag in hand turned out to carry content rather than being blank, and the no-NDEF path has never run. Writing is the stack's other half and is unimplemented. Nothing yet reacts to a tag -- the read ends in a `printf`, and injecting a key through the desktop's existing injection path is the smallest change that would make a tag do something a person can see. `nfc` is Terminal-only, with no way in from the desktop, which is the same shape audio had before the player existed. Everything else is unchanged and unblocked: the taskbar edge is settable and left defaulting to bottom at the operator's direction; the thermistor reads in degrees; both pushers work and both send Enter, with F10 on the BOOT pusher the shape I would still argue for; audio plays WAV files from the card; the display's tearing-effect line is configured and unread; and the remaining outboard parts are the BHI260AP at 0x28 answering and undriven, the LoRa radio needing ALDO3 and XL9555 P05, and the GNSS and microphone with no code. The standing queue is otherwise as it was: the bell seam parked with its finding recorded, the top margin as the last unpainted region, the full-screen margin question, Store installs to the card, the two untested port overrides, and the unexercised RTC write path. The one open measurement on the reader's power is worth naming while it is cheap: `board_nfc_rail_on()` raises DLDO1 on demand and leaves it up, so whether the rail is dropped when a scan ends is a decision waiting on a power-budget pass rather than a defect.
+
+#### Files Modified:
+
+None.
+
+#### Status:
+
+- Build: N/A
+- Deployment: N/A
+- User Test: N/A
+
+---
+
 ## 35 COMMIT Unreleased 2026-11-12T12:34:01-07:00
 
 #### Coming From:
