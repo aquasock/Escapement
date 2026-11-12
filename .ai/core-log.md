@@ -1,3 +1,33 @@
+## 78 COMMIT Unreleased 2026-11-12T05:40:00-07:00
+
+#### Coming From:
+
+Unreleased 252e3d4
+
+#### Purpose:
+
+Record MQTT's reflow, the worst case found by the survey, and the survey's full result.
+
+#### Outcome:
+
+At 62237ae on branch `t-watch-ultra`, `apps/mqtt.c` gives each field its own row with its button beside it on a narrow window. Upstream puts a 34-column field at x 8 with seven controls to the right of it -- Connect at 44, Login at 59, Config at 59, Subscribe at 44, Unsubscribe at 58, Publish at 44 and Retain at 56 -- and on a 40-column panel every one of them was invisible and unreachable while the window looked healthy, because the read-only topic list below renders correctly. That is the strongest argument in this line of work for checking an app mechanically rather than by eye, and the survey that found it is worth recording: grepping every app for `td_button`, `td_checkbox`, `td_label` and `td_textbox` calls whose x plus width reaches column 38, and skipping those that already branch on `td_win_client()`, leaves six apps broken and one clear ranking. MQTT is the worst with seven off-screen controls; `trash` has Refresh at x 38, its status label at 45 and "Delete after: never" running to column 40; `update` has a "Check for updates on start" caption 50 columns wide starting at column 1; `store` has "Install on the..." running to 39; and `users` and `settings` place controls and captions at columns 24 and 25 that overflow. Network, Modbus, Displays, Bluetooth, Files, Editor, Date & time and Remote Desktop are already gated. Three of the six -- update, store and users -- have captions longer than the whole screen, so stacking will not save them; they need shorter wording, which is different work from what the last five apps needed and should be planned for. The narrow MQTT form puts Login and Config on the bottom rows rather than competing for space, since they are settings rather than part of the publish flow, and the app's `on_draw` labels are gated by width with the status, subscription and column-heading lines moved below the six-row form. One error was made and caught: the column heading and the list's first row were both at row 8, so the list painted over its own heading; the list starts at 10 now so the heading at 9 stays visible. Verified on the glass: all seven controls, the status line, the subscriptions line and the list heading, read back over the USB link. The host suite is 37 of 37.
+
+#### Next Steps:
+
+`trash` is next and is mostly positioning rather than restructuring: Refresh and the status label need to move, and "Delete after: never" needs a shorter caption or its own row. Then `update`, `store`, `users` and `settings`, which need wording changes as well as layout. Seven apps have windows 60 to 78 columns wide but no control past column 38, so they may only have dead space on the right -- Log Viewer, Task Manager, Keyboard, Mouse, Image Viewer, Search and Pixels -- and are worth a look on the glass rather than a code change, since the cheapest test is whether the content uses the width it is given. The parked redraw fault from entry 74 is untouched; forcing `td_full_redraw()` with the garbage visible is still the experiment that would localise it. The remaining port overrides `TD_SIZE_POLL_MS=0` and `TD_ACK_TIMEOUT_MS=0` are still untested against the current tree, and the three capacitive bars under the glass still act on stretches of taskbar rather than three fixed cells, awaiting the vendor map. The Linux side stays parked; its last code commit is 8645a82 and everything after it in this repository is the project log.
+
+#### Files Modified:
+
+- apps/mqtt.c
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: PASS
+
+---
+
 ## 77 COMMIT Unreleased 2026-11-12T05:00:00-07:00
 
 #### Coming From:
