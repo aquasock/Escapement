@@ -1,3 +1,41 @@
+## 21 COMMIT Unreleased 2026-11-12T08:42:04-07:00
+
+#### Coming From:
+
+Unreleased 3cfb371
+
+#### Purpose:
+
+Make the BOOT pusher a key, so a physical side button on the watch reaches the desktop for the first time.
+
+#### Outcome:
+
+At `4e3a8b4` on branch `t-watch-ultra`, `ports/twatchultra/main/pusher.c` configures GPIO 0 as an input with the internal pull-up and a falling-edge interrupt, and sends one key per press into the same `inject()` queue the margin buttons use. The board has two pushers and neither reached the desktop before this: Pusher A is the power key, which is not a GPIO at all -- it reaches the SoC only through the AXP2101's PEK interrupt on GPIO 7 -- and was left alone, while Pusher B is a plain switch on GPIO 0 with a 10K pull-up on the board, declared by LilyGoLib as `Button2 bootButton = Button2(0)` and pinned with `pinMode(0, INPUT)`. The key is Enter for now because the operator has not decided what the button should do, and Enter acts on nearly anything focused, so a press cannot be silently swallowed while that question is open; changing it is one constant and one table entry. THE SHAPE IS DELIBERATELY THE TOUCH INTERRUPT'S: configure the pin, install a falling-edge handler, have the handler notify a task that does the work. That gives the port one mechanism for "a pin tells a task something happened" rather than two, and it means the ISR takes no lock, allocates nothing and calls nothing into the desktop, with the notification coalescing harmlessly. Because the key goes in through `inject()`, a pusher press is indistinguishable from the same key on a Bluetooth keyboard and nothing below the port knows the button exists. TWO PROPERTIES OF THE PIN WERE HANDLED RATHER THAN DISCOVERED, and both would otherwise have looked like faults. GPIO 0 is a strapping pin: holding the pusher while the watch powers on puts the ESP32-S3 into serial download mode, which is the pin's designed function and not something firmware can override. And esptool's resets drive IO0 low, so a flash can leave an edge pending that no finger caused -- the task therefore settles for 250 ms and drops any stale notification before it listens, and the level check rejects a pin that is already high again; the settle sits in the task rather than in `pusher_init()` so it stays off the desktop's startup path. ONE REAL DEFECT WAS CAUGHT ON THE GLASS AND NOT IN REVIEW. `touch_init()` installed the GPIO ISR service first, so the pusher's own call hit `GPIO_CHECK`'s "GPIO isr service already installed", which logs at ERROR level, and the first flashed build carried an `E` line at every boot for a condition that was exactly what was wanted. `board_gpio_isr_init()` in `power.c` is now idempotent and cached, so any driver may call it and only the first call does anything, and both `touch.c` and `pusher.c` go through it; that also removes an ordering question that would have been silent, because the second caller no longer needs to know it is second. `pusher.pin` is the board key, defaulting to 0, with -1 turning the button off as the way to tell a press from here apart from one on the panel, and the `board_keys` check caught the new key on the first build exactly as it did for `touch.int`. Verified end to end on the board rather than by the buzz, which matters because `send_key()`, `haptic_tap()` and the log line all run in the same task: `gpio: GPIO[0]| InputEn: 1` and `twatch-pusher: p0 enter` appear at 3067 ms with no gpio error anywhere in the boot, and the two pins share one ISR service; eight presses produced eight `twatch-pusher: p<n>` lines numbered consecutively with no duplicates, so the debounce holds and a single press is a single event; and the operator opened the Start menu and pressed the pusher, which launched Files -- which the desktop was then read back to confirm, showing `/root` with `Apps/`, `Desktop/` and `Start menu/`. That last check is the one that proves the key arrived rather than merely that the press was detected, and it is why it was run separately. Build is clean under `-Werror`, the host suite is 38 of 38 including the `board_keys` gate, and only the app region at 0x10000 was written, with the write hash-verified. The required `core-syntax.md` audit was run against the whole `.ai/` diff, which is this entry alone: `core.md` was untouched, the entry follows the six-section template and the canonical order, its number is the highest present plus one at 21, Coming From names the pre-cycle `HEAD`, Files Modified lists only port files and no `.ai/` path or generated artifact, Status uses allowed values, and the active log holds 21 entries against the 100-entry limit.
+
+#### Next Steps:
+
+What the pusher should send is now a design question rather than a wiring one, and the operator has deliberately left it open -- the summary of what is available is worth stating so the decision can be made against it: F10 is global in the window manager and works with nothing focused, with a window focused, and over a full-screen application, which makes it the natural "home"; Esc is the cancel key everywhere else but goes to the focused window first, so on a bare desktop it does nothing; and Enter, the current mapping, activates whatever is focused. Everything else is unchanged and unblocked. Pusher A remains unbuilt and is the more valuable of the two to add next, because it needs the AXP2101 PEK interrupt on GPIO 7 that this port does not install and that same interrupt is what VBUS plug and removal would need for charge-state handling -- so one piece of work there would give a working power button and the basis for reporting charging. Audio remains a beep with no playback path, charging is read but never configured, and the display's tearing-effect line is configured in `board.conf` and read by nothing. Two smaller items still belong to earlier work: the screen model that reads the Log Viewer over USB is in a temporary directory for the fourth time and belongs in the fork under a tools directory, and `scripts/watch-backup.sh` does not confirm the board returned after its trailing reset, which has now been silent twice and is hidden behind `|| true` in its trap. The standing queue is otherwise as it was: the bell seam is parked with its finding recorded, the top margin is the last unpainted region, the full-screen margin question waits for something to go full screen, Store installs to the card and the image cache have never run against a card, `TD_SIZE_POLL_MS=0` and `TD_ACK_TIMEOUT_MS=0` remain untested against the current tree, the RTC write path has never been exercised by setting a time and power-cycling, and the pre-existing YAML fence defect in `core-reference.md` is untouched. The unbuilt outboard parts are unchanged: the BHI260AP at 0x28 answering with no driver, the LoRa radio needing ALDO3 and XL9555 P05 before it is powered, the NFC reader needing DLDO1 with its earlier absence verdict still suspect, and the GNSS and microphone with no code and, for the microphone, no evidence that a part is fitted. A fresh backup is due, since this build is the first to carry the pusher and `working-2026-11-12-0820.bin` predates it.
+
+#### Files Modified:
+
+- ports/twatchultra/main/pusher.c
+- ports/twatchultra/main/pusher.h
+- ports/twatchultra/main/link_twatch.c
+- ports/twatchultra/main/touch.c
+- ports/twatchultra/main/power.c
+- ports/twatchultra/main/power.h
+- ports/twatchultra/main/CMakeLists.txt
+- ports/twatchultra/board.example.conf
+- api/board_keys.txt
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: PASS
+
+---
+
 ## 20 COMMIT Unreleased 2026-11-12T08:30:20-07:00
 
 #### Coming From:
