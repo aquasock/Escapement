@@ -189,6 +189,7 @@ Topic IDs are the `record_id` prefix. An entry reserves a name; it does not clai
 | Why did the PMU work, then stop, after a rebuild? | PMU | PMU-002 |
 | Which config option publishes axp20x-usb? | PMU | PMU-003 |
 | Does the PMU interrupt work, and does LEVEL_LOW really storm? | PMU | PMU-004 |
+| What do the charge registers mean, and is this board charging correctly? | PMU | PMU-005 |
 | Why did the click disappear when the touch daemon was retired? | HAPTIC | HAP-001 |
 | Where does the RTC's time come from and go to? | RTC | RTC-001 |
 | Does the RTC interrupt actually work, or is it dead? | RTC | RTC-004 |
@@ -270,6 +271,7 @@ PMU-002: "The AXP2101 has no mainline driver, so it lives in patches/kernel/axp2
 PMU-003: "CONFIG_AXP20X_POWER publishes /sys/class/power_supply/axp20x-usb and is off by default; its absence is silent because axp20x-battery still appears"
 
 PMU-004: "The AXP2101 interrupt on GPIO 7 works, and its earlier zero count meant no event had happened rather than a broken line: a tap of Pusher A advanced IRQ 8 from 0 to 2 and both axp20x-usb-power-supply sub-sources from 0 to 1"
+PMU-005: "Charge registers are 0x18 enable, 0x30 NTC, 0x61 precharge, 0x62 fast charge, 0x63 termination, 0x64 CV; this board defaults to 4200 mV, 500 mA and 125/125 mA, already correct for its 1100 mAh cell, whose limits are below 500 mA and 0.5 C"
 RTC-001: "The PCF85063A at I2C 0x51 registers as rtc0 and, with CONFIG_RTC_HCTOSYS, seeds the system clock before init; its interrupt shares GPIO bank 0 with the PMU line"
 RTC-002: "The image ships no /etc/TZ, /etc/localtime or /usr/share/zoneinfo, so `date` prints UTC even when the clock is right; /etc/TZ containing MST7 (UTC-7 all year, no DST) is the whole fix for uClibc-ng"
 RTC-003: "The upstream image's /etc/init.d/S01clock saves the epoch to /home/.clock at shutdown and overwrites the RTC-seeded clock at boot; the board has one RTC (rtc0 at 0x51), so it is a second mechanism, not a second clock, and this project disables it by moving it out of /etc/init.d because S??* still matches .disabled"
@@ -927,6 +929,24 @@ EMU-017: "OPEN and superseded: a firmware task writing a PSRAM buffer from the h
     - "patches/kernel/axp2101/final/axp20x.c: axp2101_regmap_irqs[] and axp2101_regmap_irq_chip's unmask_base = AXP2101_IRQ0_EN"
     - "patches/kernel/display/final/esp32s3-devkit-c1.dts: the pmic@34 node and its stale warning comment"
   verification: "Verified on hardware 2026-11-10. Before: all five PMU-related counts 0 and status 00 00 00. After one tap of Pusher A: IRQ 8 at 2, both PEK sub-IRQs at 1, status bank 1 bit 3 set. The press/release pair appearing separately confirms both edges are delivered, not just one, and the kernel remained healthy throughout."
+
+
+- record_id: PMU-005
+  kind: PMU
+  topic_id: PMU
+  status: VERIFIED
+  verified_date: 2026-11-12
+  title: "AXP2101 charge registers, and this board's power-on charge defaults are already correct for its 1100 mAh cell"
+  statement: "The AXP2101's charging is configured through six registers, decoded here from lewisxhe/SensorLib's AXP2101Charger, which is the driver LilyGo's own firmware uses. 0x18 is the module enable, where bit 1 enables the cell charger and bit 3 the fuel gauge; 0x30 bit 1 enables TS pin measurement for an NTC battery thermistor; 0x61 holds the precharge current in the low nibble at 25 mA per step; 0x62 holds the fast-charge current in bits 4:0, where a code of 8 or less means code x 25 mA and anything above 8 means 200 + (code - 8) x 100 mA; 0x63 holds the termination current in the low nibble at 25 mA per step; and 0x64 bits 2:0 select the full-charge voltage from six fixed steps, 0 = 5000 mV, 1 = 4000, 2 = 4100, 3 = 4200, 4 = 4350, 5 = 4400, with 6 and 7 undefined. On this watch, measured 2026-11-12 and never written by any code in the TinyDesk port: 0x18 = 0x0a, 0x30 = 0xff, 0x61 = 0x05, 0x62 = 0x0b, 0x63 = 0x05, 0x64 = 0x03. That decodes as cell charging and the gauge both enabled, NTC sensing enabled, 125 mA precharge, 500 mA fast charge, 125 mA termination and a 4200 mV full-charge voltage."
+  consequence: "Nothing needs to be written, and that is a result rather than an omission. LilyGo documents this board's pack as 1100 mAh at 3.7 V, warns to keep the charging current below 500 mA so the PMU does not overheat, and warns not to exceed 0.5 C, which for 1100 mAh is 550 mA. The measured defaults sit inside all three: 500 mA is 0.45 C, 4200 mV is the standard full-charge voltage for a 3.7 V Li-ion cell rather than the 4350 or 4400 settings that belong to high-voltage cells, and 125 mA termination is about 11 percent of capacity, which is the usual shape. The TinyDesk port's charge.c therefore only READS these registers at boot, logs them, and warns if any value drifts from the expected one, so a future change that breaks charging cannot pass unnoticed. It deliberately does not write a charge voltage: choosing one means reading a cell's spec, and setting 4350 or 4400 on this pack would overcharge it."
+  sources:
+    - "lewisxhe/SensorLib src/pmic/xpowers/axp2101/AXP2101Charger.cpp: setPreChargeCurrent, setFastChargeCurrent, setTerminationCurrent, setChargeVoltage, and the two decode scales"
+    - "lewisxhe/SensorLib src/pmic/xpowers/axp2101/AXP2101Regs.hpp: IPRECHG_SET 0x61, ICC_SETTING 0x62, ITERM_CTRL 0x63, CV_CHG_VOLTAGE 0x64"
+    - "lewisxhe/SensorLib src/pmic/xpowers/axp2101/AXP2101Core.cpp: CELL_CHARGE and GAUGE as bits 1 and 3 of MODULE_EN 0x18, TS_MEASURE as bit 1 of 0x30"
+    - "Xinyuan-LilyGO/LilyGoLib docs/hardware/lilygo-t-watch-ultra.md: 1100 mAh (4.07 Wh), 3.7 V, 'use a charging current below 500 mA', 'do not charge at a rate greater than 0.5 C'"
+    - "tinydesk-twatch ports/twatchultra/main/charge.c: charge_report(), which decodes the same six registers and checks them against these values"
+  verification: "Measured on the watch 2026-11-12 by the ESP-IDF port, which has never written a charge register: the boot log reads `180a 30ff 6105`, `620b 6315 6403` and `cv4200 ic500`, and System Monitor simultaneously reports `Battery:100%  4.17 V full`, so the state decode agrees with the configuration decode. The decoder was checked against the encoder before it was trusted: a host harness round-tripped all 40 fast-charge steps from 25 to 1000 mA and all six voltage steps through SensorLib's own encoding, 46 checks with no failures. A vendor defect was found in the process and is recorded because copying it would be silent: LilyGoLib's LilyGoWatchUltra.cpp calls `setChargeVoltage(4288)`, and SensorLib accepts only 5000, 4000, 4100, 4200, 4350 and 4400, so 4288 falls through to `default: return false` and the register keeps its power-on value. A project that copied that call would believe it had set a voltage it had not set. Their `setFastChargeCurrent(512)` is harmless for a different reason: 512 encodes to the same register code as 500 mA."
+
 
 - record_id: KRN-001
   kind: KERNEL

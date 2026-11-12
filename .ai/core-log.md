@@ -1,3 +1,37 @@
+## 24 COMMIT Unreleased 2026-11-12T09:11:48-07:00
+
+#### Coming From:
+
+Unreleased d9cd6ef
+
+#### Purpose:
+
+Establish what the AXP2101 is doing about charging, which this port had never read or configured, and turn the answer into a check that runs at every boot.
+
+#### Outcome:
+
+At `ab74901` on branch `t-watch-ultra`, `ports/twatchultra/main/charge.c` reads the AXP2101's six charge registers at boot, decodes them, logs them on three short lines and warns if any value has drifted from what it should be -- and writes nothing, because the measurement says nothing needs writing. The cycle began as configuration work and correctly turned into measurement: charging is the one subsystem on this board where a wrong write damages hardware that is not easily replaced, and the obvious source for what to write disagreed with itself. The port has never written a charge register, and the part's power-on values are already right for the cell. Read off the watch: `0x18=0x0a` with the cell charger at bit 1 and the fuel gauge at bit 3 both set, `0x30=0xff` with NTC temperature sensing on, `0x61=0x05`, `0x62=0x0b`, `0x63=0x05`, `0x64=0x03`; those decode as 125 mA precharge, 500 mA fast charge, 125 mA termination and a 4200 mV full-charge voltage. LilyGo documents this board's pack as 1100 mAh at 3.7 V, warns to keep the charging current below 500 mA so the PMU does not overheat, and warns against exceeding 0.5 C, which for 1100 mAh is 550 mA; the defaults sit inside all three at 0.45 C, and 4200 mV is the standard full-charge voltage for a 3.7 V Li-ion cell rather than the 4350 or 4400 steps that belong to high-voltage cells. So the deliverable is a check rather than a setting, which is the stronger of the two: `charge_report()` logs `cv4200 ic500` and stays silent unless a value moves, so a future change that breaks charging cannot pass unnoticed, whereas a comment saying the defaults are correct would still be true the day they stopped being true. It deliberately does not write a voltage, because choosing one means reading a cell's spec and writing 4350 or 4400 on this pack would overcharge it. A VENDOR DEFECT WAS FOUND AND IS THE REASON COPYING WAS RULED OUT. LilyGoLib's Ultra init calls `setChargeVoltage(4288)`, and SensorLib's `setChargeVoltage()` accepts only 5000, 4000, 4100, 4200, 4350 and 4400 -- 4288 falls through to `default: return false`, so the call does nothing and the register keeps its power-on value while the source reads as though it asks for 4288. Their `setFastChargeCurrent(512)` is harmless for a different reason: 512 encodes to the same register code as 500 mA. A project copying either call would have believed it had configured charging. THE DECODER WAS CHECKED AGAINST THE ENCODER BEFORE IT WAS TRUSTED, since a wrong decode would make the safety check wrong in exactly the direction that matters: a host harness round-tripped all 40 fast-charge steps from 25 to 1000 mA and all six voltage steps through SensorLib's own encoding -- 46 checks, no failures -- and confirmed that 4288 does not encode at all. On the board the boot prints `180a 30ff 6105`, `620b 6315 6403` and `cv4200 ic500` with no charge warning, while System Monitor simultaneously reports `Battery:100%  4.17 V full`, so the state decode and the configuration decode agree. Nothing was flashed beyond the app region at 0x10000 and the write was hash-verified. `PMU-005` was added to `core-reference.md` with the register map, the measured values, the cell's limits and the vendor defect, because this is an external fact the file did not hold and `.ai/core.md` requires such findings to be recorded with the existing syntax; every one of the 87 records still parses individually against the template with no duplicate ids, and the pre-existing YAML fence defect in the fast-lookup index is unchanged -- it fails identically at `HEAD`, which was checked rather than assumed. The required `core-syntax.md` audit was run against the whole `.ai/` diff: `core.md` was untouched, the entry follows the six-section template and the canonical order, its number is the highest present plus one at 24, and the reference change is insertion-only.
+
+#### Next Steps:
+
+The measurement leaves a real question that this cycle deliberately did not answer, and it is the one worth answering next: nothing in this port REACTS to charging. The pwrkey driver reports `vbus in` and `vbus out` and System Monitor reads the charge state on its own tick, so the display is correct, but no code acts on the transition -- nothing refreshes the battery line at the moment the cable goes in, and nothing records that a charge cycle happened. That is small and worth doing because it is the difference between a number on a screen and a device that knows it is charging. Two questions about the cell remain genuinely open and are deliberately left open: whether this pack has an NTC thermistor actually fitted, since the PMU's TS measurement is enabled but a missing thermistor reads as a plausible temperature, and whether the reported capacity is trustworthy, since PMU-001 records that a freshly powered gauge reports above 100 percent until it settles and every reading so far has been at 100. The first is answerable by reading the TS ADC channel and comparing against a plausible ambient; the second by discharging the watch and watching the gauge fall. Everything else is unchanged and unblocked. Both pushers work and both send Enter, which remains a placeholder: F10 on the BOOT pusher is the shape I would argue for, because it is global in the window manager and works with nothing focused. Audio remains a beep with no playback path, and the display's tearing-effect line is configured and unread. The screen model that reads the Log Viewer over USB is in a temporary directory, now for the sixth cycle, and belongs in the fork under a tools directory. The unbuilt outboard parts are as they were: the BHI260AP at 0x28 answering with no driver, the LoRa radio needing ALDO3 and XL9555 P05 before it is powered, the NFC reader needing DLDO1, and the GNSS and microphone with no code. The standing queue is otherwise as it was: the bell seam is parked with its finding recorded, the top margin is the last unpainted region, the full-screen margin question waits for something to go full screen, Store installs to the card and the image cache have never run against a card, `TD_SIZE_POLL_MS=0` and `TD_ACK_TIMEOUT_MS=0` remain untested against the current tree, the RTC write path has never been exercised by setting a time and power-cycling, and the pre-existing YAML fence defect in `core-reference.md` is untouched. A fresh backup is due once this build is accepted, since it carries `charge.c` and `working-2026-11-12-0859.bin` predates it.
+
+#### Files Modified:
+
+- ports/twatchultra/main/charge.c
+- ports/twatchultra/main/charge.h
+- ports/twatchultra/main/link_twatch.c
+- ports/twatchultra/main/CMakeLists.txt
+- ports/twatchultra/README.md
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: NOT RUN
+
+---
+
 ## 23 COMMIT Unreleased 2026-11-12T09:05:20-07:00
 
 #### Coming From:
