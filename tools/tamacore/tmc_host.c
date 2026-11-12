@@ -364,8 +364,17 @@ int main(int argc, char **argv)
 
     for (long n = 0; n < total_frames; n++)
     {
-        if (buttons)
-            splb32_pin(cpu, 0, (uint8_t)buttons, 0);
+        /* THE BUTTONS ARE PORT 0, BITS 0x01/0x02/0x04, AND 1 MEANS PRESSED.
+         * The line is pulled up, so a press drives it low -- splb32_pin() takes
+         * 1 for "driven" and -1 for "released to the pull-up", which is the
+         * opposite of the mask's own convention and was wrong here: the first
+         * version passed 0, which is neither, and nothing ever moved. */
+        for (int i = 0; i < 3; i++)
+        {
+            static const uint8_t bit[3] = { 0x01, 0x02, 0x04 };
+            int want = (buttons & bit[i]) ? 1 : -1;
+            splb32_pin(cpu, 0, bit[i], want);
+        }
 
         /* THE ARGUMENT IS A DELTA AND THE RETURN IS ABSOLUTE. The firmware's
          * comment ("cycles_done += splb32_run_cycles(...) inflated the count")
