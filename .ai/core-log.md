@@ -1,3 +1,33 @@
+## 30 COMMIT Unreleased 2026-11-12T10:35:44-07:00
+
+#### Coming From:
+
+Unreleased a735d57
+
+#### Purpose:
+
+Find the battery thermistor's part data, which the previous two cycles had concluded was unavailable.
+
+#### Outcome:
+
+The part data exists and is authoritative, and the search that found it also corrected two of this project's own claims. `PMU-007` now records it: the NTC sits between the AXP2101's TS pin and ground, nominally 10 kohms at 25 C, driven by a constant current selected in reg50H[1:0] as 20, 40, 50 or 60 uA; the AXP2101 datasheet (X-Powers V1.4, section 6.7.4.4 and Table 6-3) works the whole thing through with the Mitsubishi TH11-3H103F reference part and tabulates resistance, detected voltage and ADC code from -20 to 60 C, with 10.00 kohms and 0.500 V and ADC 0x3E8 at 25 C at 50 uA. It was found in the datasheet bundled inside lewisxhe/XPowersLib rather than anywhere in LilyGo's own tree: LilyGo publish the pack as 1100 mAh at 3.7 V and say nothing about its thermistor, and the board schematic marks the position `NC NTC` and gives no value at all. Rendering the schematic at 600 dpi did settle the topology even without a part number: the TS pin reaches the battery connector P2 through the net named NTC, whose pin 2 is the pack's thermistor contact, with R8 drawn from that net to ground. The datasheet explains R8 -- it is the 10 kohm pull-down the part wants when a pack has no thermistor -- so the `NC` in the drawing most likely means that fallback resistor is not fitted while the pack's NTC is, which is consistent with the measurement and with the schematic text being the only evidence that ever suggested otherwise. TWO CORRECTIONS FOLLOW, and both are this project's rather than the vendor's. The excitation current is NOT the 50 uA the datasheet's table assumes: reg50H reads 0x07 on this watch, which is 60 uA in reg50H[1:0] against a documented power-on default of 50, with reg50H[4] = 0 so the TS input genuinely gates the charger. `PMU-006` had guessed 80 uA by fitting a curve to two readings, and that guess was wrong; the same millivolts therefore decode to 28.6 to 30.3 C rather than the 23.7 to 25.4 C a 50 uA assumption would have produced. Since the current source is not at its default, a conversion must read it rather than assume it, which is now the recorded consequence rather than an inferred one. And the Steinhart-Hart coefficients published in XPowersLib were checked and deliberately not used: they place 10.00 kohms at 22.4 C where the datasheet's own table places it at 25 C, a disagreement of about 2.6 C, so the table wins. The decoder was validated against that table rather than against itself -- interpolating Table 6-3 returns exactly 25.0 C for 500 mV and 30.0 C for 416 mV, the two tabulated points it is asked about -- and the table is self-consistent at its stated 50 uA, which is why scaling by the actual current is the right correction rather than a fudge. A SAFETY FACT IS NOW ON RECORD that was not before: because reg50H[4] = 0, the TS reading does not merely report a temperature, it moves the charger's window. The part pauses charging when TS leaves reg54H/reg55H (defaults about 0 C and 55 C) and pauses the boost outside reg56H/reg57H (about -10 C and 60 C), so writing reg50H to change the current, or to declare TS unused, would change when this board refuses to charge. That is the reason the port reads that register and does not write it. `PMU-006` was revised in place rather than left standing, since its calibration caveat is now answered and its 80 uA arithmetic was wrong; the thermistor conclusion it reached was not affected, because that was established from the direction of travel and not from any assumed coefficient. Nothing was built or flashed. The required `core-syntax.md` audit was run against the whole `.ai/` diff: `core.md` was untouched, the entry follows the six-section template and the canonical order, its number is the highest present plus one at 30, Files Modified reads `None.` because the cycle changed only project-control files, the index and routing table gained their entries, and all 89 records parse individually with no duplicate ids.
+
+#### Next Steps:
+
+The conversion this unlocks is the next code change and it is small: replace the millivolt display with a temperature, computed from Table 6-3 by interpolation and scaled by the current actually found in reg50H[1:0] rather than by the table's 50 uA. The shape worth using is the table rather than the Steinhart coefficients, because the table is the primary source and the coefficients available in the wild disagree with it by 2.6 C. What that change should NOT do is write reg50H, including to force the current to 50 uA so the table applies directly: reg50H[4] = 0 means that register decides when this board will refuse to charge, and changing it to simplify arithmetic would trade a safety behaviour for a convenience. Two smaller items belong with it. The `NC` annotation on the schematic should be recorded as meaning the unused pull-down rather than an absent thermistor, since that reading is now supported by both the datasheet's description of R8 and by the measurement. And the current source being off its default is worth watching across a real power cycle: if it is an eFuse value it will persist, and if a previous firmware wrote it then a battery disconnect will restore 50 uA and the conversion must follow it rather than break, which the read-don't-assume rule already covers but which nobody has yet confirmed on hardware. Everything else is unchanged and unblocked: the taskbar-at-top option is verified at all five points and left defaulting to bottom at the operator's direction, the pushers work and both send Enter, audio is a beep with no playback path, the display's tearing-effect line is configured and unread, and the unbuilt outboard parts are as they were, with the BHI260AP at 0x28 answering and undriven, the LoRa radio needing ALDO3 and XL9555 P05, the NFC reader needing DLDO1, and the GNSS and microphone with no code. The standing queue is otherwise as it was: the bell seam parked with its finding recorded, the top margin as the last unpainted region, the full-screen margin question, Store installs to the card, the two untested port overrides, the unexercised RTC write path, and the pre-existing YAML fence defect in `core-reference.md`. A fresh backup is due once the conversion lands, since `working-2026-11-12-1010.bin` predates it.
+
+#### Files Modified:
+
+None.
+
+#### Status:
+
+- Build: N/A
+- Deployment: N/A
+- User Test: N/A
+
+---
+
 ## 29 COMMIT Unreleased 2026-11-12T10:27:17-07:00
 
 #### Coming From:
