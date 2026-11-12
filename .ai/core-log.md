@@ -1,3 +1,34 @@
+## 16 COMMIT Unreleased 2026-11-12T07:36:02-07:00
+
+#### Coming From:
+
+Unreleased 12b3f2a
+
+#### Purpose:
+
+Correct the SD card block in `ports/twatchultra/board.example.conf`, which still told a clean checkout that the card was unproven when the bus, the rail and two cards had each been shown to work.
+
+#### Outcome:
+
+At `e703575` on branch `t-watch-ultra`, the SD block in `ports/twatchultra/board.example.conf` no longer says the hardware is unproven. It had claimed three things that were true when written and have been false since entry 10: that the second SPI bus had never been proven to transfer a byte, that the card had never enumerated, and that `power.c` raised only the display's ALDO2 -- where entry 10 recorded `board_power_rails_preinit()` raising ALDO1 and a 29 GB card mounting, writing a file that read back byte-exact and appearing in Files, and entry 11 recorded the same for a 128 GB card. The note carried more weight than its place in a commented-out block suggests: `ports/esp_idf/app/app.cmake` copies `board.example.conf` into the firmware as the built-in configuration whenever `board.conf` is absent, which is the state of every clean checkout, so the wrong text shipped inside generic builds and the shell's own `board` command served it back on the device. What replaced it is what a reader needs before enabling the keys: that MISO is shared with the LoRa radio on CS 36 and the NFC reader on CS 4 and both chip selects must be parked high or they drive the line and corrupt every transaction; that FAT32 is the requirement rather than a size limit, because ESP-IDF 5.3 builds FatFs with `FF_FS_EXFAT` hardcoded off; that the keys stay commented because a card is optional and not because the answer is in doubt, since with them set and no card fitted the watcher re-probes the shared bus every 5 s; and that hot-plug is untested in either direction. Reading the code for that last item produced the one correction worth more than the rest: `sd.cd` looks like the way to stop polling for card presence, and the insert switch is expander pin 10, so `sd.cd = 10` is the line someone would write next, and it is wrong twice -- `sd.cd` is read with `gpio_get_level()` on an ESP32-S3 GPIO while the switch is XL9555 port 1 bit 2 and needs expander support `tdsh_sdcard.c` does not have, and SoC GPIO10 is this port's I2S word clock. The README's subsystem table carried the same "unproven" claim and was corrected in the same commit, because leaving one of the two would have made the tree contradict the file it points at. This is a documentation cycle, so nothing was built, deployed or flashed, and it was verified mechanically rather than by inspection: the example now parses through the shell's own `tdsh_board_parse` to exactly the same 19 settings with the same values and no bad line, and the non-comment bytes of the file hash identically before and after, so the configuration a generic build embeds is unchanged; the file is pure ASCII and no line approaches the parser's buffer limit, and comment text is stripped before anything is parsed. `board.conf` was deliberately left alone -- it is gitignored, so its copy of the stale header is outside the repository change, and it is the file this machine actually builds from. The required `core-syntax.md` audit was run against the complete `.ai/` diff, which is this entry alone: `core.md` was not touched, the entry follows the six-section template and the canonical order, its number is the highest present plus one at 16, Coming From names the pre-cycle `HEAD`, Files Modified lists only the two port files and no `.ai/` path or generated artifact, Status uses allowed values only, and the active log holds 16 entries against the 100-entry limit, so no conformance failure was carried forward.
+
+#### Next Steps:
+
+The next item in the queue is the bell seam: `apps/terminal.c`'s `vt_bell()` installs `td_vterm_t.bell` on the Terminal's own emulator and calls `td_sysinfo_t.bell`, which reaches the port's `board_bell()` and `sound_bell()`, so the two hooks are layers rather than duplicates and the handoff's note that `td_vterm_t.bell` is redundant is wrong; the hedge that does exist is `link_twatch.c`'s `display_set_bell(sound_bell, NULL)`, which wires the renderer's mirror vterm as well, and whether that can double-ring should be measured before it is kept or deleted. After that the three API additions go to TinyDesk's author as one written summary, with `TD_VERSION` left at 0.4.0 because the bump is the author's decision. Two follow-ups belong with this work rather than to a new cycle: this machine's `board.conf` still carries the old header comment and should be brought into line the next time it is edited, and card-detect against the expander is a change to `third_party/tdsh` rather than to this port, so it is an upstream proposal and not a local edit. Otherwise the standing queue is unchanged and none of it is blocked: the top margin is the last unpainted region and is inert as `EDGE_TOP`; what the margins should do while an application owns the whole screen stays deferred until something goes full screen; Store installs to the card and the image cache at `/sd/TinyDesk/cache` have never run against a card at any capacity; the two port overrides `TD_SIZE_POLL_MS=0` and `TD_ACK_TIMEOUT_MS=0` remain untested against the current tree; the RTC write path compiles and is called but has never been exercised by setting a time and power-cycling; and the pre-existing YAML defect in `core-reference.md`, where a code fence after the last record stops the sequence parsing as one document, is untouched. No fresh backup is needed yet -- nothing has flashed since `working-2026-11-12-0109.bin` was taken and verified -- but the next cycle that changes firmware should take one first.
+
+#### Files Modified:
+
+- ports/twatchultra/board.example.conf
+- ports/twatchultra/README.md
+
+#### Status:
+
+- Build: N/A
+- Deployment: N/A
+- User Test: N/A
+
+---
+
 ## 15 COMMIT Unreleased 2026-11-12T01:14:51-07:00
 
 #### Coming From:
