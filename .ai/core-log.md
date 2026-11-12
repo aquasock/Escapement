@@ -1,3 +1,33 @@
+## 76 COMMIT Unreleased 2026-11-12T04:10:00-07:00
+
+#### Coming From:
+
+Unreleased f8d0a31
+
+#### Purpose:
+
+Record the Displays app's reflow for the 40x26 grid, which had one defect worse than the ones the previous apps showed.
+
+#### Outcome:
+
+At a92edca on branch `t-watch-ultra`, `apps/displays.c` stacks its controls on a narrow window. The window asked for 74x27 with a 70-column minimum and placed its controls at columns 14, 17, 33 and 39; on a 40-column panel the client is 38 wide, so most of that column was off the glass. Two faults were worse than a truncation. The orientation button and the display pickers were laid out past the visible width, so one vanished entirely and the other overlapped its neighbour -- a control the user cannot see and cannot reach, rather than one that reads badly. And the app's two help lines were drawn at fixed rows 21 and 22, which on a 23-row client are the rows holding the message and the Close button, so the help was painted straight over them and the bottom of the window read "[ Close ]+Left / Right, or Other disp". The narrow layout gives each control a label row and a value row in reading order with the shorter captions "Auto (its size)" and "Landscape 180", drops the two long help lines entirely on the grounds that a keyboard hint is the least important thing on 23 rows, and trims the platform's status wording to whole words rather than mid-word. Two controls stay hidden and that is the app's own logic rather than a fault: orientation when the terminal reports no rotation capability, which this fixed panel does not, and the main-display checkbox when only one display exists. Wide windows keep upstream's layout unchanged. The pattern from entries 73 and 75 held again and is now the established way to do this work: measure `td_win_client()`, branch, and keep every height relative. The guard in `test_native_apps` -- launch every app, resize to its minimum, check that each focusable widget lies inside the client -- passed on the first build this time, having caught a real error in the previous app. Verified on the glass: the display diagram, all five visible controls, the rotation note and the Close button all inside a 25-row window, read back over the USB link. The host suite is 37 of 37.
+
+#### Next Steps:
+
+The apps left to check maximised on 40x26 are System Monitor, Task Manager, Log Viewer, Users, Startup, Store, Remote Desktop and the Software Update window; System Monitor and Task Manager are the likeliest to need work because both lay rows out by hand rather than deriving them. Two of the remaining apps will be harder than these three: Users and Settings build their content from a list of controls, so a narrow layout may need the list to scroll rather than the rows to stack. The parked redraw fault from entry 74 is untouched; forcing `td_full_redraw()` with the garbage visible is still the experiment that would localise it. The remaining port overrides `TD_SIZE_POLL_MS=0` and `TD_ACK_TIMEOUT_MS=0` are still untested against the current tree, and the three capacitive bars under the glass still act on stretches of taskbar rather than three fixed cells, awaiting the vendor map. The Linux side stays parked; its last code commit is 8645a82 and everything after it in this repository is the project log.
+
+#### Files Modified:
+
+- apps/displays.c
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: PASS
+
+---
+
 ## 75 COMMIT Unreleased 2026-11-12T03:15:00-07:00
 
 #### Coming From:
