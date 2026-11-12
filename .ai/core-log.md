@@ -1,3 +1,34 @@
+## 8 COMMIT Unreleased 2026-11-11T23:09:37-07:00
+
+#### Coming From:
+
+Unreleased 675e39c
+
+#### Purpose:
+
+Record Escape no longer opening the Start menu on a bare desktop, and the operator's decision to defer the margin-visibility question rather than settle it now.
+
+#### Outcome:
+
+At dc9414e on branch `t-watch-ultra`, `src/wm.c` opens the Start menu on a bare desktop for Enter alone; Escape no longer does. The pair was a keyboard affordance that made sense when a keyboard was the only way to reach the launcher, and it stopped making sense once this port gave Escape a labelled button in the left column and put a Start button in the same column: a key whose entire meaning is "get me out" was opening the launcher, while Escape is already the cancel key everywhere else in the window manager, closing dialogs and backing out of menus. The path that reaches the changed line is worth stating because it is not obvious from either side. With no window focused, `dispatch_key()` offers the key to `desktop_key()` first, and that function returns false immediately when desktop icons are off -- which is this watch's state, since the operator switched them off -- so control fell through to a line that toggled the menu for either key. With icons on, `desktop_key()` claims Escape first to clear the icon selection, which was and remains sensible. So the fault only appeared in the configuration this board actually runs, which is why it survived until a button was bound to the key. Nothing was lost by the change: Enter still opens the menu on a bare desktop, F10 opens it from anywhere and is what the left column's top button sends, the taskbar has its Start button, and a desktop icon can still be run from the keyboard. Tested rather than assumed: `test_bare_desktop_escape` in `tests/test_wm.c` fails three assertions when the old Enter-or-Escape behaviour is restored and passes with the fix, and it checks that F10 still toggles the menu as well, since F10 is the key the top-left button sends and a change here could quietly have taken that away. The operator also decided the second open question, on whether the three margins should stop being painted while a full-screen application owns the screen, and chose to defer it: no application in this tree goes full screen today, so the choice is theoretical until one does, and the honest thing is to leave it recorded rather than write code no test can exercise. Verified: host suite 38 of 38 with the new test, and the firmware built and flashed with four sections hash-verified, since this change is in shared code rather than in a test.
+
+#### Next Steps:
+
+The operator should confirm on the glass that the Escape button now does nothing on a bare desktop while F10 and Enter still open the launcher; that is a two-press check and the only part of this cycle not yet observed. Everything else outstanding is unchanged. A fresh 16 MiB backup is due, since `working-2026-11-11-2242.bin` now predates the haptic driver, the glass-sweep test and this fix. `scripts/watch-backup.sh` should gain the `verify_flash` step for the same reason it did last time, and the top margin remains the last unpainted region, inert as `EDGE_TOP` and intended for status icons. The deferred margin-visibility question is recorded rather than dropped: when an application first goes full screen, the choice is to blank the margins on the transition and restore them on exit, which is truthful because pressable-looking dead buttons are worse than blank glass, or to keep them painted and working, which risks feeding stray F10, Escape and F6 to an application that does not understand them. Note that every app in this tree opens maximised rather than full screen, and `td_wm_app_owns_screen()` returns false for maximised, so the margins work correctly in normal use and the question only arises for something genuinely full screen. Also open: the parked redraw fault where a dark screen keeps leftover pixels because the desktop stops sending rows twelve to twenty-five, the two port overrides `TD_SIZE_POLL_MS=0` and `TD_ACK_TIMEOUT_MS=0` untested against the current tree, and the RTC write path written but never exercised. The Linux side stays parked; its last code commit is 8645a82 and everything after it in this repository is the project log.
+
+#### Files Modified:
+
+- src/wm.c
+- tests/test_wm.c
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: NOT RUN
+
+---
+
 ## 7 COMMIT Unreleased 2026-11-11T23:03:40-07:00
 
 #### Coming From:
