@@ -32,6 +32,19 @@ SRCS=(
     patches/harness/splb32/ht24lc08.c
     patches/harness/splb32/con_v3_ir.c
     patches/harness/segmap-1x/segmap.c
+    patches/harness/core0/tmc_core.c
+)
+
+# The dirty-row check is its own program: it links the core but no renderer
+# output, and it returns a status, so it can gate a commit.
+CHECK_SRCS=(
+    tools/tamacore/check_dirty.c
+    patches/harness/splb32/splb32.c
+    patches/harness/splb32/splb32_sound.c
+    patches/harness/splb32/ht24lc08.c
+    patches/harness/splb32/con_v3_ir.c
+    patches/harness/segmap-1x/segmap.c
+    patches/harness/core0/tmc_core.c
 )
 
 INCS=(
@@ -55,6 +68,17 @@ build() {
     echo "ok"
 }
 
+# Does the dirty-row range cover every pixel that changed? Exits non-zero if a
+# changed pixel falls outside the reported range, which on the watch would show
+# as one stale row.
+check() {
+    mkdir -p "$OUT"
+    echo "building $OUT/check_dirty"
+    gcc -std=gnu11 -O2 -Wall -Wextra -Wno-unused-parameter \
+        "${INCS[@]}" -o "$OUT/check_dirty" "${CHECK_SRCS[@]}" -lm
+    "$OUT/check_dirty" "$@"
+}
+
 run() {
     [ -x "$OUT/tmc_host" ] || build
     "$OUT/tmc_host" "$@"
@@ -75,6 +99,7 @@ frames() {
 
 case "${1:-}" in
     build) build ;;
+    check) shift; check "$@" ;;
     run) shift; run "$@" ;;
     frames) shift; frames "$@" ;;
     *)
