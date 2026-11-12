@@ -1,3 +1,33 @@
+## 32 COMMIT Unreleased 2026-11-12T10:50:49-07:00
+
+#### Coming From:
+
+Unreleased a06a444
+
+#### Purpose:
+
+Capture a full 16 MiB backup of the build in which the battery thermistor reads in degrees.
+
+#### Outcome:
+
+`~/twatch-backup/working-2026-11-12-1045.bin` is the current recoverable state, 16 MiB read at 578.8 kbit/s in 231.9 seconds, sha256 `efeb1ef224b696ab6daae270075e818a42c7b29f72ea003db93e6881079bd758`, verify OK against the chip with the board held in the stub across read and compare, and the stored `.sha256` re-checked afterwards. The 2,565,696-byte app region at 0x10000 is byte-identical to the `tinydesk.bin` this machine built, both hashing to `118a305c`, so the image is the firmware that was running. The strings that identify this build are all present -- `ntc%s%d.%d`, `ts %dmV`, `ts ctl%02x`, `cv%d ic%d`, `chg go`, `vbus in`, `i%lu r%lu`, `irq %d up`, `p%d enter` and `Taskbar at the top` -- which matters more than usual here because one of them, `ntc%s%d.%d`, exists only in the build that converts the thermistor to degrees; a backup taken one cycle earlier would have carried the millivolt format instead. Two candidate strings were absent on first inspection and neither was a fault: `ts_tenths_c` is a function name rather than a string literal and does not survive into the binary that way, and `ts 494mV` embeds a value that only exists at run time. Checking the format strings instead of the rendered text is the correct instrument, and the first attempt was the wrong one. The partition table parses as nvs at 0x9000, phy_init at 0xf000, ota_0 at 0x10000, ota_1 at 0x310000, otadata at 0x610000 and storage at 0x620000, matching `partitions.csv`; both image magics are 0xe9; and the littlefs partition holds 1,999 written blocks of 2,528 against the previous backup's 1,995, which is the four blocks of shell history and settings writes this session produced. THE SCRIPT'S RESET WORKED ON THE FIRST ATTEMPT, which is the first time that can be said: it printed `resetting the board`, `waiting for the board to come back`, `board is up`, with no fallback used, against three consecutive earlier backups that had all needed a second attempt before entry 28 found the cause. The board was then confirmed running independently of the script's own report, by reading its desktop over USB at 10:50, and the thermistor conversion was confirmed live on that fresh boot rather than only on the build's first run: `Battery:100%  4.17 V full ntc29.4` with the die at 35.8 C, which is the same ordering and the same range as entry 31's 30.0 C against 36.8 C. Nothing was built or flashed this cycle. The required `core-syntax.md` audit was run against the whole `.ai/` diff, which is this entry alone: `core.md` was untouched, the entry follows the six-section template and the canonical order, its number is the highest present plus one at 32, Files Modified reads `None.` because the cycle generated a recovery artifact outside the repository and changed no tracked file, and Status uses `N/A` for build and deployment because nothing was compiled or written to the chip.
+
+#### Next Steps:
+
+The backup now matches what ships, so the next risky change has a fallback: `working-2026-11-12-1045.bin` carries the thermistor conversion, the taskbar option, both pushers, the charge handling and the touch interrupt. The cheapest useful work left on the thermistor is logging its temperature alongside each `chg go` and `chg done`, which needs no new part data and gives a temperature history from events the driver already handles -- and it would place a reading at the moment charging starts, which is when the charger's thermal window between roughly 0 and 55 C actually matters. One observation is still owed on the current source: `reg50H` reads 60 uA where the datasheet's default is 50, and a battery disconnect would show whether that is an eFuse value or something a previous firmware wrote. The conversion follows either, because it reads the register rather than assuming, but nobody has watched it change. Everything else is unchanged and unblocked: the taskbar-at-top option is verified and left defaulting to bottom at the operator's direction, both pushers work and both send Enter, audio is a beep with no playback path, the display's tearing-effect line is configured and unread, the screen reader lives in the fork under `tools/`, and the unbuilt outboard parts are as they were -- the BHI260AP at 0x28 answering and undriven, the LoRa radio needing ALDO3 and XL9555 P05, the NFC reader needing DLDO1, and the GNSS and microphone with no code. The standing queue is otherwise as it was: the bell seam parked with its finding recorded, the top margin as the last unpainted region, the full-screen margin question, Store installs to the card and the image cache, the two untested port overrides, the unexercised RTC write path, and the pre-existing YAML fence defect in `core-reference.md`.
+
+#### Files Modified:
+
+None.
+
+#### Status:
+
+- Build: N/A
+- Deployment: N/A
+- User Test: N/A
+
+---
+
 ## 31 COMMIT Unreleased 2026-11-12T10:42:47-07:00
 
 #### Coming From:
