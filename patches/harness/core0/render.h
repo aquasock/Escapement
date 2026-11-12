@@ -72,7 +72,23 @@ static inline void lcd_rect(const lcd_fb *fb, int x0, int y0, int x1, int y1, ui
  * runtime: the frame is the size shmproto.h says and the renderer would draw
  * past it or leave a margin, both silently.
  */
-#ifndef SHMPROTO_H
+/*
+ * THE GUARD WAS INVERTED AND THE CHECK HAD NEVER RUN.
+ *
+ * It read `#ifndef SHMPROTO_H`, which asserts only when shmproto.h has NOT been
+ * included -- exactly the case where SHM_DOT and friends are undefined, so the
+ * block could not compile and could not check anything. In tamacore_task.c,
+ * which includes shmproto.h before this file, the guard was false and the whole
+ * cross-check was skipped.
+ *
+ * Found by compiling this file on a host for the Tamacore port: without
+ * shmproto.h the assert fires on undefined macros, and with it nothing runs.
+ * The condition is now `#ifdef`, so the comparison happens when the macros
+ * exist, which is the only time it means anything. If segmap.h and shmproto.h
+ * ever disagree the FIRMWARE build now fails, which is what the comment above
+ * always claimed it would do.
+ */
+#ifdef SHMPROTO_H
 _Static_assert(SEG_DOT == SHM_DOT, "segmap.h and shmproto.h disagree on SHM_DOT");
 _Static_assert(SEG_GAP == SHM_GAP, "segmap.h and shmproto.h disagree on SHM_GAP");
 _Static_assert(SEG_LCD_W == SHM_LCD_W, "segmap.h and shmproto.h disagree on LCD width");
