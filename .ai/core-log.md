@@ -1,3 +1,34 @@
+## 7 COMMIT Unreleased 2026-11-11T23:03:40-07:00
+
+#### Coming From:
+
+Unreleased 58901aa
+
+#### Purpose:
+
+Record the glass sweep becoming a committed test in the port rather than a program in a temporary directory.
+
+#### Outcome:
+
+At a53520b on branch `t-watch-ultra`, `tests/test_twatch_edges.c` walks all 205,820 points of the visible glass in panel coordinates and checks the margin hit test against a reference classifier, with 1536 assertions and no failures. The reason it belongs in the tree is that three faults in this subject matter reached the glass and every one was arithmetic that a desk could have found: the hit test comparing panel coordinates against controller coordinates, the inverse of the slot formula dividing by the span instead of inverting the floor, and the two columns being compared as an offset rather than a mirror. The design decision that makes the test worth having is where the reference comes from. A reference built from `edges.h`'s own macros would prove only that the code equals itself, so the reference restates the measured hardware instead -- a 410x502 glass, a 320x416 framebuffer inset 45 pixels on each side, and panel RAM 22 columns wider than the visible glass -- and derives everything else from those four facts. The code is then checked against the result, which means the macros can be wrong and the test will say so. The slot boundaries are likewise written as a table of the layout, 45/128/211/294/377/461 for the column and 67/173/280/387 for the strip, rather than as a formula the code already contains; the uneven distribution of the leftover rows and columns is visible on the glass, so it is stated rather than recomputed. Coverage is the geometry constants against the facts, the slot boundaries forward and backward, the exact inverse across every row and column of every slot, no index jumping as a finger moves, clamping at the ends, the panel-to-controller conversion stated as its own named test, and a 180-degree mirror between the two columns. Three negative controls were run and each reintroduces a fault that actually shipped, which is the only evidence that a test is not vacuous. Removing the coordinate conversion produces 30,250 region disagreements with each column keeping a claim on only 9,568 of its 18,720 points, 51 per cent dead, and that is the fault the operator reported as the left column not registering at all. Replacing the inverse with the obvious division produces 442 index disagreements and is caught first by the boundary round-trip. Shifting the right column's bounds by two pixels produces 922 region disagreements. The tree was restored after each and the final run is clean. One limitation is recorded rather than papered over: the test covers `edges.h` and not `display.c`, because the painter needs ESP-IDF's SPI headers and cannot be compiled on a host. The painter and the hit test share `edges.h` for the numbers, so the fault class this test is aimed at -- two copies of the geometry drifting apart -- is covered, but a fault inside the painter's own shape arithmetic is not. Verified: host suite now 38 of 38 including the new test. Deployment and User Test are N/A rather than PASS because nothing in the firmware changed -- this cycle added a test and its CMake entry and flashed nothing -- and the syntax does not let an agent-run check stand in for a hardware acceptance.
+
+#### Next Steps:
+
+The two items that were outstanding alongside this one are unchanged and both are small: a fresh 16 MiB backup, since `working-2026-11-11-2242.bin` now predates the haptic driver and this test; and the `verify_flash` step inside `scripts/watch-backup.sh`, which would turn the strongest available check from something a person remembers into something the tool guarantees. The top margin is still the last unpainted region and inert as `EDGE_TOP`, intended for status icons. Two questions still want decisions rather than code: Esc on a bare desktop opens the Start menu, and the margin buttons stay painted while a full-screen application owns the screen where they are no longer buttons. Also open: the parked redraw fault where a dark screen keeps leftover pixels because the desktop stops sending rows twelve to twenty-five, the two port overrides `TD_SIZE_POLL_MS=0` and `TD_ACK_TIMEOUT_MS=0` untested against the current tree, and the RTC write path written but never exercised. Worth noting for whoever picks up the painter next: because this test cannot reach `display.c`, a change to the shapes should still be rendered at 1:1 on the host before flashing, which is what the last four cycles did and what caught the reversed notch test and the wrong mirror formula. The Linux side stays parked; its last code commit is 8645a82 and everything after it in this repository is the project log.
+
+#### Files Modified:
+
+- tests/test_twatch_edges.c
+- CMakeLists.txt
+
+#### Status:
+
+- Build: PASS
+- Deployment: N/A
+- User Test: N/A
+
+---
+
 ## 6 COMMIT Unreleased 2026-11-11T23:00:19-07:00
 
 #### Coming From:
