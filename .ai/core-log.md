@@ -1,3 +1,33 @@
+## 77 COMMIT Unreleased 2026-11-12T05:00:00-07:00
+
+#### Coming From:
+
+Unreleased 32eb2fa
+
+#### Purpose:
+
+Record the Modbus form's reflow, and a survey finding that says which of the remaining apps need the same work.
+
+#### Outcome:
+
+At cce4386 on branch `t-watch-ultra`, `apps/modbus.c` stacks its form on a narrow window. Upstream puts four controls on each of four 72-column rows -- Address at x 8 with Count at 22, Read at 28, Repeat at 37, the interval at 54 and an "ms" label at 63 -- so on a 40-column panel three controls, Read, Repeat and the interval, were off the glass entirely. The narrow form uses short INLINE labels rather than a caption row per field, because on 23 rows four captions would cost more than the fields themselves: "Dev 127.0.0.1  Unit 1" then the table button, "Addr 0  Cnt 10", the repeat row, and "Vals  [ Write ]". The app's own `on_draw` also draws labels at fixed rows and columns chosen for the wide form, and on a narrow window those landed on top of the fields -- the render read "0  10  t" and "[ ]uRepeat every 1000" -- so they are gated by width and the note and list heading move below the stacked form. Three placement errors were made and fixed inside this cycle, all the same kind: a label drawn at x 21 sat under a textbox that reached column 25, and the note's position was passed as its x argument rather than its y. The rule that emerged is worth carrying forward: widgets paint AFTER `on_draw`, so text drawn near a field must clear the field's whole rectangle rather than the label's own width. A survey done while answering a question about MQTT found that most of the remaining apps need this work and several look fine at a glance while being unusable: `apps/mqtt.c` asks for 76x20 with a 75-column minimum and puts Connect, Login, Config, Subscribe, Unsubscribe, Publish and Retain at columns 44 to 63, all of which are off a 38-column client, but the read-only topic list renders correctly so the window appears healthy. That is the case for checking each app for controls past column 38 rather than judging by how it looks. Verified on the glass: the whole Modbus form, the note, the list with its column heading and the TCP server row, read back over the USB link. The host suite is 37 of 37.
+
+#### Next Steps:
+
+MQTT needs the same treatment and is the worst case found so far -- seven controls at columns 44 to 63 -- so it should come next. The remaining apps are System Monitor, Task Manager, Log Viewer, Users and Settings, then Startup, Store, Remote Desktop and the Software Update window; Users and Settings will be harder than these because both build their content from a list of controls, so a narrow layout may need the list to scroll rather than the rows to stack. A cheap first filter for the rest: grep each app for `td_button` and `td_textbox` calls whose x is 38 or more, which finds the invisible controls without opening the window. The parked redraw fault from entry 74 is untouched; forcing `td_full_redraw()` with the garbage visible is still the experiment that would localise it. The remaining port overrides `TD_SIZE_POLL_MS=0` and `TD_ACK_TIMEOUT_MS=0` are still untested against the current tree, and the three capacitive bars under the glass still act on stretches of taskbar rather than three fixed cells, awaiting the vendor map. The Linux side stays parked; its last code commit is 8645a82 and everything after it in this repository is the project log.
+
+#### Files Modified:
+
+- apps/modbus.c
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: PASS
+
+---
+
 ## 76 COMMIT Unreleased 2026-11-12T04:10:00-07:00
 
 #### Coming From:
