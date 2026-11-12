@@ -1,3 +1,33 @@
+## 37 COMMIT Unreleased 2026-11-12T13:17:56-07:00
+
+#### Coming From:
+
+Unreleased 3bdfef5
+
+#### Purpose:
+
+Extend the NFC reader from "it reads a tag" to "it identifies the tag and counts presentations", and fix the re-read storm that made counting impossible.
+
+#### Outcome:
+
+The cycle was reverted at the operator's direction and nothing it produced is in the tree; the fork is back at `fcd14aa`, rebuilt and reflashed, and `nfc` again reports `rail up`, `bus up cs 4 int 5`, `id 2a type ST25R3916 rev 2`, `boot ok` with the desktop painted and WiFi associated. Two things were established before the revert and both are worth keeping even though the code is gone. FIRST, the tag identifies itself without a datasheet lookup, and the first attempt at reading that was wrong in a way that survived review: the capability container is at offset 12 on a Type 2 tag, not offset 0, because pages 0 and 1 are the UID and page 2 is the lock bytes -- reading offset 0 returned `1dd30d4b`, the first four bytes of the UID the same read had just printed, which looks like a plausible answer and is not one. Read at the right offset it gives `e1101200`, which decodes as magic E1, mapping version 1.0, 18 x 8 = 144 bytes and access 00, so the tag is an NTAG213 that is formatted, read/write and holds 126 free bytes. RFAL's own T2T detection computes the area length but leaves its version fields zero, so the version has to come from the container. SECOND, and this is the finding the cycle is actually worth: THE READER RE-READS A TAG THAT IS STILL THERE, about 6.7 times a second, because every successful read is followed by a deactivation and a fresh discovery. A tag left on the glass cost roughly four hundred reads a minute. That was not a separate annoyance but the cause of the measurement failure that consumed the cycle -- one tap looked like seven reads and seven taps looked like one, and three successive builds went into counting the storm rather than using it. The attempt to fix it properly HUNG THE SHELL and had to be reset out of: `ndefPollerCheckPresence()` is one block-0 read for a Type 2 tag, which is the right primitive, but once the tag is lifted the transmit goes into an empty field and the vendor's transceive waits for a response that never arrives, and nothing in RFAL offers a cancellable transceive. A blocking call made while a tag might be gone is therefore unsafe on this part, which is the constraint any future fix has to respect -- the shape that would work is a non-blocking quiet window after each read, suppressing discovery rather than polling the card. The judgement error is recorded too and it is the real lesson: the storm never stopped the tag from being read, the NDEF decode had been verified three builds earlier, and four build-flash cycles went into instrumentation that added no capability. A measurement problem is not a defect and should not have been treated as one. Nothing was committed from this cycle, so no tracked file changed; the tree is clean at `fcd14aa` on branch `t-watch-ultra`, and `working-2026-11-12-1240.bin` remains the recoverable image. The required `core-syntax.md` audit was run against the complete `.ai/` diff, which is this entry alone: `core.md` was untouched; the entry follows the six-section template and the canonical order; its number is the highest present plus one at 37; Files Modified reads `None.` because everything the cycle produced was reverted; and Status records the user test as a rejection rather than a pass.
+
+#### Next Steps:
+
+NFC is parked at the operator's direction and the re-read storm is deliberately kept, because it is harmless for what the reader does today -- read a tag and print it -- and becomes a problem only if something later watches for tag changes. Any future cycle should start from the three facts this one established rather than rediscovering them: the capability container is at offset 12, the tag is an NTAG213 with `e1101200` and 126 free bytes, and `ndefPollerCheckPresence()` blocks for ever once the tag is lifted. The cheapest useful work on the reader is a consumer rather than more instrumentation: nothing reacts to a tag today, and injecting a key through the desktop's existing injection path would make a presentation do something visible. Writing is unimplemented and the vendored stack can do it. Everything else is unchanged and unblocked: the taskbar edge is settable and left defaulting to bottom at the operator's direction; the thermistor reads in degrees; both pushers work and both send Enter, with F10 on the BOOT pusher the shape I would still argue for; audio plays WAV files from the card; the display's tearing-effect line is configured and unread; and the remaining outboard parts are the BHI260AP at 0x28 answering and undriven, the LoRa radio needing ALDO3 and XL9555 P05, and the GNSS and microphone with no code. The standing queue is otherwise as it was: the bell seam parked with its finding recorded, the top margin as the last unpainted region, the full-screen margin question, Store installs to the card, the two untested port overrides, and the unexercised RTC write path.
+
+#### Files Modified:
+
+None.
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: FAIL
+
+---
+
 ## 36 COMMIT Unreleased 2026-11-12T12:43:43-07:00
 
 #### Coming From:
