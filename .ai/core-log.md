@@ -1,3 +1,34 @@
+## 88 COMMIT Unreleased 2026-11-12T12:40:00-07:00
+
+#### Coming From:
+
+Unreleased 75617d8
+
+#### Purpose:
+
+Record the Settings reflow and the third defect of the kind the layout test cannot see.
+
+#### Outcome:
+
+At c6f6310 on branch `t-watch-ultra`, `apps/settings.c` fits a 38-column client. Two faults were clipping: "On-screen keyboard for text fields" is 42 columns with its border, and "Displays..." at column 24 shared row 17 with "Software update..." at column 1, which is 25 wide, so the two overlapped by two columns. A narrow window shortens the long captions, puts the two theme buttons one per row, and pairs the four destination buttons two to a row -- which matters because the window at its own minimum size is only 19 rows and four single rows ran past the bottom. The third fault was not clipping at all and is the one worth recording. Rows 10 and 11 read "[ Medium ]icons" and "[ Medium ]nu", which looked like leftover pixels, and it survived a full redraw, so it was not stale state. `on_draw` paints the size rows' captions as TEXT at column 3 -- "Desktop icons", "Start menu", "Taskbar", "Windows", "Pictures" -- to label the four size buttons, which sit at column 18 in the wide layout and at column 1 in the narrow one. The words were therefore drawn underneath the buttons and only their tails showed past the button's right edge. The captions go to the right of the buttons now, which reads better anyway: "[ Medium ] Desktop icons", "[ Normal ] Pictures". A note on how it was found: the first hypothesis was the parked dirty-region fault from entry 74, and the thing that disproved it was forcing a full redraw and seeing the text persist -- which is the cheap test that should have been first. This is the third defect of the shape recorded in entry 86, a widget colliding with text that `on_draw` paints, and the third that the 40x26 test cannot see because it only knows about widget rectangles. Recycle Bin and Settings are both off the work list now, leaving Date and time alone. Verified: host suite 37 of 37 including the 40x26 pass; flashed and read on the glass -- every control inside the frame and every size row labelled correctly.
+
+#### Next Steps:
+
+Date and time is the last name in `s_narrow_todo[]`: a "Change..." button at column 40 on a 38-column client and a "12-hour" checkbox at column 30 reaching 41. When it is done the list is empty and the guard becomes a plain regression test at this board's grid for every app, with no exemptions left in the source. Then the gap from entry 86 should be closed -- a check that a widget's cells do not overlap text painted by `on_draw`, which the composed buffer makes possible and which three defects have now slipped past. The parked redraw fault from entry 74 is untouched; forcing `td_full_redraw()` with the garbage visible is still the experiment that would localise it. The remaining port overrides `TD_SIZE_POLL_MS=0` and `TD_ACK_TIMEOUT_MS=0` are still untested against the current tree, and the three capacitive bars under the glass still act on stretches of taskbar rather than three fixed cells, awaiting the vendor map. The Linux side stays parked; its last code commit is 8645a82 and everything after it in this repository is the project log.
+
+#### Files Modified:
+
+- apps/settings.c
+- tests/test_native_apps.c
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: PASS
+
+---
+
 ## 87 COMMIT Unreleased 2026-11-12T11:50:00-07:00
 
 #### Coming From:
