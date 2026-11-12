@@ -1,3 +1,40 @@
+## 5 COMMIT Unreleased 2026-11-11T22:58:10-07:00
+
+#### Coming From:
+
+Unreleased 9099e29
+
+#### Purpose:
+
+Record the DRV2605 haptic driver in the TinyDesk port, written from LilyGo's own source so that a press on a margin button can be felt.
+
+#### Outcome:
+
+At a1b6640 on branch `t-watch-ultra`, `ports/twatchultra/main/haptic.c` drives the DRV2605 at I2C 0x5A and `edge_press()` fires one Strong Click after sending the key. The click fires only when a key was actually sent, so the reserved right-column slot and the inert top margin stay silent: buzzing for a no-op would say something happened when nothing did. It fires after the key rather than before, so the click coincides with the action instead of announcing it. The sequence was read from LilyGo's source rather than inferred from the datasheet or copied from the Linux driver, and doing so settled the one design question the Linux version had left open. LilyGoLib's `LilyGoWatchUltra.cpp` splits the work in two: `initDrv()` calls `selectLibrary(1)`, `setMode(HapticMode::INTERNAL_TRIGGER)`, `setWaveform(0, effect)`, `setWaveform(1, 0)` and `run()`; `vibrator()` then only rewrites the two waveform slots and fires GO. So the library and the trigger mode are set once and a tap is three register writes, not six. This port does the same, where the Linux driver rewrites the whole sequence per tap — both work, and LilyGo's split is the better shape because library and mode are configuration while the waveform is payload. The underlying register class is `lewisxhe/SensorLib`, `src/haptic/HapticDriver_DRV2605.cpp`, where the relevant writes are 0x03 for the library, 0x01 = 0x00 for internal trigger, 0x04 plus the slot index for a waveform, and 1 to 0x0C for GO. Two silent failures were handled rather than assumed, and both are cases where the hardware looks dead while reporting healthy. The first is the effect library: this board's FEEDBACK register at 0x1A reads 0x36 whose bit 7 is 0, so the motor is ERM and the library must be 1, not 6 — an ERM given the LRA library buzzes weakly or not at all with no error anywhere. The driver reads that register back at init and logs what it found rather than trusting the constant. The second is the rail, and it is the one that reads as broken hardware: the chip answers every I2C transaction with its supply switched off, so a driver that only probes it reports success and then nothing moves. `board_haptic_power_on()` now raises XL9555 P06 before the probe, a bit confirmed from two independent sources — LilyGoLib's `POWER_HAPTIC_DRIVER` case driving `EXPANDS_DRV_EN`, and this project's own reference citing the same value from TinyPetz — and unlike the touch reset line there was no disagreement to hedge. Bring-up logs which of the three outcomes happened: rail failed, no chip at 0x5A, or haptics on. One limitation shaped how far this can be verified from a desk rather than a finger: `CONFIG_ESP_CONSOLE_NONE=y` in this build, so `ESP_LOG` reaches nothing on USB and the bring-up line exists only in the desktop's Log Viewer ring. A reset over native USB re-enumerates and the early lines are dropped anyway, which is why an attempt to capture the boot log produced no haptic line at all — not a fault, and worth recording so the next session does not read that silence as a failure. Verified: host suite 37 of 37, four sections hash-verified on flash, and the built image carries `board_haptic_power_on`, `haptic_init` and `haptic_tap` with their diagnostic strings. The buzz itself is the operator's to report.
+
+#### Next Steps:
+
+The operator needs to press a margin button and say whether it is felt, and if it is not, the three outcomes are distinguishable from the Log Viewer's bring-up line rather than by guessing. If it is felt but too weak, the knobs are the effect ID within library 1 — LilyGo exposes `setHapticEffects` for exactly that and defaults to 1 as this port does — and after that RATED_VOLTAGE and the overdrive clamp, which neither LilyGo nor this port sets yet. If it is felt but fires twice per press, the cause would be the press being emitted twice rather than the effect being long, since the driver fires only on the transition into a press. Beyond haptics, the top margin is still the last unpainted region and inert as `EDGE_TOP`; the glass sweep that has caught three faults plus one in its own reference still lives only in a temporary directory; `scripts/watch-backup.sh` still lacks the `verify_flash` step; and the two open questions still want decisions rather than code, namely that Esc on a bare desktop opens the Start menu and that the margin buttons stay painted while a full-screen application owns the screen. Also still open: the parked redraw fault where a dark screen keeps leftover pixels because the desktop stops sending rows twelve to twenty-five, the two port overrides `TD_SIZE_POLL_MS=0` and `TD_ACK_TIMEOUT_MS=0` untested against the current tree, and the RTC write path written but not exercised. The backup at `working-2026-11-11-2242.bin` predates this cycle, so a fresh one is due once the buzz is confirmed. The Linux side stays parked; its last code commit is 8645a82 and everything after it in this repository is the project log.
+
+#### Files Modified:
+
+- ports/twatchultra/main/haptic.c
+- ports/twatchultra/main/haptic.h
+- ports/twatchultra/main/touch.c
+- ports/twatchultra/main/power.c
+- ports/twatchultra/main/power.h
+- ports/twatchultra/main/link_twatch.c
+- ports/twatchultra/main/CMakeLists.txt
+- ports/twatchultra/README.md
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: NOT RUN
+
+---
+
 ## 4 COMMIT Unreleased 2026-11-11T22:46:47-07:00
 
 #### Coming From:
