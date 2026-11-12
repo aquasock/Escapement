@@ -669,12 +669,13 @@ EMU-017: "OPEN and superseded: a firmware task writing a PSRAM buffer from the h
   verified_date: 2026-11-10
   title: "The CST9217 INT line is GPIO 12, and driving touch from it cuts idle bus traffic about 8x"
   statement: "TP_INT is GPIO 12 on this board, active low, pulsed when the controller has a report. LilyGo configures it as INPUT_PULLUP and attaches a FALLING-edge handler. The pull-up is part of the contract: the controller drives the line low and releases it, so without the pull the line floats and the edge either never arrives or arrives continuously. In the kernel driver the line is requested with `int-gpios` and turned into an interrupt with gpiod_to_irq() rather than through an `interrupts` property, which is the idiom for input devices and also lets the pin's electrical configuration be set explicitly."
-  consequence: "The interrupt is used to wake the driver, and polling is kept at two rates rather than removed: 20 ms while a finger is down, so a drag keeps up with the controller's ~66 ms reports, and 250 ms when idle as a safety net. That structure is deliberate. Making the interrupt the only wake-up would mean a wrong polarity or a lost pull-up silently loses touch entirely, whereas a slow poll degrades to latency. Measured effect: idle interrupts settle at about 2 per second, against the ~50 reads per second that the previous unconditional 20 ms poll produced."
+  consequence: "The interrupt is used to wake the driver, and polling is kept at two rates rather than removed: 20 ms while a finger is down, so a drag keeps up with the controller's ~66 ms reports, and 250 ms when idle as a safety net. That structure is deliberate. Making the interrupt the only wake-up would mean a wrong polarity or a lost pull-up silently loses touch entirely, whereas a slow poll degrades to latency. This shape is now implemented and measured on two different stacks and the two idle figures do NOT agree, which is worth knowing before either is quoted. In the Linux kernel driver idle interrupts settled at about 2 per second, against the ~50 reads per second that the previous unconditional 20 ms poll produced. In the TinyDesk port the idle interrupt count is exactly ZERO: `irq1488` was unchanged across 77 s of an untouched glass, while the port read the report block 4 times a second on its idle timer. So neither figure should be generalised -- 2 per second is what the kernel driver saw, 0 is what ESP-IDF sees on this same board, and the difference is unexplained. Two candidates are recorded rather than chosen: the kernel driver's own polling produces some I2C activity the part answers with a pulse, or the two stacks leave the controller in different internal states. Anyone quoting an idle interrupt rate for this board should say which stack measured it."
   sources:
     - "Xinyuan-LilyGO/LilyGoLib src/LilyGoWatchUltra.cpp initTouch(): pinMode(TP_INT, INPUT_PULLUP); attachInterrupt(TP_INT, ..., FALLING)"
     - "patches/kernel/touch/final/cst92xx.c: cst92xx_irq(), the idle/active periods, and cst92xx_service() shared by both paths"
     - "KRN-008 for why the interrupt could not be mapped until the descriptor table was enlarged"
-  verification: "Verified on hardware 2026-11-10: IRQ 33 registered against cst92xx, 331 interrupts accumulated during three taps, and a captured event stream showed three presses and three releases with smooth coordinate tracks. Idle rate measured at 20 interrupts over 10 seconds. The bus, RTC, PMU, panel, WiFi and BLE keyboard all remained healthy throughout."
+    - "tinydesk-twatch ports/twatchultra/main/touch.c: the same two-rate structure on ESP-IDF, with the ISR only notifying the task"
+  verification: "Verified on hardware 2026-11-10: IRQ 33 registered against cst92xx, 331 interrupts accumulated during three taps, and a captured event stream showed three presses and three releases with smooth coordinate tracks. Idle rate measured at 20 interrupts over 10 seconds. The bus, RTC, PMU, panel, WiFi and BLE keyboard all remained healthy throughout. Revised 2026-11-12 (core-log entry 18): the ESP-IDF port implemented the same structure and measured the idle interrupt count at zero rather than 2 per second, over 77 s of untouched glass. The pin, the polarity, the pull-up, the falling edge and the two poll rates are all confirmed a second time on a different stack; only the idle figure differs, and this record no longer presents one number as the board's behaviour."
 
 - record_id: TCH-010
   kind: TOUCH
@@ -1562,7 +1563,7 @@ EMU-017: "OPEN and superseded: a firmware task writing a PSRAM buffer from the h
 - A `core-syntax.md` audit is required whenever this file changes, per `.ai/core.md`.
 
 ```yaml
-last_reviewed: 2026-11-11
+last_reviewed: 2026-11-12
 ```
 
 ---

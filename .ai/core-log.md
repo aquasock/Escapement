@@ -1,3 +1,33 @@
+## 18 COMMIT Unreleased 2026-11-12T08:11:20-07:00
+
+#### Coming From:
+
+Unreleased 7420750
+
+#### Purpose:
+
+Record the operator's acceptance of the CST9217 interrupt path and fix the logging defect that testing it exposed.
+
+#### Outcome:
+
+Entry 17 left the interrupt as `User Test: NOT RUN` because a press cannot be faked from a desk, and the operator has now tested it at `bb339d1` and reported every margin button working, a drag tracking and releasing correctly, and no regression anywhere on the desktop. Entry 17 is superseded on that one field only; it was accurate when written and is left otherwise as settled history. The interrupt itself is confirmed doing the work rather than merely being registered, which is the distinction entry 17 could not establish: the periodic counter read `irq1488` after the pressing session, and `e2 i2` appears in the ring, which is `EDGE_BOTTOM` index 2 -- Ctrl+Q, the last of the three bottom buttons, so reported presses run through the same hit test the margins always used. A second reading 77 s later, with the glass untouched, still read `irq1488`, so the line is not spuriously asserting and the 250 ms idle fallback is what is keeping the driver awake, not the interrupt. Testing also found a defect this cycle introduced, and it is worth recording because it defeated the instrument rather than the feature: `prs` logged on every press report, and the controller re-reports a held finger about every 66 ms, so the two-second hold in the test wrote roughly thirty lines into the Log Viewer's 64-line ring and the drag emptied it completely. The window showed 1540 lines and the counters the run was meant to be read from had scrolled out of it -- the diagnostic destroyed itself while being used, which is the third time this file records that shape of fault in `touch.c` and the first where the cause was volume rather than the 40-column truncation. It logs the transition only now, which is the report that carries the position a press started at, and holding and dragging are silent. The periodic line was clipped as well: `irq1488 rd3`, with the read count cut off, because the tag, a five-digit millisecond stamp and two growing numbers do not fit in 38 columns, so it is `i%lu r%lu` and fits, and the press counter went with it since the `prs` lines count presses now that there is one per touch. Both fixes were flashed and the operator re-tested on the new build, confirming one `prs` entry per touch with every button still working, and the line now reads `i0 r300` at rest -- four reads a second, unclipped, against the fifty the fixed poll produced. `TCH-009` was revised rather than left as it stood, because it claimed idle interrupts settle at about two per second and this board measures zero: `core-reference.md` now records that the two figures come from two different stacks, that the kernel driver's 2 per second and this port's 0 do not agree, and that the difference is unexplained with two candidates named rather than a cause invented. The pin, polarity, pull-up, falling edge and both poll rates are confirmed a second time on a second stack; only the idle figure was generalised wrongly. The firmware builds clean under `-Werror`, the host suite is 38 of 38, only the app region at 0x10000 was written with the hash verified, and the required `core-syntax.md` audit was run against the whole `.ai/` diff: `core.md` was not touched, the entry conforms to the six-section template and the canonical order, its number is the highest present plus one at 18, and every one of the 86 records in `core-reference.md` was re-parsed individually against the record template with all nine mandatory keys present and no duplicate ids, which is also the check that the revision to TCH-009 did not break the sequence.
+
+#### Next Steps:
+
+A fresh backup is now due and is the most valuable next action, because three firmware writes have landed since `working-2026-11-12-0109.bin` was taken -- the SD note, the interrupt, and the logging fix -- and that backup no longer describes what runs. Nothing else in this cycle is blocked. The screen model written to read the Log Viewer over USB is in a temporary directory again, which the handoff has now flagged twice; it belongs in the fork under a tools directory, and the next cycle should move it before the method is rediscovered a third time. Two smaller items belong with the touch work rather than to a new subject: `touch.int` is read as a board key while `i2c.sda`, `i2c.scl` and `touch.addr` beside it are still hardcoded, so the board configuration is half honest about this port's pins and either all of them should be read or the example should say which are inert; and the OTA check the desktop performs at boot fails on an offline watch with four lines of `esp-tls` and `HTTP_CLIENT` errors that are noise, not a fault, and bury the Log Viewer at every boot -- worth quieting or deferring now that the interrupt has made the ring worth reading. Otherwise the standing queue is unchanged: the bell seam stays parked at the operator's direction with its finding recorded, the top margin is the last unpainted region, what the margins do under a full-screen application waits for something to go full screen, Store installs to the card and the image cache have never run against a card, `TD_SIZE_POLL_MS=0` and `TD_ACK_TIMEOUT_MS=0` remain untested against the current tree, the RTC write path has never been exercised by setting a time and power-cycling, and the pre-existing YAML fence defect in `core-reference.md` is untouched. The unbuilt devices are as they were: the BHI260AP at 0x28 answering with no driver, the LoRa radio needing ALDO3 and XL9555 P05 before it is powered, the NFC reader needing DLDO1 with its earlier absence verdict still suspect, and the GNSS, microphone and both pushers with no code at all.
+
+#### Files Modified:
+
+- ports/twatchultra/main/touch.c
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: PASS
+
+---
+
 ## 17 COMMIT Unreleased 2026-11-12T07:53:10-07:00
 
 #### Coming From:
