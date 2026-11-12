@@ -1,3 +1,37 @@
+## 10 COMMIT Unreleased 2026-11-11T23:49:20-07:00
+
+#### Coming From:
+
+Unreleased 8843136
+
+#### Purpose:
+
+Record the SD card working in the TinyDesk port, which answers the open hardware question that BRD-004 had carried since 2026-11-09.
+
+#### Outcome:
+
+At 2d80ea5 on branch `t-watch-ultra`, a 29 GB FAT32 card mounts at `/sd` in the TinyDesk port, reads and writes files, and appears in the desktop's Files app as the folder `sd`. The last of those needed no new code: the shell already had `td_fs_stdio_redirect`, which serves `/fs/sd` from `/sd` while the card is mounted, and register it alongside a removable drive that reports real capacity. So the work was entirely in getting the card to mount at all, and two of the three things that had to be right were wrong. THE SHARED SPI BUS WAS NEVER PARKED, and this is the finding worth keeping: MISO, MOSI and SCLK are shared with the LoRa radio on CS 36 and the NFC reader on CS 4, neither of which this port had ever driven, so either could float low and leave its device driving MISO. That corrupts every transaction and presents as a handshake failure rather than as a bus that does not work. LilyGo's own `initShareSPIPins()` drives those pins high before using the bus; this port had no reason to before there was anything on the second bus. Parking them moved the failure from `sdmmc_init_sd_if_cond returned 0x108`, where the card does not answer at all, to `failed to mount card (13)`, where the card has answered and the filesystem is not recognised -- which is the evidence that it mattered rather than a plausible-sounding guess. THE TOUCH RESET WAS DRIVING THE CARD-DETECT PIN. `board_touch_reset_release()` hedged between two sources by driving expander pins 8 and 10, on the reasoning that a wrong pin is an unused pin. It is not: the board's own Arduino variant defines `EXPANDS_TOUCH_RST` as 8 and `EXPANDS_SD_DET` as 10, so the hedge was driving the SD card's insert switch as an output and fighting a physical switch. Only pin 8 is driven now, and the hedge's premise is recorded as false rather than deleted. Third, ALDO1: BRD-003 assigns it to the card and LilyGo raises it to 3300 mV beside the display's ALDO2, so `board_sd_rail_on()` does the same. It has to run before the shell's SD watcher, which mounts from a task rather than during init, so there is a new weak `board_power_rails_preinit()` in the shared app called from `app_main`; the port's own `link_init()` runs later, from the UI task, and would have been too late. FATFS also gained long file names and UTF-8 to match every other port, and that had to go in `sdkconfig.defaults` with the generated `sdkconfig` deleted, because a change made only in `sdkconfig` vanishes on a clean checkout with no diff to blame. Two things about method are worth carrying. The first: three separate diagnostic instruments were needed before the fault was visible, and one of them had to be built. `ESP_LOG` reaches nothing on USB in this build (`CONFIG_ESP_CONSOLE_NONE=y`), so the boot log exists only in the desktop's 64-line ring, and every diagnostic this port had written at preinit was scrolled away before anyone could read it. `board_log_rails()` now reads ALDO1 and ALDO2 back and logs them from `link_init`, which is late enough to survive and still early enough to precede the SD watcher's first attempt; it reported `ald1 1c`, which is 28, which is 3300 mV. A diagnostic nobody can read is not a diagnostic. The second: I was wrong twice about the cause and each time the card was cleared as a suspect on evidence rather than by argument. The first hypothesis was exFAT, because a 32 GB card often ships that way and ESP-IDF compiles FatFs with `FF_FS_EXFAT` hardcoded to 0 and no Kconfig option; mounting it on a PC showed FAT32 with an MBR partition table, so that was wrong. The second was the sector size, `CONFIG_FATFS_SECTOR_4096`, which I suspected would reject a 512-byte-sector card; reading `ffconf.h` showed `FF_MIN_SS` is the minimum of the SD and wear-levelling sizes, so 512 stays valid and that was wrong too. BRD-004 has been rewritten rather than left stale: its verdict that the second bus had never moved a byte was measured on Linux's `spi-mem` stack and does not carry over, and the record now states what was proven, on which stack, and what the two prerequisites are. Verified end to end on the glass: `sd` reports `mounted at /sd`, `SDABC`, SDHC/SDXC, 29 GB with 29 GB free; a file written from the shell read back byte-exact; Files navigated to its root shows `sd/` and opening it shows `TinyDesk/` and the probe file; the probe file was then removed and the card left with only `TinyDesk`. Host suite 38 of 38, four sections hash-verified on flash.
+
+#### Next Steps:
+
+The card works, so the next question is what to put on it rather than whether it can hold anything. The Store already installs packages to the card when the user picks it, and `tde`/`tdapp` caches images at `/sd/TinyDesk/cache`; neither has been exercised against a real card yet, and they are the natural first users. The `sd.*` board keys are absent from `api/board_keys.txt` because the checker skips `third_party/`, so they are outside the documented board-config surface -- worth recording if this port is ever offered upstream. Hot-plug is untested in both directions: the card was present at boot, and `sd.cd` is not configured on this port, so removal is detected by polling the card rather than by the insert switch. Note that the insert switch is expander pin 10 and the port does not currently read it, which means hot-plug would work better with `sd.cd` wired to the expander than with the polling path. Two limitations of the state rather than of the code are worth carrying: `board.conf` is not built in because it is gitignored, so a clean checkout of this port will build without SD enabled and the shipped `board.example.conf` still calls those keys unproven -- that note is now wrong and should be updated when the feature is adopted rather than probed. And the pre-existing YAML defect in `.ai/core-reference.md` remains: a code fence after the last record stops the sequence parsing as one document, so the records can only be validated individually. That predates this cycle and is not corrected here. The other open items are unchanged: a fresh 16 MiB backup is due, `verify_flash` still lives outside `scripts/watch-backup.sh`, the top margin is the last unpainted region, and the deferred question of what the margins should do under a full-screen application waits for something to go full screen. The Linux side stays parked; its last code commit is 8645a82 and everything after it in this repository is the project log.
+
+#### Files Modified:
+
+- ports/esp_idf/app/main.c
+- ports/twatchultra/main/power.c
+- ports/twatchultra/main/power.h
+- ports/twatchultra/main/link_twatch.c
+- ports/twatchultra/sdkconfig.defaults
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: PASS
+
+---
+
 ## 9 COMMIT Unreleased 2026-11-11T23:15:08-07:00
 
 #### Coming From:

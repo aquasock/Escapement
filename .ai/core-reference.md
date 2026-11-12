@@ -130,7 +130,7 @@ Topic IDs are the `record_id` prefix. An entry reserves a name; it does not clai
 | Which I2C bus carries the peripherals, on which pins, at which addresses? | BRD | BRD-001 |
 | Which PMU interrupt pin is it, and why did it storm? | BRD | BRD-002 |
 | What does the power rail map look like? | BRD | BRD-003 |
-| Which SPI bus is the panel on, and what else exists? | BRD | BRD-004 |
+| Which SPI bus is the panel on, and does the second one work? | BRD | BRD-004 |
 | Where is the haptic driver, and why does it buzz nothing? | BRD | BRD-005 |
 | Where is the touch controller, and what is at 0x5A? | TCH | TCH-001 |
 | Why does the touch controller answer but never report? | TCH | TCH-002 |
@@ -436,16 +436,18 @@ EMU-017: "OPEN and superseded: a firmware task writing a PSRAM buffer from the h
 - record_id: BRD-004
   kind: BOARD
   topic_id: BRD
-  title: "The panel owns SPI2; a second general-purpose SPI bus carries SD and LoRa but has never been proven to transfer data"
+  title: "The panel owns SPI2; the second SPI bus carries SD and LoRa and is proven to transfer data, by mounting a card from ESP-IDF"
   status: VERIFIED
-  verified_date: 2026-11-09
-  statement: "The CO5300 panel is on a dedicated QSPI bus: SCK 40, D0-D3 on 38/39/42/45, CS driven by hand on GPIO41, RST on 37, TE on 6. A separate general-purpose SPI bus exists on SCK 35, MOSI 34, MISO 33, with SD CS on 21, LoRa CS on 36 (RST 47, BUSY 48, INT 14) and NFC CS on 4 (INT 5)."
-  consequence: "Work on the second bus is unstarted and unproven: the NFC probe never received a reply, with MISO clamped low by something external, and the loopback test that would have proven the bus could move a byte was itself blocked by a pad-driving bug. The SD card and LoRa therefore rest on unverified foundations, and the kernel has no MMC support at all (CONFIG_MMC is not set)."
+  verified_date: 2026-11-11
+  statement: "The CO5300 panel is on a dedicated QSPI bus: SCK 40, D0-D3 on 38/39/42/45, CS driven by hand on GPIO41, RST on 37, TE on 6. A separate general-purpose SPI bus exists on SCK 35, MOSI 34, MISO 33, with SD CS on 21, LoRa CS on 36 (RST 47, BUSY 48, INT 14) and NFC CS on 4 (INT 5). That second bus works: ESP-IDF mounted a 29 GB FAT32 card on it and read and wrote files."
+  consequence: "The earlier verdict that this bus had never moved a byte was measured on Linux's spi-mem stack and does not carry over. Two things had to be right, and neither is about the bus itself. First, EVERY OTHER CHIP SELECT ON THE BUS MUST BE PARKED HIGH: MISO is shared, so a CS floating low leaves that device driving the line and corrupts every transaction, which presents as a handshake failure. Driving LoRa CS 36 and NFC CS 4 high before use turned a card that would not answer into one that mounted. Second, the card's supply is the PMU's ALDO1 (BRD-003), and an unpowered card answers nothing, so the rail has to be up before the first mount attempt. While on Linux the kernel still has no MMC support at all (CONFIG_MMC is not set), so none of this helps the parked kernel."
   sources:
     - "patches/kernel/display/SECOND-SPI-BUS.md"
     - "build/kernel/linux-7.2.4/.config: '# CONFIG_MMC is not set'"
     - "patches/kernel/display/final/esp32s3-devkit-c1.dts for the panel pin set"
-  verification: "Panel pins confirmed working by the display itself. Second bus: read from the probe notes, which record the negative result and the never-completed loopback; not re-exercised this session."
+    - "tinydesk-twatch port: power.c board_sd_rail_on/board_power_rails_preinit and the shared-spi CS parking"
+    - "arduino-esp32 variants/lilygo_twatch_ultra/pins_arduino.h for SD_CS 21 and the shared LORA_CS 36 / NFC_CS 4"
+  verification: "Verified on hardware 2026-11-11 in the TinyDesk port rather than Linux: a 29 GB FAT32 card (SDHC/SDXC, verified separately on a PC as FAT32 with an MBR partition table) reported itself with `sd` as mounted at /sd, accepted a file written from the shell and read it back byte-exact, and appeared in the desktop's Files app as the folder sd through the port's existing redirect. The failure sequence is the evidence for the ordering: with nothing parked, sdmmc_init_sd_if_cond returned 0x108 (no valid response); with the CS lines parked and ALDO1 raised, the same mount succeeded."
 
 - record_id: LCD-001
   kind: DISPLAY
