@@ -1,3 +1,40 @@
+## 33 COMMIT Unreleased 2026-11-12T11:49:19-07:00
+
+#### Coming From:
+
+Unreleased ad05986
+
+#### Purpose:
+
+Play a WAV file through the watch's speaker, which the port had never done despite having working I2S output.
+
+#### Outcome:
+
+At `c881b3c` on branch `t-watch-ultra`, `play /sd/full.wav` streams a 4 minute 49 second, 48 MB, 44.1 kHz stereo track off the SD card while the desktop keeps running, and it was confirmed by ear in three steps: a 3-second mono 16 kHz clip, a 5-second stereo 44.1 kHz clip, and then the whole track. THE PREMISE THIS STARTED FROM WAS WRONG AND THE CORRECTION IS WORTH RECORDING. The request assumed the port already played a WAV file for its tone; it did not. `sound.c` generated a 1 kHz square wave in `beep_samples()` and there was no RIFF parser anywhere in the tree, so this was a new feature rather than a reconfiguration of existing playback. What did already work was the I2S output itself, which is the easy half and is why the feature came together quickly once the parser existed. TWO NEW FILES, BOTH SPLIT OUT FOR TESTABILITY. `wav.c` walks the RIFF chunk list rather than assuming a canonical 44-byte header, and that decided the outcome on the very first real file: ffmpeg's output reports `data_offset` 192 because it writes a LIST metadata chunk, so a fixed-offset reader would have played 148 bytes of metadata as audio and sounded merely wrong rather than failing. The test states the same chunk layouts independently -- a LIST between fmt and data, an odd-length chunk with its pad byte, a `WAVE_FORMAT_EXTENSIBLE` fmt longer than 16 bytes whose real format lives in the sub-format GUID, and a data length exceeding the file -- and TWO NEGATIVE CONTROLS CONFIRM IT CAN FAIL: dropping the odd-chunk pad byte fails one assertion, and a fixed-offset reader fails six. PLAYBACK IS STREAMED AND NEVER LOADED, which is forced rather than stylistic: the track is six times the whole littlefs partition and PSRAM is shared with the desktop. 4 KiB reads against four 1024-frame DMA buffers is 93 ms of queued audio against under 25 ms of file I/O, roughly a 4x margin, and no stutter was audible across a five-minute read from an SD card on a 10 MHz bus shared with the LoRa radio and the NFC reader. It handles mono and stereo and reconfigures the I2S clock from the file's own header, restoring the beep's 16 kHz afterwards; mono is duplicated into both slots because the MAX98357A averages (L+R)/2 in its default SD mode and a mono-left stream would play at half volume, the same trap `sound_init()` already records for the beep. The rate change is audible rather than merely correct in a register: the log shows `play 16000Hz` then `play 44100Hz`, and the operator reported the second `sounded better`. THREE BUGS WERE CAUGHT BEFORE THIS CODE RAN AND ONE AFTER. Before: the path was handed to the task as a pointer to the caller's stack, so a command's argv would be freed before the task read it; a partial I2S reconfiguration was not undone on failure; and `wav.c` was missing from the build list, which the linker caught rather than review. After, and the one worth carrying: the first attempts logged only `no file`, which made a wrong path, an unreadable file and an unmounted filesystem indistinguishable and cost several rounds of guessing. `strerror(errno)` turned that into `open: No such file or directory` immediately, which is how the real path was found -- the shell's `~` is `/fs/root` in VFS terms, not `/home/root` and not `/`. A diagnostic that says what failed without saying why is a diagnostic that invites guessing, and this cycle spent several rounds proving it. A FLAW IN THE TEST SETUP IS RECORDED TOO: `test_wav.c` `#include`s `wav.c`, so CMake had no dependency on it, ninja reported `no work to do`, and a negative control silently tested a stale build. Fixed with `OBJECT_DEPENDS` on both include-style tests and verified by touching the source and watching the object rebuild; without that, a control can appear to fail for the right reason while checking nothing. The SD card route is worth recording as method: SFTP on this watch manages about 3 KiB/s, which is four hours for this track and never completed even a 96 KiB clip in the time allowed, so the card was written from a host card reader and every file verified by md5 against its source before the watch saw it. `api/tinydesk.api` is UNCHANGED at 701 declarations, because the player is port-internal -- unlike the taskbar edge and the thermistor temperature, this needs no author conversation. The host suite is 40 of 40, the firmware builds clean under `-Werror`, and only the app region at 0x10000 was written with the hash verified. The required `core-syntax.md` audit was run against the whole `.ai/` diff, which is this entry alone: `core.md` was untouched, the entry follows the six-section template and the canonical order, its number is the highest present plus one at 33, and Status uses `PASS` for the user test because the operator confirmed the audio on the glass.
+
+#### Next Steps:
+
+What is left on audio is a decision rather than a repair: the player is a shell command, so it belongs to the Terminal and cannot be reached from the desktop, and the two shapes worth considering are a Start-menu extra that plays a fixed file and a small app that lists what is on the card and plays a selection. Neither is needed to call this done. Two limitations are worth stating plainly rather than letting them look like bugs later. There is no pause, no seek and no volume control: `play` starts a file, `play stop` ends it, and the only way to change the track is to stop and start again. And the sampling formats are deliberately narrow -- 16-bit PCM only, one or two channels, 8 to 96 kHz -- which covers everything a normal converter produces and silently refuses 24-bit, float and multichannel rather than playing them wrong; the log says `fmt%d %db %dch %lu` when it refuses, so the numbers are there to be read. A fresh backup is due, since `working-2026-11-12-1045.bin` predates the player entirely. Everything else is unchanged and unblocked: the thermistor reads in degrees and its conversion has three negative controls; the taskbar edge is settable and left defaulting to bottom at the operator's direction; both pushers work and both send Enter; the display's tearing-effect line is configured and unread; the screen reader lives in the fork under `tools/`; and the unbuilt outboard parts are as they were -- the BHI260AP at 0x28 answering and undriven, the LoRa radio needing ALDO3 and XL9555 P05, the NFC reader needing DLDO1, and the GNSS and microphone with no code. The standing queue is otherwise as it was: the bell seam parked with its finding recorded, the top margin as the last unpainted region, the full-screen margin question, Store installs to the card and the image cache, the two untested port overrides, the unexercised RTC write path, and the pre-existing YAML fence defect in `core-reference.md`.
+
+#### Files Modified:
+
+- ports/twatchultra/main/wav.c
+- ports/twatchultra/main/wav.h
+- ports/twatchultra/main/sound.c
+- ports/twatchultra/main/sound.h
+- ports/twatchultra/main/link_twatch.c
+- ports/twatchultra/main/CMakeLists.txt
+- tests/test_wav.c
+- CMakeLists.txt
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: PASS
+
+---
+
 ## 32 COMMIT Unreleased 2026-11-12T10:50:49-07:00
 
 #### Coming From:
