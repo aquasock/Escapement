@@ -1,205 +1,153 @@
-# Handoff — Escapement, 2026-11-11T01:45
+# Handoff — Escapement / TinyDesk on T-Watch Ultra, 2026-11-12T01:10
 
-Linux 7.2.4 on a T-Watch Ultra (ESP32-S3). Real Linux on the watch's own Xtensa
-cores, not emulated. This file is orientation; verify before acting on it.
+Linux on a watch was parked. The live work is a **TinyDesk port** at
+`~/GIT/tinydesk-twatch`, branch `t-watch-ultra`. This file is orientation;
+**verify before acting on it.**
 
-## Where things stand, in one line
+## One line
 
-**The emulator works and is fast. The board reboots or freezes during long runs
-with it, and that is unresolved.** Everything else is done.
+**The desktop works: 40x26, three painted touch margins that buzz and beep, an
+SD card, a battery line in System Monitor, and a backup that verifies.** What is
+left is polish and a conversation with TinyDesk's author.
 
-Verified on the glass, 2026-11-11 ~00:30:
+## Two repositories, both clean and pushed
 
-```
-buttons      tamacore -t: pin changes applied by core 0: 0 -> 2, PASS
-menus        operator: status is good (the old 0.52x is gone)
-frames       1416 published, 1416 blitted over 90 s (~15.6 fps)
-guest rate   3,998,834 emulated cycles/s against a 4,000,000 target
-jitter       8 ms worst frame
-```
+- **Fork** `~/GIT/tinydesk-twatch`, branch `t-watch-ultra`, HEAD `ed3f88f`.
+  `fork` remote = `aquasock/tinydesk` (push here). `origin` = upstream
+  `tinydesk-project/tinydesk` — **never push there**.
+- **Escapement** `~/GIT/Escapement`, branch `main`, HEAD `19ad9c4`.
+  The Linux project, parked. Its last *code* commit is `8645a82`; everything
+  after it is `.ai/core-log.md` entries.
 
-Graphics are currently **5 px dots with a 1 px gap** (293x293 LCD, 301x301
-frame). `SHM_DOT`/`SHM_GAP` in `shmproto.h` are the only knobs; set the gap to 0
-for the true-hardware look and the frame size follows.
+## Permissions and limits
 
-## The open bug — read this before anything else
+- Push only to `aquasock` repos. Never to `tinydesk-project/tinydesk`.
+- `.ai/core.md` is RESTRICTED: read it, never edit it without being asked.
+- No sub-agents, no goals (`.ai/core.md`).
+- A `core-syntax.md` audit is owed after any `.ai/` change.
+- `board.conf` is gitignored — the SD/audio wiring exists only on this machine.
 
-Symptom: with `tamacore` running, the board **freezes** (Linux stops answering,
-screen stays) or **reboots** (`ESP_RST_INT_WDT`, reason 5) within a few minutes.
-The operator reports it most reliably **when the pet hatches** and when opening
-the **status screen / menus** — the moments with large display updates.
+## Verified on the glass tonight
 
-What has been **ruled out**, by measurement:
+- **Margins**: left column `F10 Esc F6 Super+D F11` (rotated, reads top-to-bottom,
+  upright from the right-hand edge), bottom strip `Tab Enter Ctrl+Q`, right column
+  reserved + four arrows. Dark grey faces, violet 2px border, terminal-green labels.
+  Every button buzzes on press (DRV2605) and every bottom/side press fires a key.
+- **Haptics**: `DRV2605 lib1`, confirmed felt.
+- **Battery**: System Monitor shows `Battery: 100%  4.17 V full`, from the
+  AXP2101 gauge. 4170 mV agrees with the recorded 4181 mV.
+- **BEL / speaker**: `py -c "print(chr(7))"` in the Terminal beeps. Log shows
+  `twatch-sound: beep 16000/16000 ok`.
+- **Escape** no longer opens the Start menu on a bare desktop; Enter and F10 do.
+- **SD card**: 29 GB and 128 GB FAT32 cards both mount at `/sd`, read and write,
+  and appear in Files as `sd/`.
 
-- Not memory. NOMMU Linux has no OOM killer; 256 s idle showed 1328 kB free.
-- Not the host console. It reboots with no USB traffic and with telnet banned.
-- Not the dirty-frame cache flush alone: bounded to 16-row chunks, longest
-  single `esp_cache_msync` measured at **1.6 ms** against an 800 ms watchdog
-  (`SHM_PAINT_ROWS`).
-- Not core 0 starving. The diag block's `phase` field, which survives a reset,
-  read **IDLE** after a freeze — core 0 was healthy, with a 116 ms worst gap
-  between frames. **Core 1 is what dies.**
-- Not core 1 dying inside the blit: `c1_phase` also read IDLE, and `c1_beat`
-  had stopped at a plausible value (the heartbeat was ticking until the end).
+## Verified by tool output, not by eye
 
-What **has** been established, and is a real fix:
+- Host suite **38 of 38**, including `test_twatch_edges` (1,536 checks) and
+  `test_vterm`'s BEL tests (44 checks).
+- Backup `~/twatch-backup/working-2026-11-12-0109.bin`, 16 MiB, sha256
+  `721ff576…`, **`verify_flash` digest matched** — the board is held in the
+  bootloader across read and compare, so the check is real.
 
-**A flash write reboots this board.** Reproduced with the emulator stopped:
-`write 1 KB to /home` survives; `write 32 KB to /home` reboots with reason 5.
-Fixed by chunking (below), after which 32/64/128 KB writes all complete and the
-longest single flash call measures **55.6 ms**.
+## The hardware facts that cost the most
 
-**A flash write *while the emulator runs* is the fatal combination.** Core 0's
-flash path turns the external-memory cache off for the whole chip, and this
-kernel executes from PSRAM with **no cache of its own** — so core 1 dies if it
-executes anything during that window. A flash write alone survives (core 1 is
-parked waiting for the response); the emulator alone survives; together they
-reset it. Hatching a pet did exactly that: the save changed, so the loop wrote
-it mid-play. **`tamacore` no longer writes the save while playing — only once on
-exit.**
+All in `.ai/core-reference.md`; the ones that matter:
 
-**Still unexplained, and the next thing to chase:** the board still freezes
-during long runs. The suspicion is a cache-disabling flash operation taken by
-some core-0 task that is *not* `linux_flash.c`. To answer it, an instrument was
-added at the only place that catches every caller —
-`spi_flash_disable_interrupts_caches_and_other_cpu()` in esp-idf — armed at the
-Linux handoff. **It was flashed but never read after a freeze.** That is step 1.
+- **The SD card's bus is shared with LoRa (CS 36) and NFC (CS 4).** Every other
+  CS must be parked HIGH or it drives MISO and corrupts SD transactions. This
+  is what "the second SPI bus never worked" actually was.
+- **The touch reset is expander pin 8.** Pin 10 is `EXPANDS_SD_DET` — the card's
+  insert switch — and this port used to drive it as an output.
+- **Rails**: ALDO1 = SD (`0x92`), ALDO2 = display (`0x93`), BLDO2 = speaker
+  (`0x97`), enables are bits 0/1/5 of `0x90`. Haptic rail is XL9555 P06.
+- **Touch panel is not a pointer on the desktop**; a press on the framebuffer
+  does nothing. A full-screen app gets it back via `td_wm_app_owns_screen()`.
 
-### Step 1: read the flash instrument
+## Method that found the bugs
 
-After a freeze, reset (PSRAM survives; the firmware snapshots the dying record
-into `SHM_DIAG_PREV_OFF` before clearing) and read:
+**Sweep pure functions over their whole input space against a second
+implementation.** `tests/test_twatch_edges.c` did that for the margin geometry
+and caught three faults. And **render the shapes at 1:1 on the host before
+flashing** — `display.c` cannot compile on a host, so this is the only check the
+painter gets.
 
-```sh
-cd /run/media/vash/GIT/Escapement
-./scripts/watch-exec.py 'dd if=/proc/esp-shared bs=4 skip=114756 count=3 2>/dev/null | od -An -tu4'
-```
+## Open, in order of cost
 
-Offsets (`0x70110/0x70114/0x70118`, i.e. dword 114756 onward):
+1. **`board.example.conf` still calls the SD keys unproven.** They now work. That
+   note is wrong and a clean checkout reads it as current.
+2. **`td_vterm_t.bell` is probably redundant** — `td_sysinfo_t.bell` is the path
+   that works. Both exist as a debugging hedge. Revisit rather than defend.
+3. **Three API additions for the author conversation**: `td_sysinfo_t.bell()`,
+   `td_sysinfo_t.batteries()`, `td_vterm_t.bell`. All minor under `STABILITY.md`.
+   `TD_VERSION` was deliberately **not** bumped — that is the author's call.
+4. **The top margin** is the last unpainted region, inert as `EDGE_TOP`, meant
+   for status icons.
+5. **Deferred by the operator**: what the margins should do when an app owns the
+   whole screen. Waiting for something to actually go full screen.
+6. **Hot-plug is untested both ways.** `sd.cd` is not configured, so removal is
+   detected by polling. Pin 10 is the insert switch and now free.
+7. **Store installs to SD and the image cache** have never run against a card.
+8. **Untested port overrides**: `TD_SIZE_POLL_MS=0`, `TD_ACK_TIMEOUT_MS=0`.
+9. **RTC write path** compiles and is called, never exercised by setting a time
+   and power-cycling.
+10. **Pre-existing YAML defect** in `.ai/core-reference.md`: a code fence after
+    the last record stops the sequence parsing as one document. Records can only
+    be validated individually.
 
-- **call count** since Linux came up
-- **caller return address** of the most recent call
-- **marker** `0x45534331` ("ESC1") once armed
+## Traps that will cost time if forgotten
 
-A **non-zero count that grows while the emulator runs** is the answer: something
-is writing flash during play. Map the return address with
-`xtensa-esp32s3-elf-addr2line -e build/esp-hosted/esp_hosted_ng/esp/esp_driver/network_adapter/build/network_adapter.elf <addr>`.
-A **zero count** rules flash out entirely and the death is elsewhere on core 1 —
-in which case go after the shmem/IPC path next.
+- **`CONFIG_ESP_CONSOLE_NONE=y`** — `ESP_LOG` reaches **nothing** on USB. Log
+  lines exist only in the desktop's 64-line Log Viewer ring. A missing boot line
+  is not evidence of a fault. `board_log_rails()` exists because preinit lines
+  are always scrolled away before anyone can read them.
+- **`sdkconfig` is generated and gitignored.** A config change only there is
+  lost on a clean checkout. Put it in `sdkconfig.defaults` and **delete
+  `sdkconfig`**.
+- **esptool 4.13 cannot chain commands.** `read_flash … verify_flash` is refused;
+  it must be two invocations with `--after no_reset` then `--before no_reset`.
+- **`screen /dev/ttyACM0` blocks flashing.** Check `fuser /dev/ttyACM0` first.
+- **Native USB re-enumerates on reset**, so boot logs are lost. To read the
+  desktop, send `Ctrl+L` (full repaint) and decode into a **fresh** screen model.
+- **The shell drops the first character** typed into a freshly focused Terminal.
+- **`td_vterm_init()` clears the struct** but preserves `reply` and now `bell`.
+  Anything else installed there is wiped by `td_terminal_reset()`.
 
-### Step 2: candidates if the count is non-zero
+## Reading the desktop from the host
 
-- `/etc` and `/home` are jffs2. Anything that touches them during play: the save
-  (already stopped mid-play), dropbear keys, the BLE bond (`bond.c` — the
-  firmware only *reads* it, but Linux writing it is a writer).
-- **Treat "no flash I/O while the emulator runs" as an invariant**, not a
-  workaround.
+`/tmp/td/grid.py` is an ANSI screen model. The working pattern, used all night:
 
-## What was fixed this session
+1. open `/dev/ttyACM0` at 115200
+2. write keys (`\x1b[21~` = F10 for the Start menu, `\r` = Enter)
+3. send `\x0c` (Ctrl+L) to force a full repaint
+4. feed the bytes into a **new** `Screen(40,26)` and print
 
-- **Flash chunking** (`linux_flash.c`, `patches/harness/core0/0003-*`): requests
-  split into 4096-byte pieces with the skip-ipc flag dropped between them, so
-  each uninterruptible window is bounded however large the write is.
-- **Save written only on exit** (`userspace/tamacore.c`) — see above. Cost, and
-  it is real: progress since launch is lost if the watch dies or the battery is
-  pulled.
-- **Cache operations bounded to 16 rows** (`SHM_PAINT_ROWS`), which took the
-  longest single cache operation from one 181 KB flush to 1.6 ms, and let core 0
-  publish only the rows it changed (`dirty_lo`/`dirty_hi`) and skip frames where
-  display RAM did not change at all.
-- **The i2c chatter** (`patches/kernel/i2c/final/i2c-esp32.c`): the driver read
-  `espressif,debug` and then ignored it in the `DBG`/`DBG_OK` macros, so every
-  boot printed 30 `ok addr=..` lines. Both conditions are now required. 39 lines
-  → 1. Register read-back dumps demoted to `dev_dbg`; re-enable with
-  `echo 'file i2c-esp32.c +p' > /sys/kernel/debug/dynamic_debug/control`.
-- **fbcon yields the framebuffer** — `tamacore` unbinds `/sys/class/vtconsole`
-  and restores it on every exit path. That was the flickering black bands.
-- **`tamacore` is an ordinary program**, not a boot service:
-  `./scripts/install-tamacore.sh` puts it in `/home` and adds `/home` to `PATH`
-  via `/etc/profile.d/home-path.sh`. Type `tamacore`, Ctrl-C stops it. There is
-  deliberately no `/etc/init.d` entry.
-
-## Traps that cost real time — do not repeat these
-
-- **`/home/vash/Desktop/passwd.txt` is the watch password.** It must live at
-  `~/.config/escapement/watch-pass` (mode 600) or every `watch-exec.py` /
-  `usb-send.py` sits at `login:` forever. That cost most of an evening.
-- **Cancelled console commands leave `python3` holding `/dev/ttyACM0`.** Kill
-  them (`pkill -f scripts/watch-exec.py`) or every later deploy hangs. Check
-  with `fuser /dev/ttyACM0`.
-- **Do not use telnet.** The user has ruled it out; USB works.
-- **`--after no_reset` leaves the chip in the bootloader.** Follow every flash
-  with `--after hard_reset read_mac` or the board appears dead.
-- **PSRAM is not zeroed at power-on.** Any field read as a *maximum* must be
-  cleared or it holds `0x55555555` and no real value can ever beat it. Three
-  separate instruments lied this way. Clear once per **boot**, never per
-  session — clearing per session destroyed the crash record twice.
-- **`esp_cache_msync` rejects a size that is not a whole number of 32-byte
-  lines**, and the error is easy to ignore. Any struct passed to it must satisfy
-  a static assert.
-- **Core 0 has a D-cache, core 1 has none.** Any field both sides write must sit
-  in its own cache line or core 0's writeback restores its stale copy over
-  core 1's fresh data.
-
-## Reconstruct
-
-1. `git log --oneline -6` — `main` at `32304ee`, clean and fully pushed to
-   `aquasock/Escapement`.
-2. `git -C build/esp-hosted/esp_hosted_ng log --oneline -2` — local only. **That
-   tree is never pushed** (origin `jcmvbkbc/esp-hosted`), and its nested
-   `esp-idf` submodule carries the flash instrument.
-3. `./scripts/sync-firmware.sh --check` — should say the firmware tree matches.
+`/tmp/sd/drive.py` has this wrapped in a `Desk` class. **It lives in `/tmp`** —
+worth moving into the repo.
 
 ## Build and flash
 
 ```sh
-export IDF_TOOLS_PATH=$PWD/build/idf-tools
-source build/esp-hosted/esp_hosted_ng/esp/esp_driver/esp-idf/export.sh
-./scripts/sync-firmware.sh
-ninja -C build/esp-hosted/esp_hosted_ng/esp/esp_driver/network_adapter/build
-
-./scripts/build-tamacore.sh          # core 1 half
-./scripts/build-kernel.sh            # or incremental make in build/kernel/linux-7.2.4
-
-PY=build/idf-tools/python_env/idf5.1_py3.14_env/bin/python
-$PY -m esptool --chip esp32s3 --port /dev/ttyACM0 --baud 921600 --after no_reset \
-  write_flash --flash_mode dio --flash_freq 80m --flash_size 16MB \
-  0x10000 build/esp-hosted/esp_hosted_ng/esp/esp_driver/network_adapter/build/network_adapter.bin \
-  0x140000 build/kernel/linux-7.2.4/arch/xtensa/boot/xipImage
-$PY -m esptool --chip esp32s3 --port /dev/ttyACM0 --after hard_reset read_mac
-
-./scripts/watch-deploy.sh --usb tamacore
+cd ~/GIT/tinydesk-twatch/ports/twatchultra
+export IDF_PATH=$HOME/esp/esp-idf-5.3.1 IDF_TOOLS_PATH=$HOME/esp/idf-tools
+. $IDF_PATH/export.sh && idf.py build && idf.py -p /dev/ttyACM0 flash
 ```
 
-`space_for_vectors` must equal `0x40380000`; it moves if firmware internal-RAM
-use changes.
+Host suite: `cmake --build /tmp/tdtest -j8 && cd /tmp/tdtest && ctest`
 
-## Reference
+Backup: `cd ~/GIT/Escapement && ./scripts/watch-backup.sh`
+(reads and verifies in one go; ~4 minutes + ~4 for the verify)
 
-- Window `0x3df00000..0x3e000000`. ctl `0x0`, frames `0x1000`/`0x30000`, EEPROM
-  `0x60000`, ROM `0x80000`, diag `0x70000`, diag PREV copy `0x70100`,
-  flash instrument `0x70110`.
-- Control block: stage 8, rom_ready 32, eeprom_ready 36, buttons 44, quit 48,
-  session 52, frame_seq 64, frame_idx 68, frames 72, guest_hz 76,
-  dirty_lo 96, dirty_hi 100, reset_reason 112, boot_count 116.
-  Contract: `patches/harness/core0/shmproto.h`.
-- Diag block (dword index from `114688`): magic 0, version 1, phase 2, frames 3,
-  draw_us 4, gap_us 7, draw_max 8, gap_max 11, total_max 12, chunk_max 13,
-  flash_max 14, flash_last 15, c1_beat 16, c1_phase 17, c1_blit_max 18,
-  c1_last_us 19, c1_frames 20. PREV copy at dword `114752`.
-- Backups in `~/twatch-backup/`: `working-2026-11-11-0005.bin` (sha256
-  `0248b818…`, current, taken after the 5x5 build), `working-2026-11-10-2239.bin`
-  (pre-4x), `twatch-factory-16MB.bin`.
-- Numbers: 4.0 MHz guest · 16 fps · LCD 293x293 · frame 301x301 / 181,202 B ·
-  chunk 16 rows → 9,632 B · strip 192,640 B · longest cache op 1.6 ms · longest
-  flash call 55.6 ms · longest pwrite 122 ms.
-- Deferred, do not start without asking: BLE media keys, Rii K06 touchpad,
-  Logitech keyboard, firmware BLE bond persistence, wake-from-sleep.
+## Reference material read this session
 
-## Housekeeping left undone
+- LilyGo's firmware: cloned to `/tmp/lilygolib` — `src/LilyGoWatchUltra.cpp`,
+  `src/audio/AudioDevice.cpp`, and **`schematic/T-Watch Ultra V1.0 SCH
+  25-07-24.pdf`** (page 5 has the amplifier).
+- Their haptic driver: `lewisxhe/SensorLib`, cloned to `/tmp/sensorlib`.
+- Pin map: `arduino-esp32/variants/lilygo_twatch_ultra/pins_arduino.h`.
 
-`/home` on the watch is 74% full, and 384 KB of that is a leftover `frame.ppm`
-debug capture plus two obsolete emulators (`tamafb`, `tamafb-1x`, ~510 KB) that
-`tamacore` replaced. Deleting them would cut jffs2 garbage-collection pressure —
-which matters because GC is itself a flash operation, i.e. exactly the class of
-thing that seems to trigger the reboots. **Ask the user before deleting.**
+## Log state
+
+`.ai/core-log.md` has **14 entries** (the post-rollover log, opened 2026-11-11).
+Entries 1–100 are archived at `archived_logs/core-log-2026-11-11-2223.tar.gz`.
+Do not read other archives without the operator's approval.

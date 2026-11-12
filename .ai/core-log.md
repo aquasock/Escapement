@@ -1,3 +1,33 @@
+## 15 COMMIT Unreleased 2026-11-12T01:14:51-07:00
+
+#### Coming From:
+
+Unreleased 19ad9c4
+
+#### Purpose:
+
+Capture a full backup of the state at the end of this run of work, and write the handoff a fresh session needs to continue.
+
+#### Outcome:
+
+`~/twatch-backup/working-2026-11-12-0109.bin` is the current recoverable state, 16 MiB read at 575.7 kbit/s in 233.1 seconds, sha256 `721ff576453cc232c245f2dfcb9985d61da956772230ccae15709fb319fabc81`, and it is the first backup whose integrity check is a real one: `verify_flash` reported digest matched, because `scripts/watch-backup.sh` now holds the board in the bootloader from the first byte of the read to the last byte of the compare. Three further checks confirm the image is the current build rather than an older one: the 2,559,808-byte app region at 0x10000 is byte-identical to the `tinydesk.bin` this machine built, both hashing to `b2247146`; both image magics are 0xe9; and the storage partition holds 1,993 non-empty 4K blocks, five more than the last backup, which is the NVS writes this evening's session produced. The read's trailing reset left the board quiet enough that the first probe found no output, and an explicit `esptool run` brought the desktop back -- worth recording because "no output on USB" is normal on this build for the reason entry 14 gives, and the distinction between that and a board stuck in the bootloader is whether a reset produces terminal sequences. `.codewhale/handoff.md` was rewritten for a fresh agent, replacing a file that still described the parked Linux project. It states the two repositories and which remote may be pushed to, the restrictions from core.md, what was verified on the glass tonight, what was verified only by tool output, the hardware facts that cost the most to learn, the method that found the bugs, ten open items in order of cost, and the traps that will cost time -- among them that ESP_LOG reaches nothing on USB, that sdkconfig is generated and a change only there is lost, that esptool 4.13 cannot chain commands, that the shell drops the first character typed into a freshly focused Terminal, and that the host screen reader lives only in /tmp. It also records the three API additions this fork now carries so that the TinyDesk author conversation starts from a list rather than a recollection. Nothing in either repository changed except that handoff file and this entry; the build and deployment fields are N/A because this cycle flashed nothing, and the user test field records the operator's instruction that the run was finished for the night rather than a hardware acceptance of anything new.
+
+#### Next Steps:
+
+The ten open items in the handoff are the work queue and the first three are the ones a fresh session should take: correcting `board.example.conf`, which still calls the SD keys unproven when they work; deciding whether `td_vterm_t.bell` should be kept now that `td_sysinfo_t.bell` is the path that actually works, since both exist only as a debugging hedge; and taking the three API additions to TinyDesk's author together rather than one at a time, remembering that `TD_VERSION` was deliberately not bumped because that is the author's call. After those, the top margin is the last unpainted region and is meant for status icons. Two things are untested rather than unknown and should be said that way: the SD card's hot-plug has never been exercised in either direction, because `sd.cd` is not configured and removal is detected by polling the card rather than by the insert switch, and the Store's install-to-SD path and the image cache have never run against a card at any capacity. The deferred question of what the margins should do while a full-screen application owns the screen waits for something to actually go full screen. Also carried forward: `scripts/watch-backup.sh` now verifies properly but the backup itself is only as good as the moment it was taken, so the next risky change wants a fresh one; the RTC write path remains written but unexercised; and the pre-existing YAML defect in `.ai/core-reference.md`, where a code fence after the last record stops the sequence parsing as one document, is untouched. The Linux side stays parked; its last code commit is 8645a82 and everything after it in this repository is the project log.
+
+#### Files Modified:
+
+- .codewhale/handoff.md
+
+#### Status:
+
+- Build: N/A
+- Deployment: N/A
+- User Test: PASS
+
+---
+
 ## 14 COMMIT Unreleased 2026-11-12T01:08:34-07:00
 
 #### Coming From:
