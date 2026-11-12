@@ -1,3 +1,34 @@
+## 94 COMMIT Unreleased 2026-11-11T21:36:49-07:00
+
+#### Coming From:
+
+Unreleased 572b627
+
+#### Purpose:
+
+Record the coordinate-space fault that made the left margin buttons dead while the bottom strip worked, and the sweep that reproduces it without a finger.
+
+#### Outcome:
+
+At 6272612 on branch `t-watch-ultra`, `edges_hit()` takes panel coordinates and converts to the controller's space with `PANEL_COL_OFFSET` before comparing against its bounds. The fault was one omission and the symptom was reported as "the left panel buttons dont seem to register at all" while the bottom three worked, which is what made it look like two problems rather than one: both margins share a single hit test. The two spaces are not the same and differ by axis. The touch controller reports the visible glass, 410 columns, which is what TCH-006's 410x502 resolution actually means; the panel's controller RAM is 432 columns wide with the glass beginning at RAM column 22, which is what `PANEL_COL_OFFSET` has always been for on the painting side. So panel x is controller x minus 22, and panel y is controller y, because the RAM is wider than the glass and not taller. The header asserted the opposite -- "the touch part reports 410x502 exactly, so no conversion is needed on that side at all" -- so the painter went on using the right numbers and the hit test went on using them against the wrong space. The arithmetic explains both reports exactly. The left column is painted at controller 22 to 66, which is panel 0 to 44, and the test required panel x of at least 22, so the outer half of the column -- where a thumb lands -- did nothing at all. The bottom strip is painted at controller 67 to 386, which is panel 45 to 364, and was tested at 67 to 386, a 22-column shift that still lands on a 320-wide strip most of the time; that is why it read as working. Rather than fix it by inspection, a sweep was written that walks all 205,820 points of the glass and compares `edges_hit()` against a reference classifier written independently in controller coordinates. Against the code as shipped it reports 30,250 region disagreements, with the left column resolving on 9,568 of its 18,720 painted points, 51 per cent dead, and the strip on 12,218 of 13,120, 93 per cent live. Those two figures are the operator's report in numbers, produced without touching the hardware, which is the value of the exercise: a hit test is pure arithmetic and does not need a finger to be wrong. After the fix the sweep reports no disagreements of region or index, every button face resolves to its own index, and the per-margin counts are 18,720 of 18,720 and 13,120 of 13,120. Edge presses now log one short line, `e<region> i<index>`, because the three ways a margin button can fail are indistinguishable on the glass: no line means the press was not on an edge, `e0` means the region was classified but not the button, and a plausible line with the wrong action means the index. It is short because the Log Viewer is 40 columns and truncates silently. Verified: sweep clean, host suite 37 of 37, flashed and hash-confirmed in four sections. The finger test is the operator's, and this cycle's evidence for the fix is the sweep rather than a reading from the glass.
+
+#### Next Steps:
+
+The five left duties and the back button need checking on the glass one at a time now that they should reach the desktop at all, and the press log makes each one attributable. The right column is still a live touch region with nothing painted in it and should be painted next, in the same green and with the same corner treatment. The top margin is classified in `edges.h` as `EDGE_TOP` and inert, intended for status icons. Two open questions from earlier remain: Esc on a bare desktop opens the Start menu, which was sensible while Enter and Esc were a keyboard pair for the icon grid, and the margin buttons stay painted while a full-screen application owns the screen where they are no longer buttons. Also open: the parked redraw fault from entry 74, the two port overrides `TD_SIZE_POLL_MS=0` and `TD_ACK_TIMEOUT_MS=0` still untested against the current tree, and the RTC write path written but not exercised. Worth carrying forward as method rather than as a fact: this fault was found by sweeping a pure function over its whole input space and comparing against a second implementation, which is cheaper and more complete than probing points on the glass, and it would have caught the off-by-one in the slot inverse from entry 92 as well. The Linux side stays parked; its last code commit is 8645a82 and everything after it in this repository is the project log.
+
+#### Files Modified:
+
+- ports/twatchultra/main/edges.h
+- ports/twatchultra/main/touch.c
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: PASS
+
+---
+
 ## 93 COMMIT Unreleased 2026-11-11T21:27:12-07:00
 
 #### Coming From:
