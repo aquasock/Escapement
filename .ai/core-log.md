@@ -1,3 +1,33 @@
+## 41 COMMIT Unreleased 2026-11-12T13:57:13-07:00
+
+#### Coming From:
+
+Unreleased 0b2141a
+
+#### Purpose:
+
+Record the operator's hardware test of `gps time`, which entry 39 left marked NOT RUN.
+
+#### Outcome:
+
+The operator ran `gps time` on the watch and reports it working, with the system clock already correct before the command ran, so the correction applied was zero seconds. That detail is worth more than a bare pass because it is independent corroboration of the mechanism rather than of the command: a clock that was already right when the command ran means the time written by an earlier correction had survived in the PCF85063A and been seeded back at the last boot, which is the write-through path GPS-005 claims and which this cycle now has from a second observer. It also closes the one status entry 39 could not honestly fill: that entry recorded the user test as NOT RUN because every reading in it was taken by this agent over USB, which was accurate at the time and remains accurate as history, so it was not amended -- rewriting a pushed entry to look better-informed than it was is a worse record than adding the confirmation beside it. Nothing was built, flashed or changed; both repositories were clean and pushed at `0b2141a` and `50d047d` before this entry, and the recoverable image `working-2026-11-12-1352.bin` describes the same firmware the operator exercised. The required `core-syntax.md` audit was run against the complete `.ai/` diff, which is this entry alone: `core.md` was untouched; the entry follows the six-section template and the canonical order; its number is the highest present plus one at 41; Files Modified reads `None.` because the cycle changed no engineering file; and Status records the user test as PASS on the operator's own report while build and deployment remain `N/A` because nothing was compiled or written.
+
+#### Next Steps:
+
+`gps time` is now verified by both parties and the remaining question on it is a decision rather than a defect: the command must be typed, so a watch taken outdoors and reset comes back with whatever the chip last held until somebody asks the receiver. Running it automatically at boot is a trade of a few seconds and tens of milliamps on every start against a clock that is always right, and the cheaper shape is a Settings checkbox or a single invocation from the shell's start-up path -- either way it is the operator's call, not a default this port should assume. Everything else is unchanged and unblocked. NFC is parked at the operator's direction with the re-read storm deliberately kept, and its three established facts stand: the capability container is at offset 12, the tag is an NTAG213 with `e1101200` and 126 free bytes, and `ndefPollerCheckPresence()` blocks for ever once a tag is lifted. The GNSS receiver's UBX side remains unexplored -- MON-VER goes unanswered, constellation configuration is untouched, and C/N0 is not extracted from GSV -- and a fix is still untested because it needs sky. The taskbar edge is settable and left defaulting to bottom; the thermistor reads in degrees; both pushers work and both send Enter, with F10 on the BOOT pusher the shape I would still argue for; audio plays WAV files from the card; the display's tearing-effect line is configured and unread; and the remaining outboard parts are the BHI260AP at 0x28 answering and undriven, the LoRa radio needing ALDO3 and XL9555 P05, and the microphone with no code. The standing queue is otherwise as it was: the bell seam parked with its finding recorded, the top margin as the last unpainted region, the full-screen margin question, Store installs to the card, and the two untested port overrides.
+
+#### Files Modified:
+
+None.
+
+#### Status:
+
+- Build: N/A
+- Deployment: N/A
+- User Test: PASS
+
+---
+
 ## 40 COMMIT Unreleased 2026-11-12T13:55:09-07:00
 
 #### Coming From:
