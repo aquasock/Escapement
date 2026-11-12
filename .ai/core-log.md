@@ -1,3 +1,43 @@
+## 12 COMMIT Unreleased 2026-11-12T00:19:17-07:00
+
+#### Coming From:
+
+Unreleased 95591b2
+
+#### Purpose:
+
+Record the speaker probe: a BEL from the terminal driving the MAX98357A, which is the first time anything on this project has touched that amplifier.
+
+#### Outcome:
+
+At dd73478 on branch `t-watch-ultra`, `py -c "print(chr(7))"` in the Terminal emits a BEL that reaches the speaker amplifier, and the whole software chain reports success: the boot log carries `PMU bldo2_v=1...`, `twatch-sound: i2s 16000Hz b...` and `link_twatch: sound on`, with no write failure from the beep. Whether a sound is actually audible is not something this session can establish; that is the operator's to report. The port's shape came entirely from LilyGo, because theirs is the only code that has ever driven this part: `AudioOutputDev::begin()` in LilyGoLib's `src/audio/AudioDevice.cpp` gives I2S master TX, 16-bit samples, four DMA buffers of 1024, `tx_desc_auto_clear`, and pins bclk 9, ws 10, dout 11, and `LilyGoWatchUltra.cpp` raises the supply in its PMU bring-up as `setVoltage(CH_BLDO2, 3300)` and `enable(CH_BLDO2, true)` beside the display's ALDO2 and the card's ALDO1. BRD-003 independently records BLDO2 as the speaker's rail, so the two agree. Two departures were necessary. LilyGo has no tone generator at all -- their audio path plays WAV files -- so a square-wave generator was written: 1 kHz for 80 ms, sixteen samples per period at 16 kHz, which is what an IBM PC speaker was and needs no filter or table. And LilyGo uses the legacy `i2s_driver_install()`; ESP-IDF 5.3.1 keeps `driver/i2s.h` only under `components/driver/deprecated`, so this uses `i2s_std` with `i2s_new_channel`, `i2s_channel_init_std_mode` and `i2s_channel_enable`, with the same settings and a mono slot where LilyGo used ALL_RIGHT. THE BEL HOOK IS THE ONE SHARED-CODE CHANGE IN THIS CYCLE, and it was made deliberately rather than by scanning bytes in the port. `td_vterm_t` gains an optional `bell(void *)` callback beside the existing `dcs`, and `vterm.c` calls it for a BEL in the ground state only. That distinction is load-bearing: an OSC string is terminated by BEL, so a terminal that rang on every 0x07 would buzz every time an application set its window title, which is a bug that would have looked like a spurious beep under load. The alternative -- a shadow scanner in the port that tracked whether it was inside a sequence -- would have duplicated parser state that this project has already watched drift apart twice, and the callback is the same shape the renderer already uses for DCS. It is a struct member appended at the end, which `STABILITY.md` classes as a minor change, so `api/tinydesk.api` is re-recorded and the suite is green at 38 of 38. `TD_VERSION` was NOT bumped: this fork would be claiming an upstream release number and that is the author's decision, not this port's. The ordering lesson from the last three cycles repeated once more and was applied this time before the failure rather than after it: `board_speaker_rail_on()` runs before the I2S channel is created, because a class-D amplifier with its supply down clocks in every sample and outputs silence, which is indistinguishable from a wrong I2S configuration. Where this differs from the haptic and SD cases is that here the symptom would have been "no sound" in a system that has never made sound, so nothing would have been suspected at all.
+
+#### Next Steps:
+
+The operator needs to run `py -c "print(chr(7))"` in the Terminal and say whether a beep is heard. If it is, the hardware is proven and the question becomes what the desktop wants from it, which the operator is already taking to TinyDesk's author: the BEL callback is the whole of what this port offers, and sampled audio would be a new interface rather than a port task, since `td_sysinfo_t` has no sound ops and the public headers have nothing audio-shaped. If it is not heard, the three candidates in order are the rail (the log line reports `bldo2_v` and the enable byte, so it is checkable rather than guessed), the I2S format (a mono slot against LilyGo's ALL_RIGHT is the one deliberate difference, and it is a one-line change), and the amplifier's own SD pin mode, which sets its channel behaviour and is not wired here -- LilyGo leaves it unconfigured too, so if that is the fault it is a shared one. One structural consequence of the shared-code change is worth recording for the author conversation: adding a member to `td_vterm_t` is a minor API bump by this tree's own policy, so the BEL callback cannot land in a 1.x release without one, and an alternative shape the author might prefer -- a function rather than a struct member, or a hook on `td_sysinfo_t` -- would avoid that. Everything else outstanding is unchanged: a fresh backup was taken at 0009 tonight and its `verify_flash` now passes because the script holds the board in the bootloader across the read and the compare; the top margin remains the last unpainted region; the deferred question of what the margins should do under a full-screen application waits for something to go full screen; `board.example.conf` still calls the SD keys unproven and is now wrong; and the pre-existing YAML defect in `.ai/core-reference.md`, where a code fence after the last record stops the sequence parsing as one document, remains. The Linux side stays parked; its last code commit is 8645a82 and everything after it in this repository is the project log.
+
+#### Files Modified:
+
+- ports/twatchultra/main/sound.c
+- ports/twatchultra/main/sound.h
+- ports/twatchultra/main/power.c
+- ports/twatchultra/main/power.h
+- ports/twatchultra/main/display.c
+- ports/twatchultra/main/display.h
+- ports/twatchultra/main/link_twatch.c
+- ports/twatchultra/main/CMakeLists.txt
+- include/tinydesk/td_vterm.h
+- src/vterm.c
+- api/tinydesk.api
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: NOT RUN
+
+---
+
 ## 11 COMMIT Unreleased 2026-11-11T23:57:09-07:00
 
 #### Coming From:
