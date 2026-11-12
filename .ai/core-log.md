@@ -1,3 +1,39 @@
+## 27 COMMIT Unreleased 2026-11-12T09:58:30-07:00
+
+#### Coming From:
+
+Unreleased f1c9da7
+
+#### Purpose:
+
+Put the battery thermistor's voltage on System Monitor, where the cell's temperature can be watched rather than only logged at boot.
+
+#### Outcome:
+
+At `bd0c819` on branch `t-watch-ultra`, System Monitor's battery row reads `Battery:100%  4.17 V full ntc494`, and the reading moves with the cell -- `ntc497` on one read and `ntc494` a few minutes later as it cooled. It sits on the battery line rather than a row of its own because it is the same subject and a 26-row screen cannot spare a row for seven characters; the whole line is 32 of the 38 columns the window shows at this board's grid. MILLIVOLTS AND NOT DEGREES, deliberately: turning the TS voltage into a temperature needs the NTC's nominal resistance and beta plus the excitation current the charger applies, none of which is known here, and PMU-006 records why a plausible number derived from a guessed part number is worse than no number at all. `td_battery_t` gains `ntc_millivolts` appended at the end of the struct, which is the minor change `STABILITY.md` sanctions, and `api/tinydesk.api` was re-recorded at 699 declarations with that one struct line changed and nothing removed; a board with no thermistor reports 0 and its battery line is byte-identical to before, so the addition is free for every other port. `charge_ts_mv()` is new and is the single decoder for registers 0x36/0x37, with `charge_ts_report()` now calling it instead of duplicating the shift -- so the boot line and the twice-a-second tick physically cannot disagree -- and it logs nothing and does nothing else, because a diagnostic per call at that rate would bury the 64-line ring, which is the fault this port has already recorded twice. THE FINDING WORTH CARRYING IS THAT THE SUITE PASSED WITHOUT TESTING ANY OF THIS. `check_controls()` audits only FOCUSABLE widgets and these are labels, so the 40x26 layout pass said nothing about whether the line fits; and nothing in the suite supplied a battery at all, so the thermistor branch had never been rendered by any test -- a green suite that would have stayed green whatever that code did. `tests/test_native_apps.c` now fakes a battery with and without a thermistor and checks both the text and the width at this board's grid, and TWO NEGATIVE CONTROLS EACH FAIL A DIFFERENT ASSERTION rather than the same one twice: formatting no `ntc` at all fails the text check, and a longer label fails the width check at 38 columns, which was verified separately after the first attempt tripped the text assertion and proved nothing about width. Verified on the board rather than only in the host tests: the firmware builds clean under `-Werror`, the app region was written with the hash verified, and System Monitor was read back over USB showing the line with a thermistor value that changed between reads, so the tick path is live rather than a boot-time snapshot. The host suite is 38 of 38. The required `core-syntax.md` audit was run against the whole `.ai/` diff, which is this entry alone: `core.md` was untouched, the entry follows the six-section template and the canonical order, its number is the highest present plus one at 27, and Status uses `PASS` for the user test because the operator reported the feature working.
+
+#### Next Steps:
+
+The thermistor is now visible but still uncalibrated, and that is the next real step rather than a cosmetic one: with the NTC's nominal resistance and beta and the charger's excitation current, `ntc_millivolts` becomes a battery temperature, and then the charger's own temperature protection becomes reportable instead of merely active. Two cheaper things are worth doing first because they need no new part data. Logging the TS voltage alongside each `chg go` and `chg done` would give a temperature history for free from events the driver already handles, and it would put a thermistor reading next to the moment charging starts -- which is the one time the charger's thermal protection matters. And the battery percentage is still unverified above 100, which only draining the watch can settle and which would now be corroborated by the cell temperature falling as the pack empties. A fresh backup remains due and is overdue: `working-2026-11-12-0859.bin` predates the whole charge cycle, both pusher builds' successors, the taskbar option and this row. Everything else is unchanged and unblocked: the taskbar-at-top option is flashed and waiting on the operator's four checks; both pushers send Enter with F10 on the BOOT pusher the shape I would argue for; audio is a beep with no playback path; the display's tearing-effect line is configured and unread; the screen model that reads the Log Viewer over USB is in a temporary directory for the ninth cycle and belongs in the fork under `tools/`; the unbuilt outboard parts are as they were, with the BHI260AP at 0x28 answering and undriven, the LoRa radio needing ALDO3 and XL9555 P05, the NFC reader needing DLDO1, and the GNSS and microphone with no code; and the standing queue is otherwise as it was, including the bell seam parked with its finding recorded, the top margin as the last unpainted region, the full-screen margin question, Store installs to the card, the two untested port overrides, the unexercised RTC write path, and the pre-existing YAML fence defect in `core-reference.md`.
+
+#### Files Modified:
+
+- include/tinydesk/td_sysinfo.h
+- apps/sysmon.c
+- api/tinydesk.api
+- tests/test_native_apps.c
+- ports/twatchultra/main/charge.c
+- ports/twatchultra/main/charge.h
+- ports/twatchultra/main/power.c
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: PASS
+
+---
+
 ## 26 COMMIT Unreleased 2026-11-12T09:50:21-07:00
 
 #### Coming From:
