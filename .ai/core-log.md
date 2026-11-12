@@ -1,3 +1,34 @@
+## 89 COMMIT Unreleased 2026-11-12T13:30:00-07:00
+
+#### Coming From:
+
+Unreleased d07e9aa
+
+#### Purpose:
+
+Record the last app reflowed for the 40x26 grid, and the port reaching the state where every app in the tree fits this board.
+
+#### Outcome:
+
+At f931cd9 on branch `t-watch-ultra`, `apps/datetime.c` fits a 38-column client, and with it `s_narrow_todo[]` in `tests/test_native_apps.c` is EMPTY. That array is the milestone this run of work was aimed at: every app in the tree now passes the 40x26 layout pass with no exemptions, so the check has become a plain regression test at this board's grid rather than a list of known defects. Date and time had "Sync now" and "Change..." at column 40, so the clock could be configured but not actually set, and "12-hour" starting at 30 and reaching 41. A narrow window puts each control on the row of the thing it acts on, at column 1. The array's comment now says what an empty list means and that adding a name to it again would be a statement that an app is broken rather than that it is acceptable. The series as a whole reflowed eleven apps -- Bluetooth, Files, Network, Displays, MQTT, Modbus, Mouse, Keyboard, Users, Store, Recycle Bin, Software Update, Remote Desktop, Settings and Date and time -- from layouts written for 56 to 82-column windows to layouts that fit 38. Two things about method are worth carrying forward. The first is the 40x26 pass itself: adding it to the test suite found three faults the operator and I had both passed on the glass (Files' Delete button, and MQTT and Modbus resolving lists to zero rows), and it is the reason the check is trustworthy now rather than a green signal that meant nothing. The second is its gap, recorded in entry 86 and hit three more times since: it compares widget rectangles against the client, and so cannot see a widget colliding with text that `on_draw` paints. Three of the last several defects were of that shape -- Update's status lines drawn through the form, Mouse's progress bar, and Settings' size captions drawn underneath their own buttons -- and every one needed the glass or a full-redraw test to find. One app is not verified on the glass: Date and time, because the Displays window would not close from here and intercepted the clicks, so its confirmation is the operator's. Everything else in this entry was read back from the watch.
+
+#### Next Steps:
+
+The gap from entry 86 is now the most valuable thing to close: a layout check that notices a widget overlapping text painted by `on_draw`. The composed buffer contains both, so a comparison is possible -- paint a window, then test whether any widget's cells differ from what the renderer wrote there before the widgets drew. Three defects of that shape in the last ten entries is a fair argument for the cost. After that, the fork stands 38 commits above upstream v0.4.0 and is a candidate to offer: the six shared-code changes (the `#if` in `src/td.c`, the `td_config.h` guards, the grid override in the ESP-IDF component, the msgbox wrapping, `TD_OPEN_MAXIMIZED`, `TD_HIDE_OSK_APP`) each stand on their own merits and are off by default where they change behaviour. The parked redraw fault from entry 74 is untouched; forcing `td_full_redraw()` with the garbage visible is still the experiment that would localise it. The remaining port overrides `TD_SIZE_POLL_MS=0` and `TD_ACK_TIMEOUT_MS=0` are still untested against the current tree, and the three capacitive bars under the glass still act on stretches of taskbar rather than three fixed cells, awaiting the vendor map. The Linux side stays parked; its last code commit is 8645a82 and everything after it in this repository is the project log.
+
+#### Files Modified:
+
+- apps/datetime.c
+- tests/test_native_apps.c
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: NOT RUN
+
+---
+
 ## 88 COMMIT Unreleased 2026-11-12T12:40:00-07:00
 
 #### Coming From:
