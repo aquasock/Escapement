@@ -1,3 +1,45 @@
+## 38 COMMIT Unreleased 2026-11-12T13:29:57-07:00
+
+#### Coming From:
+
+Unreleased 0b4ac5b
+
+#### Purpose:
+
+Bring the T-Watch Ultra's GNSS receiver up for the first time and read its fix.
+
+#### Outcome:
+
+At `9fe65a2` on branch `t-watch-ultra` the watch tracks satellites: `gps` reports `rail up`, `port 38400 8N1` and 624 to 900 bytes heard per second, and `gps raw 12` counts `GGA 12 RMC 12 GSA 48 GSV 54 GLL 12 VTG 12` with `sats visible 5`. A 60-second monitor then produced `20:28:41` UTC with `s03` and `hd2.38` and NO FIX, which is the indoor limit rather than a fault: three satellites is one short of the four a 3D solution needs. ACQUIRING UTC IS THE EVIDENCE THAT MATTERS and it is worth being precise about why: a receiver cannot print a UTC time until it has decoded ephemeris from the satellites themselves, which takes roughly thirty seconds of continuous reception and cannot be produced by noise, a crossed pin or a parser bug. That is a stronger statement about the antenna than a fix would have been, because a fix can come from a receiver near a window while the actual question -- is the antenna connected -- was already answered by the clock. THE MODULE IS A u-blox MIA-M10Q on UART1 at 38400 8N1, TX pin 43, RX pin 44, PPS pin 13, powered by the AXP2101's BLDO1 -- voltage register 0x96 and enable bit 4 of 0x90 -- which nothing in this port raised before. That is one register below the speaker's BLDO2 in both the enable and voltage registers, and powering the wrong one lights the amplifier and leaves the receiver dark with no fault reported anywhere, so `board_gnss_rail_on()` reads the rail back rather than trusting the write, the same shape the speaker's rail already used. The work is two files and the split is what makes it verifiable: `nmea.c` owns no stream and decodes only GGA and RMC, so `tests/test_nmea.c` feeds it recorded sentences on the host with no hardware present, while `gps.c` is the transport -- rail, UART, one UBX poll, bytes assembled into lines with a buffer that survives between calls so a sentence straddling two reads is not lost. THE PARSER'S THREE HABITS ARE EACH A CORRECTION AND TWO WERE PROVED BY MUTATION. Latitude is degrees AND minutes: `4807.038` is 48.11730 degrees and not 48.07038, a difference of about 5.2 km north to south, and a mutant that reads it as decimal degrees was built and does fail the test. An empty field is not a zero: a receiver with no fix sends `,,,,,` for position, and a mutant that stores zero or drops the fix-quality gate produces `have_pos` at 0,0 -- a point in the Gulf of Guinea -- and was also built and does fail. Fields are counted rather than trusted because GGA arrives with twelve fields about as often as fourteen, so a short sentence yields missing data instead of shifted data. WHAT DID NOT WORK IS RECORDED RATHER THAN SMOOTHED OVER: the UBX-MON-VER probe gets no reply on this unit even though NMEA flows continuously, so the module never confirms its own model string and `gps` prints `ubx no reply` plainly; the input side may be disabled or the reply missed, and it was not chased because NMEA already answers every question the port has. The pin names are also from the SoC's point of view, which is the opposite of the module's, and a crossed pair is silent in both directions and looks exactly like a dead module -- which is why the probe reports a byte count and not only a parse result. `gps raw [s]` was written for exactly that distinction and earned its place: "no fix" and "no antenna" are the same reading on a fix display, and the GSV count is what separated them, turning this cycle from "no satellites" into "five visible, three used". The host suite is 41 of 41, up from 40 of 41, and the extra test is this one. THE `board_keys` FAILURE IS FIXED IN PASSING and its history is worth recording: it had been failing since `fcd14aa` because the NFC commit added `nfc.spi_host`, `nfc.cs` and `nfc.int` without recording them in `api/board_keys.txt`, and the suite was reported as passing at the time. A test that fails and is not noticed is not different from a test that is absent, and the check is cheap enough that it should have been run before that commit rather than after. The required `core-syntax.md` audit was run against the complete `.ai/` diff: `core.md` was untouched; the entry follows the six-section template and the canonical order; its number is the highest present plus one at 38; Files Modified lists port and test paths and no `.ai/` file or generated artifact; Status records the user test as NOT RUN, because the hardware result above was read off the panel by this agent over USB and the operator has not independently exercised the command -- the readings are real, but they are not a user test and are not recorded as one.
+
+#### Next Steps:
+
+A fix needs sky view, and that is the one thing left on this receiver that the bench cannot supply -- near a window or outdoors it should lock within a minute now that the antenna is known to work. The cheapest useful work meanwhile is time rather than position: the receiver already reports authoritative UTC, the port already has `rtc.c` and a `board_time_set_post()` path that SNTP uses, and the watch's PCF85063A drifts, so setting the clock from a GPS sentence would give the watch an accurate time with no network at all -- which is the same reasoning that made the boot-time RTC seed worth doing. Beyond that the receiver's UBX side is unexplored: the MON-VER poll is unanswered, constellation configuration is untouched, and the module's factory defaults have not been changed, which is deliberate because the first move on a new part in this project has been measurement. Everything else is unchanged and unblocked: NFC is parked at the operator's direction with the re-read storm kept deliberately; the taskbar edge is settable and left defaulting to bottom; the thermistor reads in degrees; both pushers work and both send Enter, with F10 on the BOOT pusher the shape I would still argue for; audio plays WAV files from the card; the display's tearing-effect line is configured and unread; and the remaining outboard parts are the BHI260AP at 0x28 answering and undriven, the LoRa radio needing ALDO3 and XL9555 P05, and the microphone with no code. The standing queue is otherwise as it was: the bell seam parked with its finding recorded, the top margin as the last unpainted region, the full-screen margin question, Store installs to the card, the two untested port overrides, and the unexercised RTC write path.
+
+#### Files Modified:
+
+- ports/twatchultra/main/gps.c
+- ports/twatchultra/main/gps.h
+- ports/twatchultra/main/nmea.c
+- ports/twatchultra/main/nmea.h
+- ports/twatchultra/main/power.c
+- ports/twatchultra/main/power.h
+- ports/twatchultra/main/link_twatch.c
+- ports/twatchultra/main/CMakeLists.txt
+- ports/twatchultra/board.example.conf
+- ports/twatchultra/README.md
+- tests/test_nmea.c
+- api/board_keys.txt
+- CMakeLists.txt
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: NOT RUN
+
+---
+
 ## 37 COMMIT Unreleased 2026-11-12T13:17:56-07:00
 
 #### Coming From:

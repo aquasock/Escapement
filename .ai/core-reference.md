@@ -70,6 +70,10 @@ Topic IDs are the `record_id` prefix. An entry reserves a name; it does not clai
   name: "CO5300 AMOLED and fbdev"
   description: "The panel's controller: SPI framing, window addressing, the byte order the pixel stream needs, which windows it honours, and what the fbdev driver does and does not implement for userspace."
 
+- topic_id: GPS
+  name: "MIA-M10Q GNSS receiver"
+  description: "The u-blox receiver on UART1: which pins, which rail, the NMEA sentence set it emits, and what its output proves about the antenna when there is no fix."
+
 - topic_id: NFC
   name: "ST25R3916 NFC reader"
   description: "The reader on the shared SPI bus: the part fitted, which chip select and interrupt it uses, the PMU rail that powers it, the SPI framing it answers, and the vendor stack this project drives it with."
@@ -346,6 +350,11 @@ NFC-001: "The NFC reader is an ST25R3916, not a PN532 and not on I2C: SPI on the
 NFC-002: "The ST25R3916 answers SPI mode 1 at up to 5 MHz with a one-byte command: write reg = (reg and 0x3F) then data, read reg = that or 0x40 then a dummy byte then data, FIFO load 0x80, FIFO read 0xBF, direct command 0xC0 or cmd; chip select must stay a plain GPIO because the vendor stack drives it by hand around each command"
 NFC-003: "The vendor stack is ST RFAL plus the ST25R3916 driver plus NDEF, ~40k lines, and its RfalRfClass declares 50 virtuals with none defined, so it fails to link until they are marked pure; Arduino coupling is only types, GPIO, MIN/MAX and a Serial object, and attachInterrupt can stay a no-op because the stack falls back to reading the pin"
 NFC-004: "This board has no capacitive card-presence circuit, so the reader must be powered and polling to see a tag; a Type 2 tag reads as `card A uid <hex>`, `sak 00 T2T`, and its NDEF message, and the LilyGo tag in hand carries the text record 'Hello LilyGo' rather than being blank"
+
+GPS-001: "The GNSS receiver is a u-blox MIA-M10Q on UART1 at 38400 8N1, TX 43 / RX 44 / PPS 13 from the SoC's point of view, powered by the AXP2101's BLDO1 (voltage 0x96, enable bit 4 of 0x90) -- one register below the speaker's BLDO2 in both, so the wrong write lights the amplifier and leaves the receiver dark"
+GPS-002: "The receiver emits GGA, RMC, GSA, GSV, GLL and VTG at 1 Hz with 0 checksum failures, and acquiring a UTC time from it proves ephemeris was decoded off the satellites -- a stronger statement about the antenna than a fix, and the evidence that separates 'no antenna' from 'no fix'"
+GPS-003: "The receiver answers NMEA on this unit but NOT the UBX-MON-VER poll, so it never confirms its own model string; NMEA is the working interface and the UBX side (and constellation configuration) is untouched factory default"
+GPS-004: "Indoors the receiver tracks 3 to 5 satellites with a real HDOP around 2.38 and no fix, because a 3D solution needs four; a fix needs sky view and is the one remaining question the bench cannot answer"
 ```
 
 ---
@@ -1654,6 +1663,62 @@ NFC-004: "This board has no capacitive card-presence circuit, so the reader must
     - "on the watch, TinyDesk port 2026-11-12: `nfc scan 10 > /sd/nfc.txt` then `cat /sd/nfc.txt` gave the card line, the decoded record, the hex and `1 card`"
     - "tinydesk-twatch port: main/nfc_scan.cpp nfc_scan_step() and main/nfc.c print_ndef_text()/print_ndef_hex()"
   verification: "Verified on hardware 2026-11-12 with the operator holding the tag against the glass. Two independent scans four minutes apart returned the same UID, and the second run's output was written to /sd and read back, so the evidence is a durable record rather than a scrollback. Not yet exercised: a tag with no NDEF, any technology other than NFC-A Type 2, and writing."
+
+- record_id: GPS-001
+  kind: BOARD
+  topic_id: GPS
+  title: "The GNSS receiver is a u-blox MIA-M10Q on UART1, powered by BLDO1 one register below the speaker's rail"
+  status: VERIFIED
+  verified_date: 2026-11-12
+  statement: "The T-Watch Ultra carries a u-blox MIA-M10Q multi-constellation receiver on UART1 at 38400 baud, 8 data bits, no parity, one stop bit. From the SoC's point of view the pins are TX 43, RX 44 and PPS 13 -- which is the opposite of the module's, since the schematic labels GPS_TX for the line the module receives on. Its supply is the AXP2101's BLDO1: voltage register 0x96 in 100 mV steps from 500 mV, and enable bit 4 of 0x90. Nothing in this project raised that rail before 2026-11-12."
+  consequence: "BLDO1 sits immediately below the speaker's BLDO2 in BOTH registers -- bit 4 versus bit 5 of 0x90, and 0x96 versus 0x97 for the voltage -- and the consequence of writing the wrong one is entirely silent: the amplifier comes up, the receiver stays dark, no register reports a fault, and the only symptom is an absence of satellites. That is the same silent-stub shape as the haptic driver with its expander bit low and the SD card with ALDO1 low, and it is why the rail is written read-modify-write and then read back rather than trusted. The module also needs roughly 300 ms after its rail before it will answer, because its own oscillator has to start and its firmware to boot; probing sooner returns silence that is indistinguishable from a wiring fault. And because the pin names are the SoC's, a harness with TX and RX crossed is silent in both directions and looks exactly like a dead module -- which is why a probe here must report how many BYTES arrived and not only whether a reply parsed."
+  sources:
+    - "BRD-003 for the BLDO1 assignment, and the AXP2101 register map this project carries in patches/kernel/axp2101"
+    - "arduino-esp32 variants/lilygo_twatch_ultra/pins_arduino.h: GPS_TX 43, GPS_RX 44, GPS_PPS 13"
+    - "LilyGoLib docs/hardware/lilygo-t-watch-ultra.md: MIA-M10Q and the same pin table"
+    - "tinydesk-twatch port: main/power.c board_gnss_rail_on() and main/gps.c gps_open()"
+  verification: "Verified on hardware 2026-11-12 in the TinyDesk port: `gps` reported `rail up` and `port 38400 8N1`, and 624 to 900 bytes arrived from the module in the first second, so both the rail and the pin direction are correct rather than merely plausible."
+
+- record_id: GPS-002
+  kind: BOARD
+  topic_id: GPS
+  title: "Acquiring UTC proves the antenna works, and is better evidence than a fix"
+  status: VERIFIED
+  verified_date: 2026-11-12
+  statement: "With the rail up, the receiver emits GGA, RMC, GSA, GSV, GLL and VTG at 1 Hz: `gps raw 12` counted GGA 12, RMC 12, GSA 48, GSV 54, GLL 12, VTG 12 over twelve seconds with zero unclassified sentences, and a 60-second monitor parsed 120 sentences with zero checksum failures. During that monitor the receiver began reporting a real UTC time -- `20:28:41` -- together with s03 (three satellites used) and HDOP 2.38, while never reporting a fix. A GSV count reported 5 satellites visible."
+  consequence: "A GNSS receiver cannot report UTC until it has decoded ephemeris from the satellites themselves, which takes roughly thirty seconds of continuous reception at usable signal strength. That makes an acquired clock a stronger statement about the antenna than a fix is: noise, a crossed pin and a parser bug cannot produce it. The two readings also separate three different faults that look identical on a fix display -- no antenna shows no satellites at all, an antenna with sky but insufficient geometry shows satellites and no fix, and a working receiver shows a fix -- and only the satellite count distinguishes the first from the second. HDOP is worth reading alongside it because the receiver reports 99.99 when it has nothing, so a plausible HDOP with zero satellites in the fix means the solution is being computed from a real though insufficient set. Three satellites is one short of the four a 3D fix requires, which is exactly what a windowless room supplies and what a fixed location cannot be blamed for."
+  sources:
+    - "on the watch, TinyDesk port 2026-11-12: `gps raw 12` and `gps monitor 60`, the latter written to /sd and read back"
+    - "tinydesk-twatch port: main/nmea.c for the GGA/RMC decode and main/gps.c for the raw sentence counter"
+    - "GPS-001 for the rail these readings depend on"
+  verification: "Verified on hardware 2026-11-12, indoors, on a desk: the counts and the acquired UTC above were read off the panel and out of a file written to the SD card. NOT verified: a fix, which needs sky view, and the C/N0 of the satellites being tracked, which the port does not yet extract from GSV."
+
+- record_id: GPS-003
+  kind: EXTERNAL
+  topic_id: GPS
+  title: "The receiver answers NMEA but not the UBX-MON-VER poll, so it never names itself"
+  status: VERIFIED
+  verified_date: 2026-11-12
+  statement: "The module speaks NMEA continuously on its UART, and this project's probe sends a single UBX-MON-VER request (`B5 62 0A 04 00 00 0E 34`) expecting a reply carrying software version, hardware version and an extension list in which a u-blox module puts its own model as `OD=MIA-M10Q`. On this unit no such reply arrives within a one-second window, in two separate runs, while 567 and 624 bytes of NMEA arrived in the same windows. The UBX input side may be disabled in the module's configuration, or the reply may be missed by the framing, and neither was determined."
+  consequence: "This matters for how much weight the model name can carry. The board's documentation and its Arduino variant both say MIA-M10Q, and the receiver's behaviour is consistent with that, but the module has not confirmed it in its own words and this project's records should not pretend otherwise. It also limits what can be configured later: every u-blox configuration command is UBX, so anything beyond reading NMEA -- changing the sentence rate, enabling or disabling constellations, setting a fixed mode -- depends on solving this first. The untried next steps, in order of cost, are enabling UBX input with UBX-CFG-PRT, polling again after the receiver has a fix (some modules answer only once they are running normally), and checking the reply framing against a longer window."
+  sources:
+    - "on the watch, TinyDesk port 2026-11-12: two runs of `gps` reporting `ubx no reply` with `heard 567 bytes` and `heard 624 bytes`"
+    - "tinydesk-twatch port: main/gps.c, the MON_VER request and the Fletcher checksum in ubx_checksum_ok()"
+    - "LilyGoLib examples/peripheral/GPSFullExample and src/gps/GPS.cpp checkUblox(), which sends the same request and reads the same OD= extension"
+  verification: "Verified as a negative on hardware 2026-11-12: NMEA demonstrably flows (GPS-002) while the MON-VER reply does not arrive, which rules out a dead or unpowered module and leaves the UBX input path as the open question. Recorded as unexplained rather than explained away."
+
+- record_id: GPS-004
+  kind: BOARD
+  topic_id: GPS
+  title: "Indoors the receiver tracks a handful of satellites without a fix, and that is the bench's limit"
+  status: VERIFIED
+  verified_date: 2026-11-12
+  statement: "Over a 60-second monitor on a desk with no window, the receiver reported three satellites used, a real HDOP of 2.38 that moved no more than 0.01 over the minute, an acquired UTC time, and no fix. An earlier twelve-second window showed five satellites visible in GSV. Fix quality stayed 0 throughout."
+  consequence: "Three satellites is one short of the four a three-dimensional fix needs, which makes this a geometry limit and not a defect -- and it is worth stating so that a later cycle does not treat it as a bug to hunt. Two things follow for method. First, a fix needs sky view and is the only part of this work the bench cannot supply, so it has to be tested near a window or outdoors. Second, the port currently reads the satellite COUNT but not the carrier-to-noise ratio of each satellite, so it can say how many are heard and not how well; extracting C/N0 from GSV is the measurement that would say whether a marginal fix is a placement problem or a receiver one."
+  sources:
+    - "on the watch, TinyDesk port 2026-11-12: `gps monitor 60` written to /sd/m60.txt and read back"
+    - "GPS-002 for the same run's UTC acquisition and sentence counts"
+  verification: "Verified on hardware 2026-11-12, indoors. The no-fix result is a measurement of the location rather than of the receiver, and is recorded as such: the same code with the same antenna is expected to fix outdoors, which has not been tried."
 ```
 
 ---
