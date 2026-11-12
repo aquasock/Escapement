@@ -1,3 +1,33 @@
+## 29 COMMIT Unreleased 2026-11-12T10:27:17-07:00
+
+#### Coming From:
+
+Unreleased 8835330
+
+#### Purpose:
+
+Verify the taskbar-at-top option on the glass and close the ten-cycle-old item of the screen reader living in a temporary directory.
+
+#### Outcome:
+
+All five checks passed on the watch, and the cycle's real finding was in the instrument rather than in the feature. The taskbar moved to the top edge -- `[Start] root Offline 10:23` on row 1 with row 26 now plain desktop; the Start menu opened at row 2 hanging DOWNWARD from the bar rather than upward from the bottom; a maximised System Monitor took rows 2 to 26 with its top border immediately below the bar, so `desk_of()` is moving the origin as intended; and with desktop icons enabled for the test the first icon row landed at row 3, visible rather than behind the bar, which is the `slot_y()` offset working. Persistence was checked by a real reboot, not by assuming the settings write landed: uptime afterwards read 22 seconds and the bar was still at the top, so the settings-blob byte survives. THE SCREEN READER LIED AND THE OPERATOR CORRECTED IT. Reading the desktop back over USB reported twenty-six blank rows with no taskbar anywhere, and that was written up as a missing bar before the operator said it looked fine on the glass -- which it did. The cause is in `tools/watch-screen.py`: the desktop brackets its cursor-position query with save (ESC 7) and restore (ESC 8) around a jump to 999;999, and the model ignored both, so it was left parked at row 999 and wrote every glyph off-screen. A desktop drawn correctly and a desktop drawn nowhere are indistinguishable when the reader is the only witness, which is the same trap as a panel that returns success and draws nothing -- and this project has that one recorded three times already for the display. Fixed, and POSITIONS ARE CLAMPED as well, because 999;999 is a legitimate size query and must not poison every later write. A SECOND FAULT was found while fixing the first: a fixed-duration drain is not enough, because bytes from the previous frame are still in flight and parsing a partial frame reports a stale screen; `read_screen()` now drains until the line has been quiet for 150 ms and sends Ctrl+L itself when asked for a plain read, so the default path is the one that works rather than the one that needs remembering. THE TOOL NOW LIVES IN THE FORK at `tools/watch-screen.py` with both lessons in its docstring, which closes an item carried since entry 16 and rewritten or reused in ten consecutive cycles; it takes keys and a wait as arguments and self-repaints, so the next cycle reads the glass with a working instrument rather than rebuilding one. Two state changes were made on the watch for these tests and both are recorded: desktop icons were enabled to check the icon-grid offset and have been turned back off, restoring the operator's configuration, and the Settings window was closed with the setting saved. Nothing was built or flashed -- the firmware under test is `bd0c819`, the build the operator has been using since the NTC row was added. The required `core-syntax.md` audit was run against the whole `.ai/` diff, which is this entry alone: `core.md` was untouched, the entry follows the six-section template and the canonical order, its number is the highest present plus one at 29, Files Modified lists one deterministic tool and no `.ai/` path or generated artifact, and Status uses `PASS` for the user test because the operator reported the taskbar looking right on the glass.
+
+#### Next Steps:
+
+The lesson worth carrying out of this cycle is not about the taskbar: an instrument that reports a blank screen is indistinguishable from a feature that draws nothing, and the only reason this was caught is that a person looked at the hardware. Any future cycle that concludes something is MISSING on the basis of the USB reader alone should say so as a reading rather than as a fact, and should check the reader against a known-good screen first -- which is now cheap, because `tools/watch-screen.py` is in the tree and its failure modes are documented. What remains on the watch is the thermistor calibration, needing the NTC's nominal resistance and beta and the charger's excitation current; logging the TS voltage alongside each `chg go` and `chg done` would give a temperature history for free in the meantime. Both pushers work and both send Enter, with F10 on the BOOT pusher the shape I would argue for, and now that the bar can be at either edge there is a small layout question worth a decision rather than a default: with the bar at the top, its row sits directly under the glass's inert top margin, which reads better than the bar being at the bottom with the `Tab`/`Enter`/`Ctrl+Q` strip immediately below it -- so the port should probably ship `td_wm_set_taskbar_top(true)` rather than leaving the operator to find the checkbox. Audio is a beep with no playback path, and the display's tearing-effect line is configured and unread. The unbuilt outboard parts are as they were: the BHI260AP at 0x28 answering and undriven, the LoRa radio needing ALDO3 and XL9555 P05, the NFC reader needing DLDO1, and the GNSS and microphone with no code. The standing queue is otherwise as it was: the bell seam parked with its finding recorded, the top margin as the last unpainted region, the full-screen margin question, Store installs to the card and the image cache, the two untested port overrides, the unexercised RTC write path, and the pre-existing YAML fence defect in `core-reference.md`.
+
+#### Files Modified:
+
+- tools/watch-screen.py
+
+#### Status:
+
+- Build: N/A
+- Deployment: N/A
+- User Test: PASS
+
+---
+
 ## 28 COMMIT Unreleased 2026-11-12T10:15:13-07:00
 
 #### Coming From:
