@@ -1,3 +1,33 @@
+## 81 COMMIT Unreleased 2026-11-12T07:45:00-07:00
+
+#### Coming From:
+
+Unreleased 16c3107
+
+#### Purpose:
+
+Record the Keyboard app's reflow, the first case of a widget that was not drawn at all rather than clipped, and a blind spot in the tool used to verify every one of these reflows.
+
+#### Outcome:
+
+At 2a7f69e on branch `t-watch-ultra`, `apps/keyboard.c` measures its layout from the client width, which is the same fault the Mouse app had: rows built from fixed columns -- name at 2, "<" or "-" at 17, a 20-column bar from 23, "+" at 44 and the value at 50 -- so on a 38-column client the bar overran the frame, the "+" and values were off the glass, and the layout name was cut to "US (English" with the ">" button invisible, meaning the layout could only be cycled backwards. One thing was worse than Mouse's version: the "Try it" textbox was a fixed 44 columns at x 11, and a widget wider than the client is not clipped but omitted, so the box for testing the keyboard did not exist on this panel at all. The bar now takes what is left between "-" and "+", the click handler reads the computed geometry rather than the old constants, and the layout row has its own geometry -- "<" at 1, ">" at the right edge and the name between them -- because borrowing the bar's columns gave the name eight columns. The more important finding is about the tooling. The screen model used to read these windows back over the USB link tracked characters only, recording each cell's character and discarding its attributes, so a textbox -- which draws spaces on a different background -- was indistinguishable from empty space. That is why the "Try it" box appeared absent in every reading, and it means the same blindness applied to every filled widget checked in entries 75 through 80: any control that draws only a background would have looked missing whether it was there or not. The model records background colours per cell now and renders a fill as an underscore, and on the first run with it the box showed up as 28 filled cells on row 12. No conclusion in those earlier entries is known to be wrong -- the controls they confirmed were drawn with visible captions -- but the check was weaker than it was described as being, and that is worth recording. Verified: host suite 37 of 37; both "<" and ">", both bars with both their buttons and values, and the "Try it" box confirmed present by its background fill.
+
+#### Next Steps:
+
+`trash` is next and is positioning rather than restructuring. Then `store` and `update`, whose captions are longer than the screen and need rewording, and `settings`, which is a list of controls. The screen model can now distinguish filled widgets, so the remaining apps can be verified for controls that draw no text as well as for text that is cut. The parked redraw fault from entry 74 is untouched; forcing `td_full_redraw()` with the garbage visible is still the experiment that would localise it. The remaining port overrides `TD_SIZE_POLL_MS=0` and `TD_ACK_TIMEOUT_MS=0` are still untested against the current tree, and the three capacitive bars under the glass still act on stretches of taskbar rather than three fixed cells, awaiting the vendor map. The Linux side stays parked; its last code commit is 8645a82 and everything after it in this repository is the project log.
+
+#### Files Modified:
+
+- apps/keyboard.c
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: PASS
+
+---
+
 ## 80 COMMIT Unreleased 2026-11-12T07:00:00-07:00
 
 #### Coming From:
