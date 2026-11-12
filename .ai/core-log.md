@@ -1,3 +1,40 @@
+## 13 COMMIT Unreleased 2026-11-12T00:32:52-07:00
+
+#### Coming From:
+
+Unreleased 098627b
+
+#### Purpose:
+
+Record the battery line in System Monitor and the AXP2101 fuel gauge behind it, which is the first time the TinyDesk port has read the PMU for anything but rail setup.
+
+#### Outcome:
+
+At ecc6b30 on branch `t-watch-ultra`, System Monitor shows `Battery: 100%  4.17 V full` on the watch, stable across three reads three seconds apart. The 4170 mV agrees with PMU-001's measured 4181 mV on this board, which is the check that the register decode is right rather than merely plausible. TinyDesk had no battery support of any kind, verified four ways before anything was written: nothing in `td_sysinfo_t`, nothing in `api/tinydesk.api`, the taskbar tray draws only the network indicator and the clock, and System Monitor had no battery row. The shape added follows the drives accessor, which is the same problem: an optional array plus a count, cheap enough to call twice a second, and a board with no gauge returns zero so the app says "n/a" rather than the desktop having to know what is fitted. `td_sysinfo_t` gains `batteries()`, a new `td_battery_t` carries label, percent, millivolts and state, and `TD_MAX_BATTERIES` joins the other compile-time limits. Two decisions are worth more than the code. THE PORT OVERRIDES A WEAK HOOK rather than System Monitor reaching into a port: `board_battery_read()` joins `board_power_rails_preinit()` and `board_time_set_post()` in the shared ESP-IDF app as a weak function the board replaces, so the desktop stays ignorant of the chip. AND A GAUGE ABOVE 100 IS REPORTED AS UNKNOWN, not as a percentage: PMU-001 records that a freshly powered AXP2101 reports more than 100 until its fuel gauge settles, and the kernel driver returns -ENODATA for exactly that reason. The port passes -1 and the app prints `--%`, because a wrong number on a battery is worse than no number, and a battery indicator is the one place a plausible-looking lie is most likely to be believed. The registers are taken from the driver this project carries in `patches/kernel/axp2101` rather than from a datasheet: capacity at 0xa4 bits 6:0, voltage at 0x34 bits 5:0 above 0x35 giving 14 bits already in millivolts, charge state at 0x01 bits 2:0 with precharge, CC and CV all meaning charging and done meaning full, and battery presence at 0x00 bit 3. The row sits above the memory bars rather than below the statistics, because on a 26-row screen power left is what a watch user looks for first, and the window grows by one row only when a battery is actually present. Two bugs were caught while writing it and both are worth naming because neither would have shown up on the glass. The percent was formatted straight from an unbounded `int`, which `-Werror=format-truncation` refused; it is now clamped to 0 to 100 with anything out of range treated as unknown, which is the correct behaviour as well as the compiling one. And `on_close()` left every widget pointer set, so a tick arriving after the window closed but before `launch()` ran again would have written through freed widgets -- a use-after-free that the desktop's 500 ms tick makes unlikely rather than impossible, which is the kind that survives for months. The API snapshot was re-recorded at 697 declarations, three added and nothing removed, which is the minor shape `STABILITY.md` sanctions; `TD_VERSION` is still not bumped for the same reason as last cycle. On the question that prompted this: nothing in the audio failure is explained by the battery manager. The rail bits the amplifier depends on were checked against the kernel driver's own descriptors -- ALDO1 BIT(0), ALDO2 BIT(1) and BLDO2 BIT(5) of 0x90, with voltages at 0x92, 0x93 and 0x97 -- and they are correct, so the battery work neither implicates nor exonerates the PMU as the cause of the silence.
+
+#### Next Steps:
+
+The obvious next reading is the one this cycle made possible and did not take: log the full LDO enable byte at boot alongside the rails, so the BLDO2 bit can be seen rather than inferred, and take a battery reading while on battery rather than on USB, since every reading so far has been at 100 per cent and full. If the amplifier's silence is eventually traced to the rail, that byte is where it will show. Audio itself stays parked at the operator's direction and the state to resume from is recorded in entry 12: the build with Philips framing, stereo and a 200 ms tone was flashed and reported nothing audible, and the three remaining candidates are the rail, the I2S format against LilyGo's ALL_RIGHT, and the amplifier not being fitted. For the TinyDesk author, this cycle adds a second item to the conversation entry 12 opened: the `bell` callback is one minor API change and `batteries()` is another, and both would be better raised together than one at a time, with the note that `batteries()` deliberately copies `drives()` so the author has one pattern to judge rather than two. Also open and unchanged: the top margin is the last unpainted region; the deferred question of what the margins should do under a full-screen application waits for something to go full screen; `board.example.conf` still calls the SD keys unproven when they now work; and the pre-existing YAML defect in `.ai/core-reference.md`, where a code fence after the last record stops the sequence parsing as one document, remains unfixed. A fresh backup was taken at 0009 and verifies; this cycle and the audio one before it have changed the firmware since, so another is due before anything risky. The Linux side stays parked; its last code commit is 8645a82 and everything after it in this repository is the project log.
+
+#### Files Modified:
+
+- apps/sysmon.c
+- include/tinydesk/td_sysinfo.h
+- include/tinydesk/td_config.h
+- ports/esp_idf/app/main.c
+- ports/twatchultra/main/power.c
+- ports/twatchultra/main/power.h
+- ports/twatchultra/main/sound.c
+- api/tinydesk.api
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: NOT RUN
+
+---
+
 ## 12 COMMIT Unreleased 2026-11-12T00:19:17-07:00
 
 #### Coming From:
