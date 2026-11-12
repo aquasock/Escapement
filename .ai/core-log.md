@@ -1,3 +1,33 @@
+## 79 COMMIT Unreleased 2026-11-12T06:20:00-07:00
+
+#### Coming From:
+
+Unreleased 9e887ef
+
+#### Purpose:
+
+Record the Mouse app's reflow, which had lost the half of each setting that turns a value up.
+
+#### Outcome:
+
+At bd3cb18 on branch `t-watch-ultra`, `apps/mouse.c` measures its bars from the client width. The three setting rows were laid out from fixed columns -- name at 2, "-" at 17, a 20-column bar from column 23, "+" at 44 and the value at 50 -- so on a 40-column panel the bar ran four columns past the frame and both the "+" button and the value label were off the glass. The settings could be turned down but never up, which is the wrong half to lose, and "Hits: 0" at column 37 was cut to a single "H". The layout is now measured: name at 1, "-" at 15, the bar taking whatever is left, and "+" and the value at the right edge, which gives an 8-wide bar at 38 columns and 30 at 60. One thing that had to change with it and would have been easy to miss: the bar's click handler had its position compiled in through `BAR_X` and `BAR_W`, so moving the bar would have made clicks set the wrong value; it reads the geometry computed at layout time instead. "Hits: 0" moved to its own row, and the permission note lost the words that made it wrap. This was found by the operator rather than by the survey in entry 78, and that is the useful part: the survey looked for controls whose x plus width reached column 38 and Mouse has none -- its buttons are at x 15 and x 17. What overflowed was the PROGRESS BAR, a `td_progress` call with a fixed width, which the survey's widget list did not include. So the survey's rule needs extending to bars and any other fixed-width drawing, or the remaining apps should be checked on the glass. Verified on the glass: three bars with both their buttons and their values, the target row and the hit count, all inside the frame. The host suite is 37 of 37.
+
+#### Next Steps:
+
+`trash` is next and is the same kind of work as Mouse -- positioning rather than restructuring. Then `update`, `store`, `users` and `settings`, which need shorter captions as well. The survey in entry 78 should be re-run with `td_progress`, `td_list` and `td_scrollbar` included before trusting it for the rest, since Mouse showed that a widget can overflow without a button being past column 38. Log Viewer, Task Manager, Keyboard, Image Viewer, Search and Pixels still need a look on the glass. The parked redraw fault from entry 74 is untouched; forcing `td_full_redraw()` with the garbage visible is still the experiment that would localise it. The remaining port overrides `TD_SIZE_POLL_MS=0` and `TD_ACK_TIMEOUT_MS=0` are still untested against the current tree, and the three capacitive bars under the glass still act on stretches of taskbar rather than three fixed cells, awaiting the vendor map. The Linux side stays parked; its last code commit is 8645a82 and everything after it in this repository is the project log.
+
+#### Files Modified:
+
+- apps/mouse.c
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: PASS
+
+---
+
 ## 78 COMMIT Unreleased 2026-11-12T05:40:00-07:00
 
 #### Coming From:
