@@ -1,3 +1,33 @@
+## 23 COMMIT Unreleased 2026-11-12T09:05:20-07:00
+
+#### Coming From:
+
+Unreleased 9843f44
+
+#### Purpose:
+
+Make `scripts/watch-backup.sh` report whether the watch came back after its reset, which it twice failed to do while claiming success, and take a backup of the build both pushers now run on.
+
+#### Outcome:
+
+`scripts/watch-backup.sh` now ends by confirming the board is running, and the backup it was extended to protect is `~/twatch-backup/working-2026-11-12-0859.bin`, 16 MiB read at 576.7 kbit/s in 232.7 seconds, sha256 `87feb3989f2183c197200c9f38a10c1b84496eb910d0c7482e72d55bed6dce03`, verify OK against the chip with the board held in the stub across read and compare. THE DEFECT WAS THAT BOTH RESETS FAIL QUIETLY AND NOTHING CHECKED THE RESULT. The verify's `--after hard_reset` leaves the board in the stub when it does not take, and `reset_board` -- written before this cycle -- runs `--before no_reset` against a board that by then is no longer in a stub, so its own failure also lands in the `|| true` at the end of the trap. On entry 15 and again on entry 20 that produced a script exiting 0 while the watch sat silent on both USB and WiFi, which from the outside is indistinguishable from a brick and cost a session to diagnose each time. The tail now opens the port, reads for up to twelve seconds, and treats any byte as alive, because a booting desktop repaints the whole screen and one byte is therefore enough; if nothing arrives it performs a full `--before default_reset --after hard_reset run` and checks again; and if the board is still silent it says so in three lines and states that the backup itself is sound, because the compare against the chip passed before any reset was attempted. Reporting rather than dying is deliberate: a silent board needs a power cycle, it does not invalidate the artifact, and making the script exit non-zero would train its caller to ignore it. THE FAILURE REPRODUCED ON THE FIRST REAL RUN AND THE FIX RECOVERED IT, which is the only evidence worth having here: the script printed `board stayed silent; resetting it again` and then `board is up after a second reset`, so this was not a hypothetical being guarded against but an observed fault being handled. The probe itself was checked in both directions before it was trusted, since a liveness check that cannot fail is worthless: against the live port it returned 128 bytes and exit 0, and against a silent pty it returned zero bytes and exit 1. The backup was then verified independently of the script's own claim. The stored `.sha256` re-checks; the 2,562,688-byte app region at 0x10000 is byte-identical to the `tinydesk.bin` this machine built, both hashing to `886f9481`; the strings unique to this build -- `twatch-pwrkey`, `pwrkey.pin`, `line low, not armed` and `vbus in` -- are all present in the image, so it is the build carrying the power key and not a snapshot from before it; and the littlefs partition holds 1,993 written blocks of 2,528, identical to the 0820 backup, so the desktop's own files did not move. The board was then confirmed running independently of the script's report, by reading its desktop over USB and finding the taskbar at `09:04`. Nothing was built or flashed this cycle: the firmware on the watch is `715c7b4`, the build the operator accepted, and the backup is a read of it. The required `core-syntax.md` audit was run against the whole `.ai/` diff, which is this entry alone: `core.md` was untouched, the entry follows the six-section template and the canonical order, its number is the highest present plus one at 23, Coming From names the pre-cycle `HEAD`, Files Modified lists one deterministic tool and no `.ai/` path or generated artifact, and Status uses `N/A` for the three stages because this cycle changed a script and read the flash without building or deploying anything.
+
+#### Next Steps:
+
+Charging is the largest thing this port can now reach and still does not: `vbus in` and `vbus out` have been observable since entry 22, System Monitor already reads the AXP2101's charge state, and nothing acts on either -- no charge current is set, no termination is configured, and the desktop cannot show whether the watch is charging beyond the state the gauge reports. The next cycle should decide what a `vbus in` event should do rather than leave the reporting without a consumer, and the honest first question is whether the part's default charging behaviour is already correct for this cell, which is answerable by reading the AXP2101's charge registers and the cell's spec before writing anything. Two pushers now exist and both send Enter, which is a placeholder rather than a design: the useful question is whether they should differ, and the shape I would argue for is F10 on the BOOT pusher because it is global in the window manager and works with nothing focused, with the power key left as Enter or given a dedicated meaning once one exists. Everything else is unchanged and unblocked. Audio remains a beep with no playback path, and the display's tearing-effect line is configured in `board.conf` and read by nothing. The screen model that reads the Log Viewer over USB is still in a temporary directory, now for the fifth cycle, and belongs in the fork under a tools directory -- this cycle used it again and again rebuilt nothing of it. The unbuilt outboard parts are as they were: the BHI260AP at 0x28 answering with no driver, the LoRa radio needing ALDO3 and XL9555 P05 before it is powered, the NFC reader needing DLDO1 with its earlier absence verdict still suspect, and the GNSS and microphone with no code and, for the microphone, no evidence that a part is fitted. The standing queue is otherwise as it was: the bell seam is parked with its finding recorded, the top margin is the last unpainted region, the full-screen margin question waits for something to go full screen, Store installs to the card and the image cache have never run against a card, `TD_SIZE_POLL_MS=0` and `TD_ACK_TIMEOUT_MS=0` remain untested against the current tree, the RTC write path has never been exercised by setting a time and power-cycling, and the pre-existing YAML fence defect in `core-reference.md` is untouched.
+
+#### Files Modified:
+
+- scripts/watch-backup.sh
+
+#### Status:
+
+- Build: N/A
+- Deployment: N/A
+- User Test: N/A
+
+---
+
 ## 22 COMMIT Unreleased 2026-11-12T08:58:25-07:00
 
 #### Coming From:
