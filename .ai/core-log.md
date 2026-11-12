@@ -1,3 +1,36 @@
+## 45 COMMIT Unreleased 2026-11-12T16:43:49-07:00
+
+#### Coming From:
+
+Unreleased 91da0e3
+
+#### Purpose:
+
+Find and fix the leftover pixel strips that appear on the desktop after the Start menu closes -- a fault older than this session's work.
+
+#### Outcome:
+
+At `ade77cc` on branch `t-watch-ultra` the strips no longer appear, confirmed by the operator using the watch normally -- opening and closing the Start menu and Files -- with no `repaint` needed. THE FAULT AND THE FIX ARE BOTH ONE NUMBER. `flush_rect()` computed how many rows one transaction could carry purely from buffer size, `band = 5120 / w`, so a full-width flush was 16 rows and an 8-pixel-wide column was 640: a narrow update went out as one very tall window. Full-width flushes were always clean and narrow ones dropped bands, and the only difference between the two paths was that height. The height is now capped at `BAND_ROWS` whatever the width. What makes this worth recording rather than merely fixing is that the project already had the shape of it: `LCD-009` in the reference says a 45x356 single-transfer window tears into diagonal splits while the same rectangle in 2-row bands is clean, and explicitly closes with "not width, not X, not height" and the root cause unestablished. The leftover strips supplied the missing half -- that the tearing and the strips are the same fault, that the `repaint` command cleared it because full-width bands were clean, and that the incremental path produced it because narrow ones were not. THE COST OF THE FIX IS REAL AND SMALL: an 8x416 column becomes 26 transactions instead of one, and the icon-column case that motivated the old reasoning -- 23 rows of 8 pixels, which the previous comment argued should go out in a single transaction to save window-programming overhead -- becomes two. The old argument was true and its conclusion was wrong, because the panel does not tolerate a tall narrow window; two window-register writes per extra transaction at 40 MHz is noise against the pixels. TWO INSTRUMENTS WERE BUILT AND ONE WAS WRONG IN AN INSTRUCTIVE WAY. `dcheck` compares the framebuffer against the cell grid and reported `fb_bad=0 shown_bad=0` while the operator could see strips -- it was not lying, but it could never have answered the question, because the panel is write-only and nothing can compare the framebuffer against the glass. `repaint` is the instrument that worked: pushing the whole screen cleared the strips, which proved the framebuffer was right and the rectangles were being lost on the way out. A THIRD FIX WAS NEEDED BECAUSE THE FIRST `repaint` WAS ITSELF A SECOND WRITER: it painted cells and called `flush_rect()` from the shell's task, and `flush_rect` writes `s_tx` and takes the SPI bus, which until then only `paint_task` had ever touched -- there was no lock because there had never been a second caller. On the glass that was a scrambled taskbar and a shell that never returned, and the watch had to be reset. It now sets a request flag and wakes the painter, which invalidates `s_shown` so the existing comparison finds every cell changed -- the same lesson as `display_pixels_claim()` one cycle earlier, applied after failing to apply it once. Also in this cycle: `display_picture_rgb()` made real (it was a stub returning false and the desktop was told it had no picture support), the RGB sink registered, three generated test patterns, and exclusive framebuffer ownership so a bitmap stops being overpainted by a cell painter that cannot see it. The backup `working-2026-11-12-1638.bin` was taken from this build: 16 MiB, sha256 `917fbb1367c630e57f26118a26e8847f421854964990e83f2b7f536f62bbdb8e`, verify OK with the board held in the stub across read and compare, and the 2,642,096-byte app region byte-identical to the build at `06f575d1`. The required `core-syntax.md` audit was run against the complete `.ai/` diff: `core.md` was untouched; the entry follows the six-section template and the canonical order; its number is the highest present plus one at 45; Files Modified lists port paths and no `.ai/` file or generated artifact; and Status records the user test as a pass on the operator's own report of normal use.
+
+#### Next Steps:
+
+The rendering work is done and the Tamacore port can resume at Phase 4 -- `tmc_core.c` as an ESP-IDF component, the ROM from the SD card, one static frame on the glass -- and the two constraints that phase depends on are now measured rather than assumed: a frame-sized buffer must be a PSRAM heap allocation because 256 KB of .bss overflowed internal DRAM, and an app that draws pixels must claim the screen or the painter overpaints it. `repaint` should be kept as a recovery command rather than removed: it is now safe, it costs nothing when unused, and it recovers a whole screen from anything that leaves the glass wrong. `dcheck` should be kept with its limit stated in its own help, because it measures the model against the framebuffer and says nothing about the panel -- the one question an operator most wants answered is the one it cannot answer. One thing this cycle leaves open by choice: `LCD-009`'s "not width, not X, not height" is now explained, and that record should be revised to say so rather than left as an open mystery. Everything else is unchanged and unblocked: NFC is parked with the re-read storm deliberately kept; GPS tracks satellites and sets the clock, with the UBX side unexplored and a fix untested for want of sky; the taskbar edge is settable and left defaulting to bottom; the thermistor reads in degrees; both pushers work and both send Enter, with F10 on the BOOT pusher the shape I would still argue for; audio plays WAV files from the card; and the remaining outboard parts are the BHI260AP at 0x28 answering and undriven, the LoRa radio needing ALDO3 and XL9555 P05, and the microphone with no code.
+
+#### Files Modified:
+
+- ports/twatchultra/main/display.c
+- ports/twatchultra/main/display.h
+- ports/twatchultra/main/link_twatch.c
+- ports/twatchultra/README.md
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: PASS
+
+---
+
 ## 44 COMMIT Unreleased 2026-11-12T16:23:06-07:00
 
 #### Coming From:
