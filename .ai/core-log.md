@@ -1,3 +1,33 @@
+## 6 COMMIT Unreleased 2026-11-11T23:00:19-07:00
+
+#### Coming From:
+
+Unreleased cbd38fd
+
+#### Purpose:
+
+Record the operator's acceptance of the haptic feedback, which entry 5 left as NOT RUN because the buzz had not been felt when it was written.
+
+#### Outcome:
+
+The operator reports that the margin buttons buzz and that it works perfectly, and accepted it without asking for a change. Entry 5 is therefore superseded on one point only: its User Test field reads NOT RUN, which was accurate when it was written and is left that way because a committed entry is settled history and the syntax requires later results to be recorded in the next entry rather than appended to the old one. Everything else in entry 5 stands as written, including the three failure modes it predicted and their distinguishing log lines. The acceptance also settles the two questions that entry 5 left open for the operator to answer. The chip is present and configured, since a missing DRV2605 or a failed rail would have logged its own line instead of buzzing. The effect is at the right strength for a button, since the operator described it as working rather than as weak or as a double buzz, so neither the effect ID within library 1 nor RATED_VOLTAGE and the overdrive clamp need touching; those remain unset, as they are in LilyGo's own driver, and are the knobs for a later cycle if the feel ever needs changing. Nothing in either repository changed for this cycle, so Files Modified is None, and the build and deployment fields are N/A because nothing was built or flashed. One thing this confirms beyond the feature itself: the bring-up ordering is correct, meaning the XL9555 P06 rail is genuinely raised before the chip is probed. That ordering was written from LilyGo's source and from BRD-005's warning that a chip with its supply off still answers I2C, which meant the failure would have been silent and looked like a dead motor; a working buzz is the evidence that the warning was heeded rather than merely quoted.
+
+#### Next Steps:
+
+A fresh 16 MiB backup is now the right next move, since `working-2026-11-11-2242.bin` predates both this driver and the two cycles before it. After that the remaining work is unchanged and none of it is blocked: the top margin is the last unpainted region and still inert as `EDGE_TOP`, intended for status icons; the glass sweep that has caught three faults plus one in its own reference should be landed as a real test rather than left in a temporary directory; and `scripts/watch-backup.sh` should gain the `verify_flash` step that the last two hand-checked backups used, so the strongest available check becomes something the tool guarantees rather than something a person remembers. Two questions still want decisions rather than code: Esc on a bare desktop opens the Start menu, which was sensible while Enter and Esc were a keyboard pair for the icon grid and is odd now that Esc means cancel, and the margin buttons stay painted while a full-screen application owns the screen where they are no longer buttons. Also open: the parked redraw fault where a dark screen keeps leftover pixels because the desktop stops sending rows twelve to twenty-five, the two port overrides `TD_SIZE_POLL_MS=0` and `TD_ACK_TIMEOUT_MS=0` untested against the current tree, and the RTC write path written but never exercised by setting a time and power-cycling. The Linux side stays parked; its last code commit is 8645a82 and everything after it in this repository is the project log.
+
+#### Files Modified:
+
+None.
+
+#### Status:
+
+- Build: N/A
+- Deployment: N/A
+- User Test: PASS
+
+---
+
 ## 5 COMMIT Unreleased 2026-11-11T22:58:10-07:00
 
 #### Coming From:
