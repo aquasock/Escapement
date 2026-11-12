@@ -1,3 +1,33 @@
+## 9 COMMIT Unreleased 2026-11-11T23:15:08-07:00
+
+#### Coming From:
+
+Unreleased f66dd22
+
+#### Purpose:
+
+Capture a full 16 MiB backup of the state the operator accepted, in which haptics work and the glass sweep is a committed test.
+
+#### Outcome:
+
+`~/twatch-backup/working-2026-11-11-2310.bin` is the current recoverable state, 16 MiB read at 583.1 kbit/s in 230.2 seconds, sha256 `39b6ac8b3dbbff4c57049420ba62ae4a0ece5b86d4ea4e3580f25069e6e3a956`. It carries TinyDesk at dc9414e on branch `t-watch-ultra`, the build in which the three margins are painted, labelled and live, the DRV2605 buzzes on a press, Escape no longer opens the Start menu on a bare desktop, and the glass sweep exists as `tests/test_twatch_edges.c` rather than as a program in a temporary directory. The read used `scripts/watch-backup.sh`, which is now its second consecutive use after the hand-rolled read in entry 96 that the log recorded as a mistake not to repeat. Four checks confirm the image is the current build rather than an older one, and the order matters because the strongest is not the one the script does. `esptool verify_flash` read the chip back a second time and compared it against the file with the digest matched, which states that the file equals the flash rather than that the file equals itself. The `.sha256` written by the script verifies. The 2,535,920-byte app region at 0x10000 is byte-identical to the `tinydesk.bin` this machine built, both hashing to `80511df1`. Both image magics are 0xe9, so neither the bootloader nor the app region is a truncated read, and the partition table parses as nvs at 0x9000, phy_init at 0xf000, ota_0 and ota_1 at 0x10000 and 0x310000, otadata at 0x610000 and storage at 0x620000. The storage partition holds 1,988 non-empty 4K blocks, unchanged from the previous two backups, so the desktop's own filesystem came with the firmware and nothing in it has moved. The board was confirmed running after the read's trailing hard reset by the USB port producing the desktop's own terminal escape sequences rather than ROM output. Nothing in this repository changed; the image is a recovery artifact outside it, so Files Modified is None by the syntax's own rule about generated binaries, and Build and Deployment are N/A because this cycle built and flashed nothing. One limitation is worth stating plainly rather than leaving implied: the backup is taken after the flash and not after a cold boot with every subsystem re-read, so it records the running state rather than a freshly initialised one. That is the same shape as the two previous backups and it is adequate for recovery, because the flash contents do not depend on how the board got there; what it does not capture is any diagnostic evidence about a cold-boot sequence, and none was needed. `verify_flash` still lives outside `scripts/watch-backup.sh` and is still something a person has to remember, which entry 7 named as the next thing to fix and which this cycle did not fix.
+
+#### Next Steps:
+
+The immediate work is a small one that has now been deferred twice: putting `verify_flash` inside `scripts/watch-backup.sh`, where it costs one more pass over the flash and turns the strongest available check from a habit into a guarantee. Everything else outstanding is unchanged and unblocked. The top margin is the last unpainted region, inert as `EDGE_TOP` and intended for status icons. The operator deferred the question of whether the three margins should stop being painted while a full-screen application owns the screen, on the grounds that no application in this tree goes full screen today; that decision is recorded in entry 8 with both options and the reasoning, and it should be reopened when something first goes full screen rather than kept indefinitely. Also open: the parked redraw fault where a dark screen keeps leftover pixels because the desktop stops sending rows twelve to twenty-five, the two port overrides `TD_SIZE_POLL_MS=0` and `TD_ACK_TIMEOUT_MS=0` untested against the current tree, and the RTC write path written but never exercised by setting a time and power-cycling. Now that the sweep is a committed test, the port has a regression net for the margins that did not exist before this run of work, so the next margin change can be attempted with a check behind it rather than only with a render at 1:1; the painter's own shapes remain outside that net, since `display.c` cannot compile on a host. The Linux side stays parked; its last code commit is 8645a82 and everything after it in this repository is the project log.
+
+#### Files Modified:
+
+None.
+
+#### Status:
+
+- Build: N/A
+- Deployment: N/A
+- User Test: PASS
+
+---
+
 ## 8 COMMIT Unreleased 2026-11-11T23:09:37-07:00
 
 #### Coming From:
