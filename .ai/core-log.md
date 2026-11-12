@@ -1,3 +1,33 @@
+## 34 COMMIT Unreleased 2026-11-12T11:57:24-07:00
+
+#### Coming From:
+
+Unreleased 78d4546
+
+#### Purpose:
+
+Capture a full 16 MiB backup of the build that plays WAV files, and verify the streaming player survived a whole track.
+
+#### Outcome:
+
+`~/twatch-backup/working-2026-11-12-1152.bin` is the current recoverable state, 16 MiB read at 577.4 kbit/s in 232.4 seconds, sha256 `b90249b86d96d7efd43c2c865ebaf445fb12c4de22d0178199ec520f281eba16`, verify OK against the chip with the board held in the stub across read and compare, and the stored `.sha256` re-checked afterwards. The 2,570,352-byte app region at 0x10000 is byte-identical to the `tinydesk.bin` this machine built, both hashing to `5c81df44`, and the strings that identify this build are present -- `play <file.wav> | play stop`, `play %luHz`, `open: %s` and `truncated header` among them -- so the image is the one with the player rather than an earlier one. The partition table parses as nvs, phy_init, ota_0, ota_1, otadata and storage at the offsets `partitions.csv` declares, both image magics are 0xe9, and the littlefs partition holds 2,004 written blocks of 2,528 against the previous backup's 1,999, which is the five blocks of session writes this run produced. THE PLAYER WAS VERIFIED END TO END BEFORE THE BACKUP, and the numbers are the interesting part: the log reads `play 44100Hz` at 135110 ms and `stop` at 424264 ms, which is 289.15 seconds against a file of 289.133 seconds. That is the whole track, streamed, stopping itself at the end rather than being cut short -- 48 MB read from an SD card on a 10 MHz bus shared with the LoRa radio and the NFC reader, and the operator reported it sounded perfect with no drops. The resource state afterwards is consistent with a long read that did its work properly: 65 KB of internal RAM free, and the cell at 34.4 C against a die at 45.8 C. That last pair is worth recording separately, because it is the thermistor conversion being corroborated by unexpected evidence -- five minutes of continuous decode and SPI traffic warmed the board, and the cell and the SoC both rose while staying in the order PMU-006 established, which neither would have done if the conversion were reading the SoC or the wrong current. THE SCRIPT'S RESET WORKED ON THE FIRST ATTEMPT AGAIN, which is now the second consecutive backup to do so, against three in a row that had needed a fallback before entry 28 found the cause. The board was then confirmed running independently of the script's own report, by reading its desktop over USB at 11:57. Nothing was built or flashed this cycle. The required `core-syntax.md` audit was run against the whole `.ai/` diff, which is this entry alone: `core.md` was untouched, the entry follows the six-section template and the canonical order, its number is the highest present plus one at 34, Files Modified reads `None.` because the cycle generated a recovery artifact outside the repository and changed no tracked file, and Status uses `N/A` for build and deployment because nothing was compiled or written to the chip.
+
+#### Next Steps:
+
+Audio is finished as far as the port is concerned: a file streams from the card for its full length without a drop, and the three formats a normal converter produces all play. What it does not have is a way in from the desktop, since `play` is a Terminal command -- a Start-menu extra for a fixed file, or a small app that lists the card and plays a selection, are the two shapes, and neither is needed to call the work done. Two limits are worth carrying so they are not mistaken for faults later: there is no pause, seek or volume, and the sampling formats are 16-bit PCM, one or two channels, 8 to 96 kHz -- 24-bit, float and multichannel are refused with their numbers logged rather than played wrong. Beyond audio, the queue is unchanged and nothing is blocked: the taskbar edge is settable and left defaulting to bottom at the operator's direction; the thermistor reads in degrees with a host-tested conversion; both pushers work and both send Enter, with F10 on the BOOT pusher the shape I would still argue for; the display's tearing-effect line is configured and unread; the screen reader lives in the fork under `tools/`; and the unbuilt outboard parts are as they were -- the BHI260AP at 0x28 answering and undriven, the LoRa radio needing ALDO3 and XL9555 P05, the NFC reader needing DLDO1, and the GNSS and microphone with no code. The standing queue is otherwise as it was: the bell seam parked with its finding recorded, the top margin as the last unpainted region, the full-screen margin question, Store installs to the card and the image cache, the two untested port overrides, the unexercised RTC write path, and the pre-existing YAML fence defect in `core-reference.md`.
+
+#### Files Modified:
+
+None.
+
+#### Status:
+
+- Build: N/A
+- Deployment: N/A
+- User Test: N/A
+
+---
+
 ## 33 COMMIT Unreleased 2026-11-12T11:49:19-07:00
 
 #### Coming From:
