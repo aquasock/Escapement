@@ -1,3 +1,37 @@
+## 83 COMMIT Unreleased 2026-11-12T09:10:00-07:00
+
+#### Coming From:
+
+Unreleased c217714
+
+#### Purpose:
+
+Record the Store app's reflow, and a change to the port's own test suite that found three faults the glass checks had missed.
+
+#### Outcome:
+
+At 6e0b0dd on branch `t-watch-ultra`, `apps/store.c` stacks its two panes on a narrow window. Upstream is a 78x21 window -- a 30-column list, a divider at column 32 and a details pane from 34 with 44 columns for the title, summary, state and two buttons -- so on a 40-column panel the pane began at 34 with four columns: title, summary and state invisible, Install and Uninstall off the glass, and the Store browsable but not usable. The narrow layout puts the list above the details, gives the summary two lines instead of four because four plus the title, meta, state and buttons cannot fit under a list worth scrolling, and computes every row from the bottom of the client so that no two widgets can land on the same row. The more valuable part of this cycle is a change to `tests/test_native_apps.c`: it now runs its layout check at 40x26 as well as 80 and 100 columns, because 40x26 is this board's grid and the two larger sizes could not see any of the faults the last eight entries have been fixing one app at a time. On its first run it found three that the operator and I had both passed on the glass: Files put "Delete" at column 39 on a 38-column client, so the file manager could not delete a file at all -- the earlier screenshot even shows the bottom row ending at "Rename" -- five captions needing 45 columns and now taking two rows; and MQTT and Modbus resolved their lists to ZERO rows at their own minimum height, because the narrow forms added in entries 78 and 77 are taller than the minimum allowed for, so their minimum heights are raised. Five apps still clip a control at 40x26 -- Settings, Recycle Bin, Remote Desktop, Software Update and Date & time -- and rather than skip them silently the test names them in `s_narrow_todo[]`, documented as a list of known defects that a fix removes an entry from and that should end up empty. That is the honest shape: the guard is real and the remaining work is visible in the source rather than in a promise. Store itself could not be exercised beyond its layout, because it downloads a catalogue and this board has no network at boot and an unproven SD slot; it reports "Cannot reach the server: ESP_ERR_HTTP_CONNECT" and shows an empty list, which is its correct behaviour in that state. Verified: host suite 37 of 37; flashed and read on the glass -- the Store's stacked layout, and Files with two rows of buttons and Delete present.
+
+#### Next Steps:
+
+The five apps in `s_narrow_todo[]` are the next work: Settings, Recycle Bin, Remote Desktop, Software Update and Date & time, and each one leaves that list when it passes. Recycle Bin and Remote Desktop are positioning; Software Update has a 50-column caption and a 62-column URL field and needs rewording as well as layout; Settings and Date & time were both reported as passing on the glass and are not, which is the second time the 40x26 pass has caught something an eye check missed. The parked redraw fault from entry 74 is untouched; forcing `td_full_redraw()` with the garbage visible is still the experiment that would localise it. The remaining port overrides `TD_SIZE_POLL_MS=0` and `TD_ACK_TIMEOUT_MS=0` are still untested against the current tree, and the three capacitive bars under the glass still act on stretches of taskbar rather than three fixed cells, awaiting the vendor map. The Linux side stays parked; its last code commit is 8645a82 and everything after it in this repository is the project log.
+
+#### Files Modified:
+
+- apps/store.c
+- apps/files.c
+- apps/mqtt.c
+- apps/modbus.c
+- tests/test_native_apps.c
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: PASS
+
+---
+
 ## 82 COMMIT Unreleased 2026-11-12T08:20:00-07:00
 
 #### Coming From:
