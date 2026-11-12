@@ -85,7 +85,22 @@ PY=build/idf-tools/python_env/idf5.1_py3.14_env/bin/python
 # stops the second invocation from rebooting the board.
 #
 reset_board() {
-    "$PY" -m esptool --chip esp32s3 --port "$PORT" --before no_reset \
+    # `--before default_reset` IS THE ONLY FORM THAT WORKS, from either state,
+    # and both halves were measured on this board on 2026-11-12.
+    #
+    # From the stub: `--before no_reset` connects and exits 0 but performs no
+    # effective reset, because the board is on a native USB-JTAG port where RTS
+    # is not wired to EN -- the pulse is not felt, the stub keeps running and
+    # the desktop never appears. That silent success is what made three
+    # consecutive backups report "board stayed silent".
+    #
+    # From a running board: `--before no_reset` cannot even connect, because
+    # the desktop is speaking raw VT100 and esptool's sync fails with "Invalid
+    # head of packet".
+    #
+    # default_reset handles both -- it pulses reset and syncs whatever is
+    # there -- so there is no reason to try anything else first.
+    "$PY" -m esptool --chip esp32s3 --port "$PORT" --before default_reset \
         --after hard_reset run >/dev/null 2>&1 || true
 }
 
@@ -124,8 +139,15 @@ size=$(stat -c %s "$OUT" 2>/dev/null || echo 0)
 [ "$size" = "16777216" ] || die "backup is $size bytes, expected 16777216"
 
 printf 'verifying against the chip, which has not been allowed to boot\n'
+# `--after no_reset`, NOT `--after hard_reset`. On this board the reset esptool
+# performs after a verify does nothing: the board is in esptool's stub on a
+# native USB-JTAG port, where RTS is not wired to EN, so the pulse is not felt,
+# the stub keeps running and the board stays silent. Measured 2026-11-12 across
+# three backups -- every one of them reported "board stayed silent" and then
+# came back instantly when reset explicitly below. Asking for a reset here
+# bought nothing and made the failure look like the board's fault.
 if ! "$PY" -m esptool --chip esp32s3 --port "$PORT" --baud 921600 \
-        --before no_reset --after hard_reset \
+        --before no_reset --after no_reset \
         verify_flash 0 "$OUT" > "$log" 2>&1
 then
     tr '\r' '\n' < "$log" | tail -5 >&2
@@ -195,19 +217,17 @@ sys.exit(0 if seen else 1)
 PYEOF
 }
 
+printf 'resetting the board\n'
+reset_board
 printf 'waiting for the board to come back\n'
 if board_alive; then
     printf 'board is up\n'
-    # Disarm the reset: it has already happened and the board is running.
     trap 'rm -f "$log"' EXIT
 else
-    printf 'board stayed silent; resetting it again\n'
-    # A full reset rather than `run`: the board is not in the stub, which is
-    # exactly why `reset_board` above did nothing.
-    "$PY" -m esptool --chip esp32s3 --port "$PORT" --before default_reset \
-        --after hard_reset run >/dev/null 2>&1 || true
+    printf 'still silent after a reset; trying once more\n'
+    reset_board
     if board_alive; then
-        printf 'board is up after a second reset\n'
+        printf 'board is up on the second attempt\n'
         trap 'rm -f "$log"' EXIT
     else
         printf '%s\n' \
