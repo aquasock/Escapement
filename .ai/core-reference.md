@@ -70,6 +70,10 @@ Topic IDs are the `record_id` prefix. An entry reserves a name; it does not clai
   name: "CO5300 AMOLED and fbdev"
   description: "The panel's controller: SPI framing, window addressing, the byte order the pixel stream needs, which windows it honours, and what the fbdev driver does and does not implement for userspace."
 
+- topic_id: SSH
+  name: "wolfSSH server and SFTP"
+  description: "The shell's SSH/SFTP server on port 22: the request sizes it will and will not answer, the single client slot, and the file-descriptor budget it shares with the SD card."
+
 - topic_id: GPS
   name: "MIA-M10Q GNSS receiver"
   description: "The u-blox receiver on UART1: which pins, which rail, the NMEA sentence set it emits, and what its output proves about the antenna when there is no fix."
@@ -356,6 +360,9 @@ GPS-002: "The receiver emits GGA, RMC, GSA, GSV, GLL and VTG at 1 Hz with 0 chec
 GPS-003: "The receiver answers NMEA on this unit but NOT the UBX-MON-VER poll, so it never confirms its own model string; NMEA is the working interface and the UBX side (and constellation configuration) is untouched factory default"
 GPS-004: "Indoors the receiver tracks 3 to 5 satellites with a real HDOP around 2.38 and no fix, because a 3D solution needs four; a fix needs sky view and is the one remaining question the bench cannot answer"
 GPS-005: "A GPS time needs no fix: the receiver reports valid UTC at 3 satellites, so `gps time` sets the clock indoors; the value goes through settimeofday AND board_time_set_post, so the PCF85063A holds it and it survives a hard reset, and a GPS time applied from a stale capture is a wrong clock however right the source"
+SSH-001: "The SFTP server answers a 16 KiB write but never answers 24 KiB or 32 KiB (paramiko's put uses 32 KiB and hangs), and answers a 4 KiB read but not 16 KiB, so uploads chunk at 16 KiB and downloads at 4 KiB: measured 28.9 KiB/s up and 74.0 KiB/s down"
+SSH-002: "An abandoned SFTP session leaks its file descriptors unless WOLFSSH_STOREHANDLE is defined, because SFTP_FreeHandles() is compiled out and settings.h only sets that macro for WOLFSSH_FATFS, which is the other I/O path; with the macro on, 16 killed transfers leave the SD card writable where 5 used to exhaust its 5-slot VFS pool"
+SSH-003: "The SSH server takes one client at a time on the accept loop's own task, so a stalled session holds the only slot and later attempts complete the TCP handshake then get no protocol banner; only `ssh restart` or a reboot clears it"
 ```
 
 ---
@@ -1735,6 +1742,48 @@ GPS-005: "A GPS time needs no fix: the receiver reports valid UTC at 3 satellite
     - "ports/esp_idf/app/main.c time_set(), the sequence this mirrors for SNTP"
     - "Epoch cross-checked outside the firmware: 1794515694 decodes to 2026-11-12T20:34:54Z in Python"
   verification: "Verified on hardware 2026-11-12, indoors, end to end: the system clock, the RTC write-through and survival across a reset were each observed separately rather than inferred from one. The epoch arithmetic has 12 host checks including the 2024 leap day and both century cases, and a mutant dropping the century term fails 2100-12-31 by a day."
+
+- record_id: SSH-001
+  kind: NETWORK
+  topic_id: SSH
+  title: "SFTP answers 16 KiB writes and 4 KiB reads, and hangs beyond that"
+  status: VERIFIED
+  verified_date: 2026-11-12
+  statement: "The shell's wolfSSH/SFTP server on port 22 has a request-size ceiling and it differs by direction. Uploads: 4, 8 and 16 KiB chunks all complete at 19-31 KiB/s, while a 24 KiB file and a single 32 KiB write never finish. Downloads: 4 KiB reads run at 74.0 KiB/s while a 16 KiB read stalls. Measured end to end on a 233,600-byte text file, a 16 KiB upload chunk size gives 28.9 KiB/s and a 4 KiB download read size gives 74.0 KiB/s, with md5 matching both ways."
+  consequence: "The practical trap is that paramiko's `SFTPClient.put()` uses a 32 KiB request, so ordinary tooling hangs on every file above about 16 KiB without any error -- it is a wedge and not a slow transfer, which is why it reads as 'SFTP is slow'. Reads and writes are not symmetric, so a single chunk size chosen from one direction fails the other; the first transfer helper written here used 16 KiB both ways and hung a download that had uploaded fine. The 74 KiB/s download against 28.9 KiB/s upload also shows the radio is not the limiting factor, so the ceiling is in the SSH layer and not in the network. tools/sftp-put.py encodes the measured sizes rather than a guess, and names them in its own header so a re-measurement has a baseline."
+  sources:
+    - "on the watch, TinyDesk port 2026-11-12: size sweep 1/4/8/16/24/32/64 KiB up and 4/8/16 KiB down, with md5 of a 233,600-byte file both ways"
+    - "tinydesk-twatch tools/sftp-put.py: PUT_CHUNK 16 KiB, GET_CHUNK 4 KiB, and the note explaining why they differ"
+  verification: "Verified on hardware 2026-11-12, repeatedly: 16 KiB up completes in 0.59 s and 24 KiB never returns, and the same 233 KB file transfers intact in both directions at the quoted rates. NOT established: why the ceiling exists -- the server's read/write buffer setup was not inspected, so the boundary is measured and the cause is open."
+
+- record_id: SSH-002
+  kind: NETWORK
+  topic_id: SSH
+  title: "An abandoned SFTP session leaks file descriptors unless WOLFSSH_STOREHANDLE is defined"
+  status: VERIFIED
+  verified_date: 2026-11-12
+  statement: "The SD card is mounted with max_files = 5 (tdsh_sdcard.c, SD_MAX_FILES) and SFTP files are opened through wolfSSH's stdio path, where WFOPEN maps to wfopen and therefore into ESP-IDF's VFS. wolfSSH closes those descriptors on the SFTP CLOSE request and again in SFTP_FreeHandles(), which wolfSSH_SFTP_free() calls at session teardown -- but that second path is compiled out unless WOLFSSH_STOREHANDLE is defined, and settings.h defines it automatically only for WOLFSSH_FATFS, the direct-FatFs path this port does not use. Defining the macro from the port's project_include.cmake fixes it without editing any source: sixteen deliberately killed transfers now leave the card writable, where five killed it."
+  consequence: "Two things about this are worth carrying. First, the leak is invisible to a clean test: a session that ends normally ends with the client's own CLOSE requests, which free descriptors regardless of the macro, so only ABANDONED sessions leak -- and that is why the failure presented as a size limit, since the size limit is what causes the abandonment. Separating the two required noticing that eight 1 KiB puts in one session and a 233 KB transfer both left the card writable while a few killed clients did not. Second, exhausting the pool breaks the card for everything, not just for SFTP: the shell's own `echo x > /sd/f` returns 1 with `vfs_fat: open: no free file descriptors`, and `sd umount; sd mount` restores reads while only a reboot restores writes. The fix is one build definition rather than a source change because both halves of the mechanism are already present and gated on one macro, which matters here since wolfSSH lives in the tinydesk-shell submodule and is upstream's to edit. Raising SD_MAX_FILES would only move the cliff."
+  sources:
+    - "third_party/tdsh/third_party/wolfssh/src/wolfsftp.c: SFTP_AddHandleNode/SFTP_FreeHandles, the WOLFSSH_STOREHANDLE guards, and wolfSSH_SFTP_free()"
+    - "third_party/tdsh/third_party/wolfssh/wolfssh/settings.h: STOREHANDLE defined only for WOLFSSH_FATFS"
+    - "third_party/tdsh/ports/esp_idf/components/wolfssh_local/include/wolfssh/port.h: WFOPEN mapped to wfopen, so files go through VFS"
+    - "third_party/tdsh/ports/esp_idf/components/tdsh/src/tdsh_sdcard.c: SD_MAX_FILES 5"
+    - "tinydesk-twatch ports/twatchultra/main/project_include.cmake: the definition and its rationale"
+  verification: "Verified on hardware 2026-11-12 with a controlled before/after: five killed transfers exhausted the pool before the change (shell write returned 1, `vfs_fat: open: no free file descriptors` in the log), and sixteen killed transfers left the card writable after it, with a clean 233 KB upload and download both md5-verified afterwards. The definition was confirmed to reach the sources by finding it on 1514 entries of compile_commands.json and both SFTP_AddHandleNode and SFTP_FreeHandles in the rebuilt wolfsftp.c.obj. Double-close was ruled out by reading the CLOSE path, which closes the descriptor and then removes the node."
+
+- record_id: SSH-003
+  kind: NETWORK
+  topic_id: SSH
+  title: "One stalled SFTP client denies the whole server, silently and until a restart"
+  status: VERIFIED
+  verified_date: 2026-11-12
+  statement: "The shell's SSH server accepts TDSH_SSH_MAX_CLIENTS = 1 and services the accepted client inside the accept loop's own task. When a client stalls -- which an oversized SFTP request does reliably -- the slot stays held, and every subsequent connection completes its TCP handshake in about 10 ms and then receives no SSH protocol banner at all, indefinitely. Nothing times the session out. `ssh restart` on the watch, or a reboot, clears it."
+  consequence: "The failure mode is the expensive part: a TCP connect that succeeds followed by silence is indistinguishable from a dead server, so the natural next steps are to suspect the network, the port, or the credentials rather than the previous session. It also compounds an unrelated fault into a total outage -- the request-size wedge in SSH-001 would only cost one transfer if the server shed stalled clients. The diagnostic that settles it in seconds is to read the banner directly rather than opening an SSH client: a listening socket that never sends `SSH-2.0-wolfSSHv1.5.0` is a held slot, not a broken server. `tools/sftp-put.py` names that remedy in its connection-failure message for this reason, and `ssh status` reports the occupancy as `Active clients: N / 1`."
+  sources:
+    - "third_party/tdsh/ports/esp_idf/components/tdsh/src/tdsh_ssh.c: TDSH_SSH_MAX_CLIENTS, ssh_handle_client() called from the accept loop, and the client counter"
+    - "on the watch, TinyDesk port 2026-11-12: repeated socket connects reading no banner until `ssh restart`"
+  verification: "Verified on hardware 2026-11-12: after a wedged transfer, `socket.recv` returned nothing for 8 s while `ssh status` reported `Active clients: 1 / 1`, and the same check returned `SSH-2.0-wolfSSHv1.5.0` in 0.05 s immediately after `ssh restart`. The single-slot limit and the in-loop servicing are from the source, not inferred."
 ```
 
 ---
