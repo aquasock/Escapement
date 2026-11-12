@@ -1,3 +1,33 @@
+## 19 COMMIT Unreleased 2026-11-12T08:20:05-07:00
+
+#### Coming From:
+
+Unreleased b3c4222
+
+#### Purpose:
+
+Correct three rows of the port's subsystem table that described `/fs`, WiFi and the PMU as unbuilt or barely built when all three are proven working.
+
+#### Outcome:
+
+At `d9a8bf9` on branch `t-watch-ultra`, `/fs`, WiFi and Battery / PMU in the subsystem table of `ports/twatchultra/README.md` now say what was measured rather than what was assumed. The cycle began as an audit of which of the board's peripherals remain unbuilt, and the audit found that one entry on the operator's own list was already finished: WiFi was reported untested because this repository contains no WiFi code, which is a true statement about the port and a false one about the board, since the radio is ESP-IDF's and needs nothing here. That was an inference from a code search presented as a finding, and the operator corrected it by giving the watch's address. Verified from the host: twelve pings to 10.10.0.15 all returned, min 5.152 ms, average 34.284, max 64.400, mdev 22.010, so the link carries traffic and is not merely associated; telnet on port 23 reaches `tinydesk - log in with your TinyDesk account` followed by `login:` and `Password:`; and port 22 completes an ECDSA P-256 key exchange against `SSH-2.0-wolfSSHv1.5.0` with the SFTP client landing on a server that identifies itself as `tdsh-idf SSH/SFTP`. Verified from the watch's own side rather than only from the host: `ssh status` reports `SSH/SFTP server: running`, port 22, a per-device host key, `Active clients: 0 / 1`, and `wolfSSL allocator: private heap in PSRAM` with a 65536-byte private heap. The taskbar changed from `Offline` to `Wi-Fi` with signal bars over the same session, which is the desktop's own reading of a link the host could already reach. What is not verified is a login, because that needs the account password and guessing at one is not a test; so SFTP file transfer and the telnet desktop handover are confirmed at the protocol and banner level and no further, and the row says so. `/fs` was checked the same way rather than inferred from the component being linked: `ls /` in the Terminal returns `etc home root sd shared tmp`, which is the littlefs partition as the shell's own root, and a file written to `/tmp` read back byte-exact and was then removed -- so the earlier note that it "should work" is now a measurement. Battery / PMU had claimed that no TinyDesk UI consumes the PMU and that the AXP2101 raises only ALDO2, and both were false: `power.c` raises ALDO1 for the card, ALDO2 for the display and BLDO2 for the speaker, and System Monitor draws the fuel gauge. That row now also records what the port does NOT do -- charging is never configured, because the only PMU writes are rail voltages and enable bits, so the part charges on its own defaults -- which is the distinction a reader needs and the old row had backwards. Two things were deliberately not changed. `NET-001`'s throughput figures of about 409 KB/s and 30 to 50 ms to the gateway were measured on the Escapement Linux build over esp-hosted, not on this port, and the 34 ms average seen here is a different stack that happens to land in the same range, so the record stands and the coincidence is noted rather than folded into it. And no code was touched: the three rows are documentation, nothing was built, deployed or flashed, and the firmware running on the watch is still `dbebb69`, which is also the build the operator accepted. The required `core-syntax.md` audit was run against the whole `.ai/` diff, which is this entry alone: `core.md` was untouched, the entry follows the six-section template and the canonical order, its number is the highest present plus one at 19, Coming From names the pre-cycle `HEAD`, Files Modified lists one port file and no `.ai/` path or generated artifact, Status uses allowed values only, and the active log holds 19 entries against the 100-entry limit.
+
+#### Next Steps:
+
+A fresh backup is now the outstanding action and the only one with real value, because four commits have landed since `working-2026-11-12-0109.bin` was written -- the SD note, the touch interrupt, its logging fix and these corrections -- and two of those changed the firmware image, so the backup no longer describes what runs. After it, the remaining unbuilt peripherals are the ones the audit listed and none is blocked: audio is a beep and nothing else, with no playback path, no mixer and no file source; charging is read but never configured; Pusher A is the power key and reaches the SoC only through the AXP2101 PEK interrupt on GPIO 7, which this port does not install, so the physical power button does nothing; Pusher B is GPIO 0, proven readable during the old SPI probe and read by no code here; and the display's tearing-effect line is configured in `board.conf` and read by nothing, so the painter free-runs. Of those, Pusher B is the cheapest real result because the pin is already proven and needs a handler rather than a driver, and Pusher A is the natural follow-on because the same PMU interrupt that gives the power key also gives VBUS plug and removal, which is what charge-state handling would need. Two smaller items belong to the touch work rather than to a new subject: the screen model that reads the Log Viewer over USB is in a temporary directory for the third time and belongs in the fork under a tools directory, and the boot-time OTA check writes four lines of `esp-tls` and `HTTP_CLIENT` errors on an offline watch that bury the ring at every boot and are worth quieting now that the ring is worth reading. The standing queue is otherwise unchanged: the bell seam stays parked with its finding recorded, the top margin is the last unpainted region, what the margins do under a full-screen application waits for something to go full screen, Store installs to the card and the image cache have never run against a card, `TD_SIZE_POLL_MS=0` and `TD_ACK_TIMEOUT_MS=0` remain untested against the current tree, the RTC write path has never been exercised by setting a time and power-cycling, and the pre-existing YAML fence defect in `core-reference.md` is untouched. The unbuilt outboard parts are as they were: the BHI260AP at 0x28 answering on the bus with no driver, the LoRa radio needing ALDO3 and XL9555 P05 before it is powered, the NFC reader needing DLDO1 with its earlier absence verdict still suspect, and the GNSS and microphone with no code and, for the microphone, no evidence in this repository that a part is fitted at all.
+
+#### Files Modified:
+
+- ports/twatchultra/README.md
+
+#### Status:
+
+- Build: N/A
+- Deployment: N/A
+- User Test: PASS
+
+---
+
 ## 18 COMMIT Unreleased 2026-11-12T08:11:20-07:00
 
 #### Coming From:
