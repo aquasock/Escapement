@@ -82,6 +82,10 @@ Topic IDs are the `record_id` prefix. An entry reserves a name; it does not clai
   name: "ST25R3916 NFC reader"
   description: "The reader on the shared SPI bus: the part fitted, which chip select and interrupt it uses, the PMU rail that powers it, the SPI framing it answers, and the vendor stack this project drives it with."
 
+- topic_id: DSP
+  name: "Framebuffer ownership and blitting"
+  description: "Who may write the panel's framebuffer and how a bitmap reaches it: the painter's cell-diff model, exclusive ownership for an app that draws pixels, where frame-sized buffers can live, and what happens to the USB mirror when a picture owns the screen."
+
 - topic_id: TCH
   name: "CST9217 capacitive touch"
   description: "The touch controller at I2C 0x1A: its address against its neighbours, the unlock handshake that gets it scanning, the report block layout and freshness marker, and the measured read reliability on the bit-banged bus."
@@ -363,6 +367,9 @@ GPS-005: "A GPS time needs no fix: the receiver reports valid UTC at 3 satellite
 SSH-001: "The SFTP server answers a 16 KiB write but never answers 24 KiB or 32 KiB (paramiko's put uses 32 KiB and hangs), and answers a 4 KiB read but not 16 KiB, so uploads chunk at 16 KiB and downloads at 4 KiB: measured 28.9 KiB/s up and 74.0 KiB/s down"
 SSH-002: "An abandoned SFTP session leaks its file descriptors unless WOLFSSH_STOREHANDLE is defined, because SFTP_FreeHandles() is compiled out and settings.h only sets that macro for WOLFSSH_FATFS, which is the other I/O path; with the macro on, 16 killed transfers leave the SD card writable where 5 used to exhaust its 5-slot VFS pool"
 SSH-003: "The SSH server takes one client at a time on the accept loop's own task, so a stalled session holds the only slot and later attempts complete the TCP handshake then get no protocol banner; only `ssh restart` or a reboot clears it"
+DSP-001: "The panel's framebuffer has two writers -- the cell painter and any bitmap blit -- and they must be given exclusive ownership, because the painter decides what to redraw by comparing cells against its own record and a blit does not update that record; uncoordinated, the painter repaints the old cells over the picture at the next cursor blink or clock tick"
+DSP-002: "A static RGB565 full-panel buffer does not fit: 320x416 costs 256 KB and the link fails with `region dram0_0_seg overflowed by 88896 bytes`, because everything static in the port's component is internal DRAM by construction and only libtinydesk, libtdsh and libmicropython are mapped to PSRAM; frame buffers must be heap allocations in PSRAM"
+DSP-003: "The USB mirror stops describing the panel once a bitmap owns the screen, because the desktop's diff stream no longer matches the glass, so a diagnostic that exists only in that terminal is unreadable exactly when a picture is up; counters must also go to a file"
 ```
 
 ---
@@ -1784,6 +1791,48 @@ SSH-003: "The SSH server takes one client at a time on the accept loop's own tas
     - "third_party/tdsh/ports/esp_idf/components/tdsh/src/tdsh_ssh.c: TDSH_SSH_MAX_CLIENTS, ssh_handle_client() called from the accept loop, and the client counter"
     - "on the watch, TinyDesk port 2026-11-12: repeated socket connects reading no banner until `ssh restart`"
   verification: "Verified on hardware 2026-11-12: after a wedged transfer, `socket.recv` returned nothing for 8 s while `ssh status` reported `Active clients: 1 / 1`, and the same check returned `SSH-2.0-wolfSSHv1.5.0` in 0.05 s immediately after `ssh restart`. The single-slot limit and the in-loop servicing are from the source, not inferred."
+
+- record_id: DSP-001
+  kind: DISPLAY
+  topic_id: DSP
+  title: "The panel has two potential writers, and the cell painter will overpaint any bitmap unless given exclusive ownership"
+  status: VERIFIED
+  verified_date: 2026-11-12
+  statement: "The port's framebuffer is written by a paint task that decides what to redraw per terminal cell, comparing each cell against `s_shown` -- its own record of what it has already drawn -- and flushing only the rectangles that differ. A bitmap blit through `display_picture_rgb()` writes pixels directly and does not update that record, so after a blit the painter still believes the glass holds the old cells and repaints them at the next notification. On a real panel this appears as the console bleeding through the image in strips wherever a taskbar clock tick or cursor blink landed, carrying whatever the previous windows had drawn."
+  consequence: "An app that draws pixels must claim the framebuffer for as long as it owns the screen, and release on exit: `display_pixels_claim(true)` stops the painter, and `display_pixels_claim(false)` invalidates `s_shown` so the next frame repaints every cell -- necessary because by then the glass holds a picture rather than the cells the painter was tracking. It is a mode and not a lock because there is never more than one writer either way, and making it a lock would suggest concurrency the design does not have. Measured while owned: 142 repaint triggers over 15 seconds and three pattern changes, of which none executed. On release the painter resumed and repainted the whole screen, which is what makes the desktop come back whole rather than showing the picture underneath."
+  sources:
+    - "tinydesk-twatch ports/twatchultra/main/display.c: paint_task(), the s_shown comparison, and display_pixels_claim()"
+    - "tinydesk-twatch ports/twatchultra/main/display.h: the claim/release contract"
+    - "on the watch 2026-11-12: `pattern 0|1|2` then `pattern off`, with the paint counters read from /sd/pattern.txt"
+  verification: "Verified on hardware 2026-11-12: the operator reported all three patterns holding with no console bleed after the change, against stripped bleed before it. The suppression is a measurement rather than an impression -- `painted` stayed at 631 across 15 s while `skip` climbed from 185 to 327, and on release `painted` rose to 656 with `skip` frozen."
+
+- record_id: DSP-002
+  kind: DISPLAY
+  topic_id: DSP
+  title: "A full-panel RGB565 buffer cannot be static: 256 KB overflows internal DRAM by 88,896 bytes"
+  status: VERIFIED
+  verified_date: 2026-11-12
+  statement: "A 320x416 RGB565 frame is 266,240 bytes. Declared as a static array in the port's component it fails the link with `tinydesk.elf section .dram0_0.bss will not fit in region dram0_0_seg` and `region dram0_0_seg overflowed by 88896 bytes`. Everything static in `ports/twatchultra/main` is internal DRAM by construction: the port's `extram.lf` maps only `libtinydesk`, `libtdsh` and `libmicropython` to PSRAM, and internal DRAM on this board has roughly 47 KB free once WiFi and Bluetooth have taken their share. A heap allocation in PSRAM works."
+  consequence: "This decides where any frame-sized buffer lives, and it applies to the Tamagocore port directly: the emulator's frame is 300x308 (184,800 bytes) and cannot be a static array either. It also explains a constraint that looks arbitrary from outside -- the panel's DMA source buffer, `s_tx`, IS static and must stay so, because DMA out of PSRAM goes through the cache and is markedly slower, and because it is only 10 KB. The rule is not 'never static' but 'nothing frame-sized static': small buffers where DMA needs them, frame-sized buffers on the heap. The alternative, a linker mapping for this component, is available but would put every small static in the component into PSRAM as well, including the ones that need to stay internal."
+  sources:
+    - "tinydesk-twatch ports/twatchultra/main/extram.lf: the three archive mappings"
+    - "tinydesk-twatch ports/twatchultra/main/display.c: the s_tx comment explaining why that one is static"
+    - "build log 2026-11-12: `region dram0_0_seg overflowed by 88896 bytes`"
+  verification: "Verified by build: the static form failed to link with the exact overflow figure, and moving the same buffer to `malloc()` linked and ran. The 47 KB internal-free figure is from the port's own System Monitor and the earlier shell sessions."
+
+- record_id: DSP-003
+  kind: DISPLAY
+  topic_id: DSP
+  title: "The USB mirror goes stale when a bitmap owns the panel, so instrumenting a picture needs a second channel"
+  status: VERIFIED
+  verified_date: 2026-11-12
+  statement: "The port mirrors the desktop to USB as a stream of terminal cells, which is how every screen-reading check in this project has worked. When a bitmap claims the panel and the painter stops, that stream stops describing the glass: the desktop's diff output no longer matches what is displayed, because what is displayed is no longer the desktop. A screen reader driven off the mirror then reports a stale or blank terminal while the panel holds a correct picture."
+  consequence: "A diagnostic that exists only in the terminal is unreadable precisely when a picture is up, which is when it is most wanted. The fix used here is to write the same counters to a file on the SD card as well as printing them, and read them back over SFTP. The general rule is worth stating because it will recur: when the thing under test owns the output channel, the test needs a channel it does not own. Note the mirror is still correct for everything else -- it is the desktop that is stale, not the link."
+  sources:
+    - "tinydesk-twatch ports/twatchultra/main/link_twatch.c: the mirror budget and the s_mirror_stale path"
+    - "tinydesk-twatch ports/twatchultra/main/display.c: the paint_task suppression"
+    - "tools/watch-screen.py: the reader this affects"
+  verification: "Observed on hardware 2026-11-12: after `pattern 0` the screen reader returned a terminal frame that no longer updated while `pattern stats` still ran and reported the shell was alive. The counters read back from /sd/pattern.txt continued to advance correctly, which is what showed the panel and the shell were fine and only the mirror was stale."
 ```
 
 ---

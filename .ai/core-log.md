@@ -1,3 +1,36 @@
+## 44 COMMIT Unreleased 2026-11-12T16:23:06-07:00
+
+#### Coming From:
+
+Unreleased c0d705c
+
+#### Purpose:
+
+Make the watch draw an RGB565 bitmap and stop the desktop repainting over it, so an app that owns the screen has a screen.
+
+#### Outcome:
+
+At `2e350cb` on branch `t-watch-ultra`, `pattern 0` draws colour bars that HOLD: the operator reports all three patterns looking good, with no console bleeding through. Three things were needed and each was found by the previous one failing. FIRST, `display_picture_rgb()` was a stub returning false, and `link_twatch.c` passed NULL as the desktop's RGB sink; it now copies the bitmap row by row into `s_fb` and calls `flush_rect()`, which already byte-swaps and pushes. The port's own comment said it had "no picture support", which was true of all three formats and is now true of two: 8-bit and run-length pictures stay NULL, because the desktop learns from those three what it can draw and a sink that returns false is worse than saying plainly there is none. SECOND, THE BITMAP DID NOT HOLD, and the cause was two writers with no coordination rather than a blit fault. `paint_task` decides what to redraw by comparing each cell against `s_shown`, its record of what it has already drawn; a bitmap blit does not update that record, so after a blit the painter still believed the glass held the old cells and repainted them at the next notification -- a taskbar clock tick or a cursor blink -- carrying whatever the Start menu and Files had left behind. That is exactly the striped console bleed the operator saw, and it was the painter doing what it was told. The fix is explicit ownership: `display_pixels_claim(true)` stops the painter, and `display_pixels_claim(false)` invalidates `s_shown` so the next frame repaints every cell, because by then the glass holds a picture rather than the cells the painter was tracking. A mode rather than a lock, because while it is set there is exactly one writer and while it is clear there is exactly one other. THIRD, AND AS IMPORTANT AS THE FIX: A PICTURE CANNOT TESTIFY ABOUT ITSELF. A bitmap looks identical whether the painter is suppressed or about to overwrite it, and the USB mirror used for every other check in this project goes stale the moment the panel is owned -- the desktop's diff stream stops describing the glass, because the glass no longer shows the desktop. So two counters were added and the result is a fact rather than an inference: while owned, `painted` stayed at 631 across 15 seconds and three pattern changes while `skip` climbed 185 to 327, that is 142 repaint triggers of which none executed; on release `painted` went 631 to 656 and `skip` froze at 350. The same counters are written to `/sd/pattern.txt` as well as printed, because a diagnostic that exists only in the terminal is unreadable precisely when the panel is owned -- the mirror is stale -- and the file can be fetched over SFTP instead. A REAL CONSTRAINT WAS FOUND BY BUILDING IT: the test pattern first used `static uint16_t img[DISPLAY_W * DISPLAY_H]` and the link failed with `region dram0_0_seg overflowed by 88896 bytes`, because everything static in this component lands in internal DRAM by construction (extram.lf maps only libtinydesk, libtdsh and libmicropython to PSRAM) and internal DRAM is this board's scarcest resource at about 47 KB free. The buffer moved to the heap. That decides where the emulator's own 184 KB frame goes, and it would otherwise have been discovered a phase later. The build is clean, the operator confirmed all three patterns on the glass, and no backup has been retaken since the firmware changed. The required `core-syntax.md` audit was run against the complete `.ai/` diff, which is this entry alone: `core.md` was untouched; the entry follows the six-section template and the canonical order; its number is the highest present plus one at 44; Files Modified lists port paths and no `.ai/` file or generated artifact; and Status records the user test as a pass on the operator's own report.
+
+#### Next Steps:
+
+The rendering question is closed and the port can proceed to Phase 4: `tmc_core.c` becomes an ESP-IDF component, the ROM loads from the SD card, and one static emulator frame goes on the glass. Two things from this cycle decide that phase's shape. The frame buffer must be a PSRAM allocation rather than a static array, because 256 KB of .bss overflowed internal DRAM by 88,896 bytes. And the app must claim the screen before its first blit and release on exit, or the painter fights it exactly as it fought the test pattern -- which is now a documented contract in `display.h` rather than something to rediscover. What Phase 4 still has to settle is the ROM: 524,288 bytes against 507,072 bytes of free flash means it cannot be embedded, so it comes from the card, and the app must fail gracefully when the card is absent rather than presenting a black panel. Everything else is unchanged and unblocked: NFC is parked at the operator's direction with the re-read storm deliberately kept; GPS tracks satellites and sets the clock, with the UBX side unexplored and a fix untested for want of sky; the taskbar edge is settable and left defaulting to bottom; the thermistor reads in degrees; both pushers work and both send Enter, with F10 on the BOOT pusher the shape I would still argue for; audio plays WAV files from the card; and the remaining outboard parts are the BHI260AP at 0x28 answering and undriven, the LoRa radio needing ALDO3 and XL9555 P05, and the microphone with no code. A fresh backup is due, since `working-2026-11-12-1542.bin` predates the picture sink and the paint-task change.
+
+#### Files Modified:
+
+- ports/twatchultra/main/display.c
+- ports/twatchultra/main/display.h
+- ports/twatchultra/main/link_twatch.c
+- ports/twatchultra/README.md
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: PASS
+
+---
+
 ## 43 COMMIT Unreleased 2026-11-12T15:46:24-07:00
 
 #### Coming From:
