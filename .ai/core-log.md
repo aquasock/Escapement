@@ -1,3 +1,37 @@
+## 49 COMMIT Unreleased 2026-11-12T18:03:24-07:00
+
+#### Coming From:
+
+Unreleased e29680e
+
+#### Purpose:
+
+Wire the three bottom margin bars to the Tamagotchi's three buttons, so the pet is playable on the glass instead of only from the shell.
+
+#### Outcome:
+
+The strip plays the game. A press on the left, middle or right bar reaches the guest's button 0, 1 or 2 through `tmc_button()`, and the mapping is positional because that is the order the V3's pin mask documents. Verified on the operator's own run: **31 presses, 0 drops**, over 9,107 frames and 1,258 blits in 569 seconds of guest time, with the operator reporting it works great. THE PRESS IS QUEUED, AND THAT IS THE WHOLE OF THE ENGINEERING. `touch.c` runs its poll task pinned to core 0 at priority 3; the guest task is unpinned at the same priority and can be on core 1. `tmc_core.h` states plainly that one instance is not reentrant, and `tmc_button()` writes the emulated CPU's pin state that `tmc_run()` is reading -- so applying a press directly from the touch task would be a data race on two cores against the guest's own programmer's model. The failure would not have been a crash and would not have been reproducible on demand: it would have been a pet that occasionally acted on a button it never received, which is the kind of fault that gets blamed on the emulator. An eight-deep queue between them keeps the emulator single-threaded instead of growing a lock it does not need, and the guest task drains it at the top of each frame so a press that arrived during the last one is in effect for the next -- applying it afterwards would put every press a frame late. THE SAME RACE WAS ALREADY IN THE TREE. `tama press N` has written pin state straight from the shell task since Phase 4, which is the same violation with a different second task; it goes through the queue now, and taking the same road as a real press is what made the drain verifiable without a finger -- three shell presses produced `presses=3 drops=0` before the strip was tried. THE REGISTRATION IS FOR THE LIFE OF THE PROCESS rather than per run, and touch.h says why: a handler torn down with the app leaves a window in which the driver holds a pointer to something that has freed itself, whereas a handler that returns false when the app is not running behaves identically with none of that risk. The driver decides nothing about which buttons an app wants -- it passes the region and index and the handler accepts or declines -- so the columns are still declined and still logged `off`, which keeps "not wired yet" visible in the log instead of turning it into a silent no-op. An accepted press logs `e1 i<n> app` and buzzes once; a refused one logs `off` and does not, following the rule `edge_press()` already applies to the reserved slot. Two smaller things: `_Static_assert(BTN_N == TAMA_BTN_N)` makes the strip's bar count and the guest's button count fail at build time rather than drift, and the pointer path is now skipped when an app has claimed the pixels (`if (!app || owned)`), because an app that claimed the framebuffer has been offered the margins as buttons and sending pointer reports as well would be two answers to one press. The build was clean with 0 warnings, binary `0x28b890`, and the host suite passed 41 of 41. What this cycle does NOT establish is that the guest's own game logic responds correctly to those buttons -- the count proves presses arrived and were applied, and the operator's report that it works is what covers the rest.
+
+#### Next Steps:
+
+The two columns are the remaining unwired controls and the reason APP mode blanks them: five buttons down each side are the natural home for the pet's own screens and actions, and the handler already declines exactly those, so wiring them is a matter of deciding what they should do and extending the same queue with a wider event. A Start menu entry is the other obvious gap, since `tama` is still typed into the shell; `display_pixels_claim()` is all an app needs to take the screen and the desktop already has a way to launch apps. The degree circle on the strip is still a placeholder that no longer describes a duty -- it was chosen when the bars were inert, and they act now, so the label wants deciding: the guest's three buttons show the pet's status icons and there is no short word for them that fits 41 px. Nothing in this cycle is unverified except the guest's own response, which is the operator's report rather than a measurement.
+
+#### Files Modified:
+
+- ports/twatchultra/main/tama.c
+- ports/twatchultra/main/tama.h
+- ports/twatchultra/main/touch.c
+- ports/twatchultra/main/touch.h
+- ports/twatchultra/README.md
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: PASS
+
+---
+
 ## 48 COMMIT Unreleased 2026-11-12T17:42:11-07:00
 
 #### Coming From:

@@ -375,6 +375,7 @@ DSP-004: "The leftover strips are a transfer-height fault: `flush_rect` sized a 
 DSP-005: "Only paint_task may touch flush_rect, s_tx or the SPI bus; calling it from the shell task produced a scrambled taskbar and a hung shell, because a second writer raced the painter over a buffer and bus that had never needed a lock"
 DSP-006: "The button bars and key columns live OUTSIDE the framebuffer in controller coordinates and are painted once at init by paint_buttons()/paint_column(), not by the cell painter, so a full-screen app can clear s_fb without erasing the watch's controls -- but a framebuffer clear alone is not enough to take the screen, because a blit leaves the previous console text in the rest of s_fb and ownership then stops anything from overwriting it"
 EMU-018: "Internal DRAM is scarce enough that 4,148 bytes of .bss starved the SSH server of its 65,536-byte floor (`insufficient internal RAM (62443 bytes free; need at least 65536)`), so the emulator's dirty-row tables are a refcounted PSRAM heap allocation and internal free went 62,443 to 66,599; a component that adds .bss can break a peripheral with nothing to do with it"
+EMU-019: "tmc_button() writes the emulated CPU's pin state that tmc_run() reads, so it may only be called from the guest task: one instance is not reentrant, and the touch poll task runs on core 0 at the same priority as the unpinned guest task -- presses go through a queue drained between frames, not straight at the machine"
 ```
 
 ---
@@ -1655,6 +1656,21 @@ EMU-018: "Internal DRAM is scarce enough that 4,148 bytes of .bss starved the SS
     - "ports/twatchultra/sdkconfig.defaults: CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL=4096"
     - "DSP-002 for the same scarce resource failing at link time, and DSP-003 for why the diagnostics go to a file"
   verification: "Verified on hardware 2026-11-12 in three steps. The failure was observed as the exact refusal above with 62,443 bytes free. After the change `heap` reported free=66599 and `ssh start` returned without an error, with the SFTP server answering on 10.10.0.15:22 and a 524288-byte ROM transferred at 26.6 KiB/s with md5 3bd0c293351ebb2bb221e9c69cc1c83b matching. The claimed cause is confirmed rather than assumed because the 4,148-byte figure is the .bss the component's tables occupied before the change and 66,599 - 62,443 = 4,156 recovered, which is that figure plus alignment."
+
+- record_id: EMU-019
+  kind: EMU
+  topic_id: EMU
+  status: VERIFIED
+  verified_date: 2026-11-12
+  title: "A button press is a cross-task write to the emulated CPU, so it is queued rather than applied"
+  statement: "`tmc_button()` writes the emulated CPU's pin state, which `tmc_run()` reads on every step, and `tmc_core.h` states that one instance is not reentrant. In the firmware the guest runs on an unpinned task at priority 3 while touch.c's poll task is pinned to core 0 at the same priority, so applying a press from the touch task would be a data race on two cores. Accepted presses now go into an eight-deep FreeRTOS queue and the guest task drains it at the top of each frame, before `tmc_run()`. Measured on the glass in one run: 31 presses, 0 drops, across 9,107 frames."
+  consequence: "The emulator keeps its single-threaded contract instead of growing a lock, which matters because the contract is what makes the whole dirty-row design simple -- a lock around `tmc_run()` would serialise the emulator against itself for no benefit. Draining BEFORE the step rather than after is load-bearing and not a detail: the guest samples its pins at its own rate inside `tmc_run()`, so a press applied afterwards is one frame late, and a frame is 62 ms of guest time. The general lesson is that an emulator's input surface is part of its state, not a message to it. It also surfaced a latent instance of the same fault that had been in the tree since Phase 4: `tama press N` wrote pin state straight from the shell task, and it now takes the same queue -- which is what made the drain verifiable from the host before any finger touched the glass."
+  sources:
+    - "tinydesk-twatch ports/twatchultra/main/tama.c: tama_enqueue_button(), the drain at the top of the guest loop, and cmd_tama's press path"
+    - "tinydesk-twatch ports/twatchultra/main/touch.c: the poll task pinned to core 0, and the call into touch_app_button_fn"
+    - "patches/harness/core0/tmc_core.h: 'one instance is not reentrant', and tmc_button()'s contract"
+    - "tinydesk-twatch ports/twatchultra/main/touch.h for why the sink is registered for the life of the process"
+  verification: "Verified on hardware 2026-11-12. The queue path was first exercised from the host with three `tama press`/`tama release` pairs, which the report recorded as `presses=3 drops=0` -- so the drain was proven before the touch path existed. The operator then played the pet from the strip on the glass and confirmed it works, and that run's report recorded `presses=31 drops=0` over 9,107 frames and 569 s of guest time. That the guest's own game logic responds correctly to those presses is the operator's report, not a measurement."
 
 - record_id: NFC-001
   kind: BOARD
