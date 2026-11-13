@@ -378,6 +378,7 @@ DSP-006: "The button bars and key columns live OUTSIDE the framebuffer in contro
 EMU-018: "Internal DRAM is scarce enough that 4,148 bytes of .bss starved the SSH server of its 65,536-byte floor (`insufficient internal RAM (62443 bytes free; need at least 65536)`), so the emulator's dirty-row tables are a refcounted PSRAM heap allocation and internal free went 62,443 to 66,599; a component that adds .bss can break a peripheral with nothing to do with it"
 EMU-019: "tmc_button() writes the emulated CPU's pin state that tmc_run() reads, so it may only be called from the guest task: one instance is not reentrant, and the touch poll task runs on core 0 at the same priority as the unpinned guest task -- presses go through a queue drained between frames, not straight at the machine"
 EMU-020: "splb32_audio_emits() counts square-wave TOGGLES, not sounds -- one held tone raises it thousands of times a second -- so a front end keyed on it plays continuously and falls silent only when the guest stops stepping; the envelope is the signal and the waveform is a clock, so splb32_audio_active() exists and callers fire on its rising edge"
+EMU-021: "The emulated EEPROM is 1024 bytes (HT24LC08_SIZE) and the save image must match it exactly -- ht24lc08_save() memcpys HT24LC08_SIZE with no length argument, so TMC_EEPROM_BYTES at 512 wrote 512 bytes past the caller's buffer and the overflow surfaced three calls away as a tdsh `fclose` on a corrupted FILE*; _Static_assert ties the two together, and a 64 KB coredump partition carved from the unused ota_1 is how a panic gets a backtrace when the console is compiled out"
 ```
 
 ---
@@ -1703,6 +1704,22 @@ EMU-020: "splb32_audio_emits() counts square-wave TOGGLES, not sounds -- one hel
     - "patches/harness/core0/tmc_core.c: tmc_audio_active(), the portable wrapper the firmware uses"
     - "tinydesk-twatch ports/twatchultra/main/tama.c: the rising-edge test with its 250 ms floor"
   verification: "Verified on hardware 2026-11-12: the operator reported a BEL that never stopped and that ceased while paused, and confirmed it fixed after the change. The fault is stated as a number by tools/tamacore/check_audio.c, run with ./scripts/tamacore-host.sh audio: 'one 1000-toggle tone is one sound (1000 emits, envelope constant)'. The check was proved sensitive by removing the toggle_state inversion from splb32_sound.c, which makes it fail with 'level did not alternate across a toggle'."
+
+- record_id: EMU-021
+  kind: EMU
+  topic_id: EMU
+  status: VERIFIED
+  verified_date: 2026-11-12
+  title: "A save-image size constant 512 short of the EEPROM's 1024 overflowed the stack, and the crash appeared three calls away"
+  statement: "The emulated serial EEPROM is a 24LC08: `HT24LC08_SIZE` is 1024. `ht24lc08_save()` is `memcpy(out, e->mem, HT24LC08_SIZE)` -- it takes no length and always writes the full 1024 bytes. `TMC_EEPROM_BYTES` was 512, and both `save_checkpoint()` in `main/tama.c` and `cmd_tama`'s save path declare `uint8_t save[TMC_EEPROM_BYTES]` on the stack, so every checkpoint wrote 512 bytes past its buffer. `tmc_eeprom_load()` read 512 bytes past its buffer on the way back, because `splb32_eeprom_load()` calls `ht24lc08_load(e, data, HT24LC08_SIZE)`."
+  consequence: "The overflow's destination is the point. On the shell task the write ran UPWARD through `cmd_tama` into tdsh's `execute_segment` frame and corrupted the `FILE *redir_out` local, which is initialised to NULL and never assigned for a command with no redirection. The parser's `if (redir_out) fclose(redir_out);` then closed a garbage pointer and newlib asserted: `check_lock_nonzero locks.c:307 (lock != NULL && "Uninitialized lock used")`. So `tama stop` rebooted the watch, and the backtrace pointed at tdsh, three calls from the line that caused it. Three things follow. A stack overflow does not have to hit a guard to be fatal -- it can quietly rewrite a caller's state and kill the program later, somewhere unrelated. A wrong size constant is invisible when the API that consumes it takes no length, so the defence has to be a static assertion against the device's own size rather than care at the call site. And the Save BUTTON hid the bug: `apply_action` calls the same function on the guest task, whose 6144-byte stack absorbed the overflow, so the saved file was correct and the memory around it was not -- a passing Save means the file is right, not that the machine is."
+  sources:
+    - "patches/harness/core0/tmc_core.h: TMC_EEPROM_BYTES, now 1024 with the reasoning recorded"
+    - "patches/harness/core0/tmc_core.c: _Static_assert(TMC_EEPROM_BYTES == HT24LC08_SIZE)"
+    - "patches/harness/splb32/ht24lc08.c: ht24lc08_save() and HT24LC08_SIZE"
+    - "tinydesk-twatch third_party/tdsh/src/core/tdsh_parser.c:1630, the fclose that received the corrupted pointer"
+    - "captured backtrace: #5 _fclose_r(fp=0x6d305b1b), #6 fclose, #7 execute_segment, #8 tdsh_execute_line (line="tama stop")"
+  verification: "Verified on hardware 2026-11-12. The backtrace came from a core dump, not from bisection: `ota_1` has never been used (no update feed on this board), so it was shrunk from 0x300000 to 0x2F0000 to free 64 KB at 0x600000 for a `coredump` partition, with `CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH` and `..._DATA_FORMAT_ELF`; `idf.py coredump-info` then named the assert and every frame. The partition and the config were reverted and the watch reflashed from a clean tree before the fix was accepted. After the fix, two complete start/stop cycles: `uptime` climbed 17 to 27 to 34 seconds with `stopped, screen released` printed each time and no reset. The static assertion was proved to work rather than assumed -- setting the constant back to 512 fails the build with 'save image size must match the emulated EEPROM'."
 
 - record_id: NFC-001
   kind: BOARD

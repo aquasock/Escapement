@@ -1,3 +1,36 @@
+## 51 COMMIT Unreleased 2026-11-12T20:04:44-07:00
+
+#### Coming From:
+
+Unreleased 09616ec
+
+#### Purpose:
+
+Find and fix the reboot that followed every `tama stop`, which the operator reproduced on their own watch.
+
+#### Outcome:
+
+The reboot was a stack overflow caused by one wrong constant, and the fault was three calls away from where it crashed. The emulated serial EEPROM is a 24LC08 -- 8 Kbit, 1024 bytes -- and `ht24lc08_save()` memcpys HT24LC08_SIZE bytes into the caller's buffer with no length argument, while `TMC_EEPROM_BYTES` said 512. So every checkpoint wrote 512 bytes past a 512-byte stack array. On the shell's stack that overflow ran UPWARD through `cmd_tama` into tdsh's parser frame and corrupted the `FILE *redir_out` local in `execute_segment`; the parser then called `fclose()` on the garbage pointer the overflow had left there, and newlib's lock assertion fired: `assert failed: check_lock_nonzero locks.c:307 (lock != NULL && "Uninitialized lock used")`. The load path read 512 bytes past its buffer for the same reason, so both directions were wrong. FIXING IT TOOK ONE LINE, FINDING IT TOOK A CHANNEL. Nothing in this project could report a panic: the console is compiled out (`CONFIG_ESP_CONSOLE_NONE`), the USB port belongs to the desktop's keyboard and mirror so a console there would have cost the ability to type the command under test, and the USB mirror stops describing the panel while a bitmap owns it. Every previous attempt was a bisect on a reboot signal that the operator rightly questioned, and three of those bisects were wasted removing things that were never guilty -- the repaint, the margin restore, and the frees. What broke the deadlock was a core dump: `ota_1` has never been used because this board has no update feed, so shrinking it by 64 KB made room for a 64 KB coredump partition without touching `storage`, and `idf.py coredump-info` then produced the full backtrace with symbols and line numbers on the first try. That partition and its config were removed again once the backtrace was in hand, and the watch was reflashed from a clean tree so what is on it matches what is committed. The permanent defence is `_Static_assert(TMC_EEPROM_BYTES == HT24LC08_SIZE)`, because a size constant drifting from the device it names is exactly the bug; it was proved to work rather than assumed, failing the build at 512 and passing at 1024. Verified on the watch after the diagnostic was gone: two complete start/stop cycles with `uptime` climbing 17 to 27 to 34 seconds and `stopped, screen released` printed each time, no reset. The emulator's own gates all still pass -- dirty-row check 2000 frames with 250 pushed and 0 pixels differing, the audio check, and the sync check across the thirteen shared files. TWO THINGS ARE WORTH CARRYING FORWARD AND NEITHER IS FIXED. The first is that this bug was reachable from the Save BUTTON as well as from `tama stop`: `apply_action` calls the same `save_checkpoint()` on the guest task, whose 6 KB stack absorbed the overflow without crashing, so the button appeared to work while quietly corrupting memory around it -- which means the operator's earlier "Save works" was true of the file and not of the memory. The second is a process failure rather than a code one: several conclusions this cycle were drawn from `uptime` read through a Terminal reopened with F10, an instrument that cannot distinguish a surviving window from a fresh one after a reboot, and the operator caught it. A boot log appending the reset reason to the card was drafted and then dropped so the tree would stay minimal; it remains the right instrument and is the first thing to add if this recurs.
+
+#### Next Steps:
+
+The Save and Load buttons should be re-tested now that the image is the right size, because their earlier pass was measured while every press was corrupting 512 bytes of memory around the saved data -- the file was correct and the machine around it was not. A boot log belongs in `link_init()`: one line per boot with `esp_reset_reason()` and the monotonic clock, appended to `/sd/boot.txt`, so that "did it reboot" and "was it a panic" are facts rather than inferences from a window. The coredump recipe is recorded in this cycle's commit message and in the reference under EMU-021 and is worth keeping to hand rather than rediscovering: shrink the unused `ota_1`, add a 64 KB coredump partition, enable the two config options, reproduce, `idf.py coredump-info`, then revert. Unchanged and still open from the previous cycle: there is no Quit among the margin controls, so the only way out of the emulator is `tama stop` from a keyboard; the bottom strip still carries a degree circle that no longer describes a duty; the right column has two deliberately blank slots; and the cache autoload experiment measured a 7 percent sequential-read gain against ten times the headroom, so it stays unadopted and stashed.
+
+#### Files Modified:
+
+- patches/harness/core0/tmc_core.c
+- patches/harness/core0/tmc_core.h
+- ports/twatchultra/components/tamacore/tmc_core.c
+- ports/twatchultra/components/tamacore/include/tmc_core.h
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: PASS
+
+---
+
 ## 50 COMMIT Unreleased 2026-11-12T18:57:46-07:00
 
 #### Coming From:
