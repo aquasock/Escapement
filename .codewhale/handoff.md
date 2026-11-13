@@ -4,6 +4,12 @@ Orientation, not authority. Verify before acting on it.
 
 ## One line
 
+**The `tama stop` reboot is FIXED** (`99e42ed`). It was `TMC_EEPROM_BYTES` 512
+against the EEPROM's real 1024: every save wrote 512 bytes past a stack buffer,
+through `cmd_tama` into tdsh's parser frame, and it died as a `fclose` on a
+corrupted FILE* three calls away. `_Static_assert` now ties the constant to
+`HT24LC08_SIZE`. Verified: two start/stop cycles, uptime 17 -> 27 -> 34 s.
+
 **The Tamagotchi is a playable app with seven controls.** Full-screen, 16 Hz,
 dirty rows only. Bottom strip = the pet's three buttons. Left column = Pause,
 Save, Load, Speed, Sound; right = Hold (the arm), Shot, blank, blank, Reset.
@@ -13,11 +19,11 @@ strip's `°` label is now stale. Next lever: launch it as an app, not `tama`.
 
 ## Repositories, both clean and pushed
 
-- **Fork** `~/GIT/tinydesk-twatch`, branch `t-watch-ultra`, HEAD `1b447ac`.
+- **Fork** `~/GIT/tinydesk-twatch`, branch `t-watch-ultra`, HEAD `99e42ed`.
   `fork` remote = `aquasock/tinydesk` (push here). `origin` = upstream
   `tinydesk-project/tinydesk` — **never push there**.
-- **Escapement** `~/GIT/Escapement`, branch `main`, HEAD `7431cac`. Log entry 50
-  is the current cycle; TCH-012, EMU-020, EMU-019, TCH-011, DSP-006, EMU-018 are durable.
+- **Escapement** `~/GIT/Escapement`, branch `main`, HEAD `e136f46`. Log entry 51
+  is the current cycle; EMU-021, TCH-012, EMU-020 are the newest durable findings.
 
 ## Permissions and limits
 
@@ -121,7 +127,12 @@ strip's `°` label is now stale. Next lever: launch it as an app, not `tama`.
 3. **`tama stop`'s one-second wait** and the `tama start <rom>` argument path are
    written but unexercised.
 4. **Untested under load:** whether the guest holds 16 Hz with the painter active.
-10. **No Start menu entry.** `tama` is typed into the shell.
+10. **Save and Load need re-testing** — their earlier pass happened while every
+    press corrupted 512 bytes around the saved data. The file was right; the
+    machine was not.
+11. **Add a boot log** (`/sd/boot.txt`, reset reason + monotonic ms per boot) if
+    "did it reboot" is ever ambiguous again. A reloaded Terminal cannot answer it.
+12. **No Start menu entry.** `tama` is typed into the shell.
     `display_pixels_claim()` is all an app needs to take the screen — this is the
     next real lever.
 11. **The strip's `°` is a stale placeholder.** Chosen when the bars were inert;
