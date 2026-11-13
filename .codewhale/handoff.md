@@ -4,18 +4,18 @@ Orientation, not authority. Verify before acting on it.
 
 ## One line
 
-**The Tamagotchi runs on the watch as firmware.** Phase 4 of the Tamacore port is
-done: the pet is on the glass, paced at its own 16 Hz, pushing only the rows that
-changed. Next is wiring the touch panel to the guest, then launching it from the
-Start menu instead of typing `tama`.
+**The Tamagotchi runs full-screen on the watch as firmware.** It takes the whole
+framebuffer (black, with the margin buttons still live), paces the guest at its
+own 16 Hz, and pushes only the rows that changed. Next is wiring the touch panel
+to the guest, then launching it from the Start menu instead of typing `tama`.
 
 ## Repositories, both clean and pushed
 
-- **Fork** `~/GIT/tinydesk-twatch`, branch `t-watch-ultra`, HEAD `67842a8`.
+- **Fork** `~/GIT/tinydesk-twatch`, branch `t-watch-ultra`, HEAD `2df2b0e`.
   `fork` remote = `aquasock/tinydesk` (push here). `origin` = upstream
   `tinydesk-project/tinydesk` — **never push there**.
-- **Escapement** `~/GIT/Escapement`, branch `main`, HEAD `672e19a`. Log entry 46
-  is the current cycle; EMU-018 is the durable finding.
+- **Escapement** `~/GIT/Escapement`, branch `main`, HEAD `b1e3528`. Log entry 47
+  is the current cycle; DSP-006 and EMU-018 are the durable findings.
 
 ## Permissions and limits
 
@@ -30,8 +30,9 @@ Start menu instead of typing `tama`.
 
 ## Verified on the glass this cycle
 
-- **The pet draws.** `tama` from the Terminal: bezel and dot-matrix pet centred in
-  the 320x416 desktop area. Operator confirmed by eye.
+- **The pet owns the screen.** `tama` clears the framebuffer to black first, so the
+  pet is not drawn over the console; the margin buttons stay painted and live.
+  Operator confirmed by eye, twice ("looks great. pass").
 - **Four runs, no crash:** 549 frames / 69 blits, 358 / 45, 255 / 32, and then
   2,337 / 293 over a 139-second session left alone — `reset=11` afterwards, so a
   long run is as stable as a short one. That is the host harness's 88% frame-skip
@@ -68,6 +69,12 @@ Start menu instead of typing `tama`.
    identical from the host. `/sd/tama.txt` is rewritten every 64 frames with
    frames, blits, cycles and `esp_reset_reason()`, and is the only view that
    survives (DSP-003, EMU-018).
+3. **Claiming the screen is not owning it.** A blit writes one rectangle; the
+   painter's earlier output stays everywhere else and nothing overwrites it once
+   ownership suppresses the painter. An app must `display_fill()` after claiming
+   (DSP-006). The margin bars need no such handling -- they are painted once at
+   init in controller coordinates, outside `s_fb`, so a framebuffer clear cannot
+   reach them.
 
 ## Open, in order of cost
 
@@ -79,6 +86,9 @@ Start menu instead of typing `tama`.
 3. **`tama stop`'s one-second wait** and the `tama start <rom>` argument path are
    written but unexercised.
 4. **Untested under load:** whether the guest holds 16 Hz with the painter active.
+5. **The margins still send desktop keys under ownership** — Enter mid-game goes
+   to a hidden shell, not the pet. Whether they should change meaning is the
+   operator's call, not a bug to fix unasked.
 5. **`board.example.conf` still calls the SD keys unproven.** They work. Stale.
 6. **`td_vterm_t.bell` is probably redundant** — `td_sysinfo_t.bell` is the path
    that works. Both exist as a debugging hedge. Revisit rather than defend.
