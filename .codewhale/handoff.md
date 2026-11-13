@@ -4,19 +4,20 @@ Orientation, not authority. Verify before acting on it.
 
 ## One line
 
-**The Tamagotchi is playable on the watch.** Full-screen, 16 Hz, dirty rows only,
-and the three bottom bars are its three buttons (31 presses, 0 drops, one
-session). The two side columns are still inert and logged `off`; a Start menu
-entry does not exist, so it is launched by typing `tama`. Next is the columns,
-then the menu entry.
+**The Tamagotchi is a playable app with seven controls.** Full-screen, 16 Hz,
+dirty rows only. Bottom strip = the pet's three buttons. Left column = Pause,
+Save, Load, Speed, Sound; right = Hold (the arm), Shot, blank, blank, Reset.
+Save/Load/Reset need Hold down. Sound, pause, speed, screenshot and the strip all
+verified by the operator. What is left is a Start menu entry, and the bottom
+strip's `°` label is now stale. Next lever: launch it as an app, not `tama`.
 
 ## Repositories, both clean and pushed
 
-- **Fork** `~/GIT/tinydesk-twatch`, branch `t-watch-ultra`, HEAD `e076670`.
+- **Fork** `~/GIT/tinydesk-twatch`, branch `t-watch-ultra`, HEAD `1b447ac`.
   `fork` remote = `aquasock/tinydesk` (push here). `origin` = upstream
   `tinydesk-project/tinydesk` — **never push there**.
-- **Escapement** `~/GIT/Escapement`, branch `main`, HEAD `8f63618`. Log entry 49
-  is the current cycle; EMU-019, TCH-011, DSP-006 and EMU-018 are the durable findings.
+- **Escapement** `~/GIT/Escapement`, branch `main`, HEAD `7431cac`. Log entry 50
+  is the current cycle; TCH-012, EMU-020, EMU-019, TCH-011, DSP-006, EMU-018 are durable.
 
 ## Permissions and limits
 
@@ -60,7 +61,14 @@ then the menu entry.
   on an empty label). Host suite **41/41**.
 - The button queue drained correctly from the host before any finger touched the
   glass: three `tama press`/`release` pairs → `presses=3 drops=0`.
-- **No backup since `e076670`** — `working-2026-11-12-1737.bin` covers `a17059a`.
+- Backup `working-2026-11-12-1856.bin`, sha256 `ffd5ccd1…`, `verify OK`. Covers
+  everything through `1b447ac` (the flashed image and the build differ only in the
+  descriptor timestamp: 70 bytes, zero in the code region).
+- Host suite **42/42**, including `test_tama_ui` (206 checks; the interlock fails
+  70/59/59 ways when broken) and `test_twatch_edges` (1,567).
+- `./scripts/tamacore-host.sh audio` → `one 1000-toggle tone is one sound`.
+- `./scripts/tamacore-host.sh check` → `2000 frames, 250 pushed, 0 pixels differ`.
+- `./scripts/tamacore-sync.sh check` → `in sync (13 files)`.
 
 ## The two things this cycle cost
 
@@ -90,6 +98,18 @@ then the menu entry.
    `tmc_button()` writes pin state that `tmc_run()` reads, from a different task
    on a different core. Presses go through a queue drained BEFORE each step --
    after the step makes every press a frame late (EMU-019).
+6. **A waveform is a clock; the envelope is the signal.** `splb32_audio_emits()`
+   counts square-wave toggles, thousands a second for one held tone. Gating a
+   beep on it plays continuously and stops only when paused. Use
+   `tmc_audio_active()` and its rising edge (EMU-020).
+7. **Lifting the first finger of a chord promotes the survivor** into the primary
+   slot with event `0x16`, low nibble `0x06`. The press test must be an exact
+   `b[0] == 0x06` or a stray finger fires at its own position with the interlock
+   already gone (TCH-012).
+8. **A rebuild is never byte-identical** — the app descriptor embeds the build
+   time and ELF hash. Compare the code region, not the image.
+9. **Never cast `char[N][M]` to `const char **`.** That crashed the board once:
+   element 1 read mid-row and the painter dereferenced garbage.
 
 ## Open, in order of cost
 
@@ -101,13 +121,18 @@ then the menu entry.
 3. **`tama stop`'s one-second wait** and the `tama start <rom>` argument path are
    written but unexercised.
 4. **Untested under load:** whether the guest holds 16 Hz with the painter active.
-6. **The two columns are inert under an app, and they are next.** Five buttons
-   a side, declined by the handler and logged `off`. Wiring them means extending
-   the same queue with a wider event and deciding what they do.
-7. **The strip's ° is now a stale placeholder.** Chosen when the bars were inert;
-   they play the pet now. No short word fits 41 px, so this wants a decision.
-8. **No Start menu entry.** `tama` is typed into the shell. `display_pixels_claim()`
-   is all an app needs to take the screen.
+10. **No Start menu entry.** `tama` is typed into the shell.
+    `display_pixels_claim()` is all an app needs to take the screen — this is the
+    next real lever.
+11. **The strip's `°` is a stale placeholder.** Chosen when the bars were inert;
+    they play the pet now. No short word fits 41 px — the operator's decision.
+12. **Two right-column slots are blank on purpose.** An unused button that does
+    nothing looks broken; empty glass is honest.
+13. **`touchdump` should be kept.** It is how every multi-touch fact above was
+    obtained. Captures are preserved in `~/twatch-backup/touch-captures/`.
+14. **No way to reach the seven controls without launching `tama`.** The columns
+    mean desktop keys on the desktop and app actions under an app. A second
+    screen-claiming app will force that decision.
 5. **`board.example.conf` still calls the SD keys unproven.** They work. Stale.
 6. **`td_vterm_t.bell` is probably redundant** — `td_sysinfo_t.bell` is the path
    that works. Both exist as a debugging hedge. Revisit rather than defend.
