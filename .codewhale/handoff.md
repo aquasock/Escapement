@@ -1,8 +1,20 @@
-# Handoff — Escapement / TinyDesk on T-Watch Ultra, 2026-11-12T17:05
+# Handoff — Escapement / TinyDesk on T-Watch Ultra, 2026-11-12T23:00
 
 Orientation, not authority. Verify before acting on it.
 
 ## One line
+
+**+30 KB of internal RAM, from one setting.** Free internal DRAM went
+**72,475 -> 102,635 bytes** and the low-water mark **35,211 -> 95,955**, by
+halving the Wi-Fi driver's static buffer pools (16+16 -> 8+8, 1600 B each, taken
+from INTERNAL DMA RAM at `esp_wifi_init()` and never released). Recorded as
+SOC-005, log entry 57. Cost measured, not assumed: SFTP 17.9 KiB/s vs 17.2
+before, md5 matching; BLE untouched and unchanged. **`User Test: NOT RUN`** — the
+operator has not handled the watch since this flash. No backup since it either.
+
+Do NOT chase the same win by lowering `CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL`:
+`CONFIG_SPIRAM_ALLOW_STACK_EXTERNAL_MEMORY=y`, so it would move task stacks into
+PSRAM and kill any task that runs during a flash write.
 
 **The `tama stop` reboot is FIXED** (`99e42ed`). It was `TMC_EEPROM_BYTES` 512
 against the EEPROM's real 1024: every save wrote 512 bytes past a stack buffer,

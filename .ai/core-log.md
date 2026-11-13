@@ -1,3 +1,33 @@
+## 57 COMMIT Unreleased 2026-11-12T22:56:00-07:00
+
+#### Coming From:
+
+Unreleased 4d8bff3
+
+#### Purpose:
+
+Free internal DRAM, because Task Manager showed 70 KB free and internal RAM, not PSRAM, is what the SSH server's 65,536-byte floor and every large allocation are drawn against on this board.
+
+#### Outcome:
+
+Free internal RAM went from 72475 to 102635 bytes, a gain of 30160, and the low-water mark since boot rose from 35211 to 95955, and the whole of it came from one setting: the ESP32-S3 Wi-Fi driver allocates its receive and transmit buffers from internal DMA-capable RAM, which PSRAM cannot serve, and allocates them at `esp_wifi_init()` whether or not a network is ever joined, so the IDF default pair of 16 static RX and 16 static TX buffers at 1600 bytes each was holding 51200 bytes for the life of the firmware. Halving both to 8, with `RX_BA_WIN` following them to 8 because it must stay at or under twice `STATIC_RX_BUFFER_NUM`, and halving the two dynamic pools (`DYNAMIC_RX_BUFFER_NUM` 32 to 16 and `CACHE_TX_BUFFER_NUM` 32 to 16) returned 30160 bytes, more than the 25600 the static pools account for because the dynamic pools take their own internal allocation at init. One measurement took a wrong turn worth recording: `network mode lan` was run to test Wi-Fi's footprint on the theory that stopping it would release the buffers, and the heap read 72475 before and 72475 after, because the stop path calls `esp_wifi_stop()` and leaves the driver initialised, so only `esp_wifi_deinit()` frees the buffers and that experiment measured nothing while looking like it proved Wi-Fi was cheap; the honest test was the one that shipped, change the count, rebuild, flash, read the heap again. The cost was measured rather than assumed: a 131072-byte SFTP put at `--chunk 4096` ran 17.9 KiB/s against 17.2 KiB/s before, md5 `c5d6e009fd9c9bd89b6dea07d00a3226` matching at both ends, Wi-Fi re-associated by itself after the flash and `network status` reports Online: yes with the host pinging 10.10.0.15, and Bluetooth was untouched and unchanged at radio up, 40980 bytes and both stored pairings. tdsh's own SSH log line now reads `before SSH server task creation: internal free=102635 largest=31744`, so the server starts with room instead of at the edge of its floor. What was deliberately not done matters as much: the 10240-byte `s_tx` staging buffer stays in internal DRAM because it is the destination of the blit's byte-swap and the source of the panel DMA, and the blit is already 37 percent of the frame at 19 fps, so moving a hot buffer into PSRAM to buy 10 KB would be paid for in frame rate; and `CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL` stays at 4096 because `CONFIG_SPIRAM_ALLOW_STACK_EXTERNAL_MEMORY` is on, so lowering the threshold would begin placing task stacks in PSRAM, where a task that runs while the flash cache is disabled during an OTA write or a littlefs commit dies. Build PASS with zero warnings, flash PASS, and the operator has not yet handled the watch since the flash.
+
+#### Next Steps:
+
+The remaining internal consumers are small and each has a price: `s_tx` at 10240 bytes and the nofrendo statics (`mem` 3076, `apu` 1100, `ppu` 496) are the only static objects over a kilobyte left in internal RAM, and the emulator's three are the cheaper candidates because they are only needed while `nes` runs, so a PSRAM heap allocation made at start and freed at stop would cost nothing during normal use for roughly 4.7 KB and no frame-rate risk; `BT_CTRL_BLE_MAX_ACT` of 6 could come down to 4, which is exactly one scan plus three connections, but the return is a few kilobytes and the risk is a future keyboard-mouse-gamepad setup that silently fails to connect, so it wants a measured experiment rather than a guess; and nothing here is urgent, because 102635 bytes free with a 95955 floor is comfortable against the 65536 that SSH needs. The operator should confirm the desktop, the gamepad and a transfer on the glass, and the standing items from Entry 56 are unchanged and still the larger work: nofrendo keeps battery SRAM in RAM only, so a Zelda save does not survive a reset, and the fast-blit path would recover most of the frame.
+
+#### Files Modified:
+
+- ports/twatchultra/sdkconfig.defaults
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: NOT RUN
+
+---
+
 ## 56 COMMIT Unreleased 2026-11-12T22:39:57-07:00
 
 #### Coming From:
