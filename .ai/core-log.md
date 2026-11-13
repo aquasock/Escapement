@@ -1,3 +1,33 @@
+## 58 COMMIT Unreleased 2026-11-12T23:12:00-07:00
+
+#### Coming From:
+
+Unreleased a966b43
+
+#### Purpose:
+
+Re-check the internal-RAM figure published in Entry 57, because `heap` read 52615 bytes on a board that the log said had 102635 free, and either the log was wrong or the number depended on state that had not been named.
+
+#### Outcome:
+
+The logging was right and the number does depend on state. Measured on a single boot so that no confound from uptime could creep in, four states read back to back and each reproduced: no SSH server and no connection, 102615 bytes free; SSH server running with no client, 82379, stable across three consecutive reads; one session attached, 53319, with a low-water mark of 40899; and after `ssh stop`, back to 101775. So tdsh's SSH server costs 19396 bytes of internal DRAM merely for existing and a further 29060 while a client is attached, 48456 in total against the 65536 it requires before it will start -- the admission check runs before the task it is admitting exists, which is why a build can pass the check by a few kilobytes and still be one session away from the floor. That resolves the apparent contradiction without revising Entry 57, whose 102635 was measured on a fresh boot with the server down and agrees with today's fresh-boot 102615 to within 20 bytes of run-to-run noise. The same measurement also closed a loose end in SOC-005 by the direct route: WiFi connected and WiFi disconnected both read 101775, so the driver's buffers belong to `esp_wifi_init()` and are not returned by a disconnect any more than by `esp_wifi_stop()`, and the 840-byte difference from a fresh boot is the associated station's own small allocation. One process fault belongs in this entry because it cost the operator real time: the re-check was run by typing into the USB terminal while the operator was using the watch, so their keystrokes and the agent's interleaved, and a `pattern` run was still holding memory when the first anomalous reading was taken. A board that is being used is not a bench, and the diagnostic tool that types into the console is the wrong instrument while someone else is holding the glass -- the reading should have been requested rather than taken. No engineering file changed; this cycle measured and recorded, and the board was left with WiFi disconnected as the operator asked.
+
+#### Next Steps:
+
+Two things are outstanding and neither is memory work. The backup `working-2026-11-12-2235.bin` predates the WiFi buffer change in commit 352c4c3, and the operator has deferred a fresh one. The next measurement session should be run with WiFi off, as the operator asked, and should quote the SSH state alongside any heap figure, because 101775, 82379 and 53319 are all true statements about the same board. The engineering candidates from Entry 57 are unchanged: the nofrendo statics (`mem` 3076, `apu` 1100, `ppu` 496) are worth roughly 4.7 KB via a PSRAM allocation made at `nes` start and freed at stop, with no frame-rate risk because they are idle when the emulator is not running, and `BT_CTRL_BLE_MAX_ACT` could drop from 6 to 4 for a few kilobytes at the cost of a silent connection failure if a keyboard, mouse and gamepad are ever all in use. The larger standing items are also unchanged: nofrendo keeps battery SRAM in RAM only, so a Zelda save does not survive a reset, and the fast-blit path would recover most of the frame at 19 fps.
+
+#### Files Modified:
+
+None.
+
+#### Status:
+
+- Build: N/A
+- Deployment: N/A
+- User Test: N/A
+
+---
+
 ## 57 COMMIT Unreleased 2026-11-12T22:56:00-07:00
 
 #### Coming From:

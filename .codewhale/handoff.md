@@ -1,16 +1,26 @@
-# Handoff — Escapement / TinyDesk on T-Watch Ultra, 2026-11-12T23:00
+# Handoff — Escapement / TinyDesk on T-Watch Ultra, 2026-11-12T23:12
 
 Orientation, not authority. Verify before acting on it.
 
 ## One line
 
-**+30 KB of internal RAM, from one setting.** Free internal DRAM went
-**72,475 -> 102,635 bytes** and the low-water mark **35,211 -> 95,955**, by
-halving the Wi-Fi driver's static buffer pools (16+16 -> 8+8, 1600 B each, taken
-from INTERNAL DMA RAM at `esp_wifi_init()` and never released). Recorded as
-SOC-005, log entry 57. Cost measured, not assumed: SFTP 17.9 KiB/s vs 17.2
-before, md5 matching; BLE untouched and unchanged. **`User Test: NOT RUN`** — the
-operator has not handled the watch since this flash. No backup since it either.
+**+30 KB of internal RAM, from one setting, and the heap number depends on state
+you must quote.** Free internal DRAM **72,475 -> 102,615** and the low-water mark
+**35,211 -> 95,955**, by halving the Wi-Fi driver's static buffer pools
+(16+16 -> 8+8, 1600 B each, taken from INTERNAL DMA RAM at `esp_wifi_init()` and
+never released — a disconnect frees none of it either). SOC-005, entry 57.
+
+**Read heap as three different numbers (SOC-006, entry 58):** no SSH server
+**102,615**; SSH running, no client **82,379**; one session attached **53,319**
+(low-water 40,899). SSH costs 48,456 of the 65,536 it demands before starting.
+Quoting one state's figure as another is how the same board appears to gain or
+lose 50 KB in a minute.
+
+**WiFi is OFF now, by operator request — leave it off for the next test run.**
+That means no SSH; drive the board over the USB terminal instead.
+
+**No backup since `352c4c3`** — `working-2026-11-12-2235.bin` predates the buffer
+change. Operator has deferred it deliberately, not by oversight.
 
 Do NOT chase the same win by lowering `CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL`:
 `CONFIG_SPIRAM_ALLOW_STACK_EXTERNAL_MEMORY=y`, so it would move task stacks into
