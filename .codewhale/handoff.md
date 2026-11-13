@@ -1,26 +1,22 @@
-# Handoff — Escapement / TinyDesk on T-Watch Ultra, 2026-11-12T23:20
+# Handoff — Escapement / TinyDesk on T-Watch Ultra, 2026-11-13T00:00
 
 Orientation, not authority. Verify before acting on it.
 
 ## One line
 
-**+30 KB of internal RAM, from one setting, and the heap number depends on state
-you must quote.** Free internal DRAM **72,475 -> 102,615** and the low-water mark
-**35,211 -> 95,955**, by halving the Wi-Fi driver's static buffer pools
-(16+16 -> 8+8, 1600 B each, taken from INTERNAL DMA RAM at `esp_wifi_init()` and
-never released — a disconnect frees none of it either). SOC-005, entry 57.
+**NES: Zelda's title went 19 -> 42 fps** (`4f646f3`) by streaming the blit straight
+into the transmit band. Blit 37,140 -> 8,647 us/frame; dropped 531 -> 6/s.
+Operator played it: "i feel 42fps. graphics look good." NES-003, entry 60.
 
-**Read heap as three different numbers (SOC-006, entry 58):** no SSH server
-**102,615**; SSH running, no client **82,379**; one session attached **53,319**
-(low-water 40,899). SSH costs 48,456 of the 65,536 it demands before starting.
-Quoting one state's figure as another is how the same board appears to gain or
-lose 50 KB in a minute.
+**42 fps is near the ceiling, and 60 is not reachable by blit work.** Measured:
+interpreter+PPU alone is **15,555 us**/frame; a perfect push is 3,072 us; so the
+floor is 18,627 us = **53.7 fps**. The only path to 60 is **overlapping the SPI
+push with emulation** (DMA, double-buffered) — and the push actually measures
+8,047 us, 2.6x its arithmetic floor, which is the first thing to explain.
 
-**WiFi is OFF now, by operator request — leave it off for the next test run.**
-`network autowifi off` was set as well as `wifidisconnect`, because
-disconnecting alone let it re-associate within seconds. So it will NOT come back
-by itself: to restore, `network autowifi on` then `wificonnect`. While it is off
-there is no SSH — drive the board over the USB terminal instead.
+Tried and rejected, with numbers in the code (`NES_VIDBUF_STATIC`, default 0):
+static internal vidbuf = 45 fps, +65,800 B permanently, breaks SSH with WiFi on.
+Saved 577 us, not the predicted milliseconds — the blit is push-bound.
 
 **Backup `working-2026-11-12-2307.bin`**, 16 MiB, sha256 `bdf7215d…`,
 `verify OK (digest matched)` with the board held in the stub across read and

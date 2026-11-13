@@ -1,3 +1,35 @@
+## 60 COMMIT Unreleased 2026-11-12T23:52:00-07:00
+
+#### Coming From:
+
+Unreleased 7fd7376
+
+#### Purpose:
+
+Get Zelda's title screen to full speed, which the previous cycle's split had identified as a blit problem rather than an emulator one.
+
+#### Outcome:
+
+Zelda's title screen went from 19 to 42 fps, dropped frames fell from 531 to 6 per second, and the blit from 37,140 us to 8,647 us of a frame. The old path converted all 61,440 pixels into a 120 KB PSRAM scratch buffer, handed it to `display_picture_rgb()` which copied it into the 260 KB PSRAM framebuffer, and then `flush_rect()` copied the same pixels straight back out into the 10,240-byte internal transmit band -- three passes over external memory to feed a transfer that only takes about 3,072 us at 80 MHz QIO. `display_picture_rows()` inverts the arrangement: it drives the band loop and asks a callback for one row at a time, so the pre-swapped palette lookup writes directly into `s_tx`. One PSRAM read per pixel, none written, and the 120 KB scratch buffer is gone. It refuses unless `display_pixels_claim(true)` is in force rather than falling back silently, because a fallback would leave the cell painter reading a framebuffer nobody draws into and would invalidate `repaint` and `dcheck`, whose whole job is to say whether the glass matches the framebuffer. The operator played the game and reported that they feel 42 fps and the graphics look good, which is the check that matters since the panel is write-only. The experiment that did not pay is recorded rather than quietly dropped: the frame buffer was moved to internal DRAM as a static array, which is the only route past the heap's fragmentation, since internal has 143,275 bytes free but a 49,152-byte largest block and vidbuf wants 65,280 contiguous, so the heap attempt always falls back. That measured 45 fps against 42, saving 577 us of an 8,647 us blit and costing 65,800 bytes held for the life of the firmware -- with the radio initialised it puts internal free below the 65,536 tdsh's SSH server demands, so SSH stops starting. It is reverted, and kept behind `NES_VIDBUF_STATIC` with both measurements in the comment so it is not tried twice. The prediction was several milliseconds; the measurement was 577 us, because the blit is dominated by the push and not by reading the buffer. That also fixes the ceiling: the interpreter and PPU alone are 15,555 us per frame, so even a free conversion and a perfect push give 18,627 us, or 53.7 fps. 60 is not reachable here by tuning the blit at all. Build PASS, flash PASS; the internal free after reverting reads 142,739.
+
+#### Next Steps:
+
+The two levers that could still move the frame rate, in order of size, are the push and the interpreter, and neither is a blit change. The push measures 8,047 us against a 3,072 us arithmetic floor, roughly 2.6 times what the clocks say, so the first question is where the excess goes -- per-band window programming (15 bands of 16 rows, capped by LCD-009) and the polling transmit are the candidates, and DMA overlapped with emulation rather than serialised after it is the only arrangement that could hide the push entirely, which on this arithmetic would put a frame near 16,200 us and 60 fps within reach for the first time. That is a larger change than anything this cycle, it needs two transmit buffers that fit somewhere the SPI peripheral can read, and it should be measured against the 8,047 us baseline before it is designed further. The alternative is the interpreter: 15,555 us per frame including nofrendo's PPU writing 65,280 bytes of frame buffer every frame. Nothing in the backlog changed -- nofrendo still keeps battery SRAM in RAM only so a Zelda save does not survive a reset, the nofrendo statics are still worth about 4.7 KB from PSRAM, and the Tamagotchi still wants a Start menu entry. A backup should be taken before the next change, since the last one predates this blit work.
+
+#### Files Modified:
+
+- ports/twatchultra/main/display.c
+- ports/twatchultra/main/display.h
+- ports/twatchultra/main/nes.c
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: PASS
+
+---
+
 ## 59 COMMIT Unreleased 2026-11-12T23:20:00-07:00
 
 #### Coming From:
