@@ -372,6 +372,7 @@ DSP-002: "A static RGB565 full-panel buffer does not fit: 320x416 costs 256 KB a
 DSP-003: "The USB mirror stops describing the panel once a bitmap owns the screen, because the desktop's diff stream no longer matches the glass, so a diagnostic that exists only in that terminal is unreadable exactly when a picture is up; counters must also go to a file"
 DSP-004: "The leftover strips are a transfer-height fault: `flush_rect` sized a transaction from `5120 / w`, so an 8-pixel column went out as one 640-row window and dropped bands while full-width 16-row flushes were always clean; capping the rows at 16 whatever the width fixes it, and this is LCD-009's unestablished cause"
 DSP-005: "Only paint_task may touch flush_rect, s_tx or the SPI bus; calling it from the shell task produced a scrambled taskbar and a hung shell, because a second writer raced the painter over a buffer and bus that had never needed a lock"
+DSP-006: "The button bars and key columns live OUTSIDE the framebuffer in controller coordinates and are painted once at init by paint_buttons()/paint_column(), not by the cell painter, so a full-screen app can clear s_fb without erasing the watch's controls -- but a framebuffer clear alone is not enough to take the screen, because a blit leaves the previous console text in the rest of s_fb and ownership then stops anything from overwriting it"
 EMU-018: "Internal DRAM is scarce enough that 4,148 bytes of .bss starved the SSH server of its 65,536-byte floor (`insufficient internal RAM (62443 bytes free; need at least 65536)`), so the emulator's dirty-row tables are a refcounted PSRAM heap allocation and internal free went 62,443 to 66,599; a component that adds .bss can break a peripheral with nothing to do with it"
 ```
 
@@ -1880,6 +1881,21 @@ EMU-018: "Internal DRAM is scarce enough that 4,148 bytes of .bss starved the SS
     - "tinydesk-twatch ports/twatchultra/main/display.c: display_repaint_all() setting a request flag instead of drawing"
     - "on the watch 2026-11-12: the scrambled taskbar and hung shell, then the fix"
   verification: "Verified on hardware 2026-11-12: the direct-call version scrambled the panel and hung the shell (required a reset); the flag version runs, returns, and repaints correctly, with the shell confirming responsiveness by writing a file afterwards."
+- record_id: DSP-006
+  kind: DISPLAY
+  topic_id: DSP
+  title: "Claiming the screen is not owning it: a blit leaves the console in the framebuffer, and the margins survive a full clear because they live outside it"
+  status: VERIFIED
+  verified_date: 2026-11-12
+  statement: "`display_pixels_claim(true)` stops the cell painter, and that was taken to mean an app had the screen. It does not. `display_picture_rgb()` copies only the rectangle it is given into `s_fb`, so every pixel the painter had already written outside that rectangle -- the shell's text, the window frame -- is still in the framebuffer when ownership begins, and with the painter suppressed nothing will ever overwrite it. The operator's report was that the Tamagotchi ran 'overlayed on the console'. The missing half is a full-framebuffer clear (`display_fill()`, 320x416 to 0x0000, pushed in bands) done after claiming and before the first blit."
+  consequence: "Two things follow and the second is the one worth keeping. First, an app that owns the screen must clear it, not merely claim it -- the claim is about who writes next, and the clear is about what is already there. Second, the glass OUTSIDE the framebuffer needs no special handling at all, and this was verified in the code rather than assumed: the three bottom bars and the two side key columns are painted by `paint_buttons()` and `paint_column()` during `display_init()` in CONTROLLER coordinates (x 22..66 and 387..431 for the columns, y 461..501 for the strip), which are outside `s_fb`'s 320x416 window, and the cell painter never touches them. So a framebuffer clear cannot erase the watch's controls, and the margins keep working while an app owns the screen. That is the intended arrangement -- the margins are the watch's controls, not the desktop's -- and it is now recorded because it was previously true only by accident of where each piece of code draws. A follow-on question this raises and does not settle: the margins send desktop keys (F10, Esc, Tab, Enter) under ownership too, so pressing Enter mid-game types into a hidden shell rather than reaching the app."
+  sources:
+    - "tinydesk-twatch ports/twatchultra/main/display.c: display_fill(), display_picture_rgb(), paint_buttons(), paint_column()"
+    - "tinydesk-twatch ports/twatchultra/main/tama.c: tama_start() clearing after display_pixels_claim(true)"
+    - "tinydesk-twatch ports/twatchultra/main/edges.h: the margin geometry in controller coordinates"
+    - "DSP-001 for ownership, and DSP-005 for the single-writer rule the flush obeys"
+  verification: "Verified on hardware 2026-11-12: the operator saw the pet over the console before the change, and reported the cleared screen as looking great after it. The build was clean with 0 warnings, binary 0x28b510, and a status read during the run showed frames=160 blits=20 at 10 s of guest time, so the clear did not disturb the 16 Hz cadence or the dirty-row skip ratio. The claim that the margins are outside s_fb is verified by reading the geometry constants and the init-time paint calls, not by a before/after photograph of the margins with an app up."
+
 ```
 
 ---

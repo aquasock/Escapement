@@ -1,3 +1,36 @@
+## 47 COMMIT Unreleased 2026-11-12T17:27:36-07:00
+
+#### Coming From:
+
+Unreleased 1d83738
+
+#### Purpose:
+
+Make the Tamagotchi take the whole framebuffer rather than floating on top of the console it was launched from, while leaving the watch's own margin buttons working.
+
+#### Outcome:
+
+The pet now has the screen to itself. The operator's report was that the game was "overlayed on the console", and the cause is the difference between drawing a picture and owning a screen: `display_picture_rgb()` writes only the rectangle it is given, so everything the cell painter had already put in the rest of the 320x416 framebuffer -- the shell's text and the window frame -- stayed exactly where it was, and once `display_pixels_claim(true)` suppressed the painter nothing was left to overwrite it. The new `display_fill(colour)` clears the whole framebuffer and pushes it in bands, and `tama_start()` calls it immediately after claiming and before the first blit, so the guest starts from black. Black is also the emulator's own bezel colour, so the frame blends into the screen and only the LCD's lit dots show; that is a coincidence worth stating because it is not the reason the value was chosen, and a future artwork change that moves the bezel colour should not silently reintroduce a visible border. THE GLASS OUTSIDE THE FRAMEBUFFER IS DELIBERATELY UNTOUCHED, and this is the part that needed checking rather than assuming: the three button bars and the two key columns are painted by `paint_buttons()` and `paint_column()` at init in CONTROLLER coordinates, not by the cell painter, so they live outside `s_fb` entirely and a framebuffer clear cannot reach them. That is why the margin buttons keep working while an app owns the screen, and it is now the documented behaviour rather than an accident of where the code happens to draw. The flush takes the same shape as the existing blit -- lock for the framebuffer write, release before `flush_rect()` -- and is safe for the same reason the blit is: with ownership set the painter takes its notification and returns without touching `s_tx`, so there is still exactly one writer, which is DSP-005's rule holding after being written the cycle before and then violated once. Verified on the glass by the operator, who reported the result as looking great. The build was clean, 0 warnings, binary `0x28b510` with 15 percent of the app partition free, and a status read during that run showed `frames=160 blits=20` at 10 seconds of guest time, so clearing the screen did not disturb the 16 Hz cadence or the dirty-row skip ratio.
+
+#### Next Steps:
+
+Touch is the remaining half of making the guest a real full-screen app: the panel still reports to the desktop as a mouse, so the guest's three buttons are reachable only from the shell with `tama press 0..2`, and mapping touches on the framebuffer to them is a small change behind the ownership test `touch.c` already makes. After that the emulator wants a Start menu entry, since `tama` is still a shell command and the margins are the only way to reach it from the desktop. One thing this cycle's reasoning raises and does not answer: the margins currently send desktop keys (F10, Esc, Tab, Enter) while an app owns the screen, so pressing Enter mid-game types into a hidden shell rather than reaching the pet -- deciding whether the margins should switch meaning under ownership is the operator's call, not a bug to fix unasked.
+
+#### Files Modified:
+
+- ports/twatchultra/main/display.c
+- ports/twatchultra/main/display.h
+- ports/twatchultra/main/tama.c
+- ports/twatchultra/README.md
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: PASS
+
+---
+
 ## 46 COMMIT Unreleased 2026-11-12T17:00:23-07:00
 
 #### Coming From:
