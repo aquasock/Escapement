@@ -32,8 +32,10 @@ Start menu instead of typing `tama`.
 
 - **The pet draws.** `tama` from the Terminal: bezel and dot-matrix pet centred in
   the 320x416 desktop area. Operator confirmed by eye.
-- **Three runs, no crash:** 549 frames / 69 blits, 358 / 45, 255 / 32. That is the
-  host harness's 88% frame-skip rate arriving on the hardware.
+- **Four runs, no crash:** 549 frames / 69 blits, 358 / 45, 255 / 32, and then
+  2,337 / 293 over a 139-second session left alone — `reset=11` afterwards, so a
+  long run is as stable as a short one. That is the host harness's 88% frame-skip
+  rate arriving on the hardware.
 - **`tama stop` returns the desktop whole** and uptime continues unbroken — so the
   earlier "it crashed" reading was the stale mirror, not a reset.
 - **SFTP still works** after the internal-RAM fix: ROM transferred 524,288 B at
@@ -47,9 +49,11 @@ Start menu instead of typing `tama`.
 - `./scripts/tamacore-sync.sh check` → `in sync (13 files)`, and proven able to
   fail: a one-line edit to a copy gave `DIFFERS segmap.h`, RC 1.
 - Fork host suite **41/41**.
-- Previous cycle's backup `working-2026-11-12-1638.bin`, sha256 `917fbb13…`,
-  `verify OK`. **No backup has been taken since the Tamacore work** — firmware in
-  flash matches HEAD `67842a8` (md5 `626995fd886e5e6e7fec41aa17b50ea4`).
+- **Backup `working-2026-11-12-1705.bin`, 16 MiB, sha256 `9cc526cc…`,
+  `verify OK`** (digest matched with the board held in the bootloader across read
+  and compare). Taken after a clean reboot from a fresh build, so it covers the
+  Tamacore work: the 2,667,616-byte app region at `0x10000` is byte-identical to
+  the build at `67842a8` (md5 `626995fd886e5e6e7fec41aa17b50ea4`).
 
 ## The two things this cycle cost
 
