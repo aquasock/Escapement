@@ -1,12 +1,29 @@
-# Handoff — Escapement / TinyDesk on T-Watch Ultra, 2026-11-13T00:55
+# Handoff — Escapement / TinyDesk on T-Watch Ultra, 2026-11-13T01:35
 
 Orientation, not authority. Verify before acting on it.
 
 ## One line
 
-**NES: Zelda's title 19 -> 51 fps.** Blit now runs on core 1 while the emulator
-runs on core 0 (`64ccc7d`). frames=11055 blits=11055 skipped=0 over 20 s,
-dropped 36 (0.3%). Operator: "no tearing... mostly full speed."
+**NES is PARKED at 51 fps** (operator: "320x240 is just too small for this screen").
+Code is shipped and backed up; SRAM persistence and the skip-path test are owed.
+
+**GBC scoped: use gnuboy.** Measured over 4 commercial ROMs, best of 3 — gnuboy
+9,308-13,620 fps vs binjgb 5,684-8,848, i.e. **1.54-1.79x faster**, and it emits
+`GB_PIXEL_565_BE` (panel byte order) so a port needs **no pixel conversion**.
+Scope doc: `docs/gbc-scoping.md`. Records GBC-001, GBC-002.
+
+**The picture is the reason; the speed is not.** 160x144 at 2x = 320x288: full
+width, 69% of the framebuffer, no side margins. NES reaches 46% and cannot
+improve (256 x 1.25 is not an integer). BUT a GBC CPU is 2.34x the NES clock, so
+the watch projection is **28-45 fps — likely slower than the NES's 51**. The
+cheaper blit does not pay for the dearer emulator.
+
+**Peanut-GB is DMG-only** — the fastest portable GB core is the wrong choice for
+Color. Do not start there.
+
+Harness: `./scripts/gbcbench.sh fetch && build && build-binjgb`, then
+`compare DIR`. Two traps recorded: no `gnuboy_reset()` = segfault in the CPU, and
+a per-frame diagnostic scan masks the format comparison completely.
 
 **DSP-005's single-writer rule is now lifted, in three parts — do not remove one.**
 `s_tx_app` (own transmit band), `reg_write_bus()`/`set_window_bus()` (window
