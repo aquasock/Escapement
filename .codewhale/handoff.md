@@ -10,11 +10,18 @@ through `cmd_tama` into tdsh's parser frame, and it died as a `fclose` on a
 corrupted FILE* three calls away. `_Static_assert` now ties the constant to
 `HT24LC08_SIZE`. Verified: two start/stop cycles, uptime 17 -> 27 -> 34 s.
 
-**NES is in progress: Phases 1-2 of 5 done.** nofrendo chosen by benchmark
-(1.96x InfoNES), vendored into `components/nofrendo`, **compiling on the S3 at
-120.4 KB .text / 5.3 KB .bss**, and not referenced by anything yet — so the
-firmware binary is unchanged and there is nothing to test on the watch. Next is
-Phase 3: PSRAM for the 65 KB `vidbuf` the port must supply.
+**The NES PLAYS on the watch.** ROM at `/sd/game.nes`, launched with `nes`.
+1x letterboxed, pixel-perfect, and the operator played a game with the margin
+buttons. **21 fps, not 60**, and the split names the cause:
+
+    8,160 us  6502 interpreter  (49% of the 16,667 us budget)
+    6,166 us  blit              (37%)  <- should be ~100 us
+
+The blit is the anomaly: `display_picture_rgb()` copies into the PSRAM `s_fb`
+and `flush_rect()` byte-swaps into `s_tx`, so each frame makes four passes over
+external memory. **A full-frame path converting straight into `s_tx` is the next
+change** — it also serves the Tamagotchi. Optimising the emulator is the WRONG
+first move.
 
 **The Tamagotchi is a playable app with seven controls.** Full-screen, 16 Hz,
 dirty rows only. Bottom strip = the pet's three buttons. Left column = Pause,
@@ -25,11 +32,11 @@ strip's `°` label is now stale. Next lever: launch it as an app, not `tama`.
 
 ## Repositories, both clean and pushed
 
-- **Fork** `~/GIT/tinydesk-twatch`, branch `t-watch-ultra`, HEAD `6833d03`.
+- **Fork** `~/GIT/tinydesk-twatch`, branch `t-watch-ultra`, HEAD `4f15b61`.
   `fork` remote = `aquasock/tinydesk` (push here). `origin` = upstream
   `tinydesk-project/tinydesk` — **never push there**.
-- **Escapement** `~/GIT/Escapement`, branch `main`, HEAD `e136f46`. Log entry 53
-  is the current cycle; NES-001 (core choice), OTA-001, EMU-021 are the newest.
+- **Escapement** `~/GIT/Escapement`, branch `main`, HEAD `b072044`. Log entry 54
+  is the current cycle; NES-002 (fps split), NES-001 (core choice), OTA-001 are the newest.
 
 ## Permissions and limits
 
@@ -138,11 +145,14 @@ strip's `°` label is now stale. Next lever: launch it as an app, not `tama`.
 3. **`tama stop`'s one-second wait** and the `tama start <rom>` argument path are
    written but unexercised.
 4. **Untested under load:** whether the guest holds 16 Hz with the painter active.
-10. **NES Phases 3-5.** 3: PSRAM for `vidbuf` (65 KB, must not be internal
-    DRAM — EMU-018). 4: the glue, which is small — 3 callbacks (`blit_func`,
-    `vsync`, `input`) plus `nes_setvidbuf`; blit gets a 272x240 palette-index
-    frame, the port owns the RGB565 conversion. 5: 1x letterboxed (256x240, 46%
-    of the panel, pixel-perfect) before any scaling.
+10. **NES: make the blit cheap.** A full-frame RGB565 push that converts into
+    `s_tx` in flush order and skips `s_fb`. Measurable on the host first — the
+    cost is a memcpy and a byte swap, not emulation. Then re-measure the split;
+    a 500 us blit may make the emulator half irrelevant.
+11. **NES: SELECT is unmapped.** A few games need it to choose a mode. The left
+    column has three free slots.
+12. **sound.c's beep buffer is now per-call PSRAM** (was 16,000 B of .bss). That
+    fix is independent of the NES and got internal free 60,143 → 76,147.
 11. **Save and Load need re-testing** — their earlier pass happened while every
     press corrupted 512 bytes around the saved data. The file was right; the
     machine was not.
