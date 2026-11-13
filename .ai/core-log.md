@@ -1,3 +1,33 @@
+## 59 COMMIT Unreleased 2026-11-12T23:20:00-07:00
+
+#### Coming From:
+
+Unreleased 2a73b09
+
+#### Purpose:
+
+Take the full 16 MiB flash backup that was deferred after the Wi-Fi buffer change in commit 352c4c3, and record what the board's memory looks like with the radio deliberately off.
+
+#### Outcome:
+
+The backup is `~/twatch-backup/working-2026-11-12-2307.bin`, 16777216 bytes, sha256 `bdf7215de98798a5ba2ce69aa42fd74f7d37c8e44b0c434bcdc500ca244eccde`, and it is verified rather than merely written: esptool read 16777216 bytes at 606.1 kbit/s in 221.5 seconds with `--after no_reset`, compared them against the chip while the board was still held in the stub, and reported `verify OK (digest matched)`, so the file is the chip and not a view of it taken while NVS was being written behind the read. The hash was recomputed afterwards and matches the stored one. The board was reset at the end and came back on the first attempt. The image's app region at 0x10000 was then compared against `build/tinydesk.bin` from the tree at 352c4c3 and is byte-identical at md5 `c50472f3e12dad2766824e7c2d2d6157`, which is what makes this backup a record of that commit rather than of an unknown build. Two things had to be set right for the operator's instruction to hold: `wifidisconnect` alone re-associated within seconds, so `network autowifi off` was set as well, and the board has since stayed down with ping failing and the desktop showing Offline. Measuring in that state turned up a fact worth keeping: `heap` reads 143275 with a 49152 largest block, stable across repeats, against 101775 on the same firmware with the driver initialised and the station merely disconnected. The difference is that with auto-connect off and nothing attempting a connection, `esp_wifi_init()` is never called, so the static pools are never allocated at all -- it is a distinct state from disconnected, and it is worth 41500 bytes, which is more than the 30160 that halving the buffers won in Entry 57 and is available to any session that does not need the network. SOC-005 was revised to carry it.
+
+#### Next Steps:
+
+The backup now covers 352c4c3 and supersedes `working-2026-11-12-2235.bin`, which predates the buffer change; both are on disk and the older one can go when the newer has been proven by restoring from it. The board is left with WiFi off and `autowifi off` set, so the next test run starts from 143275 bytes free with no SSH available and must be driven over the USB terminal -- to restore the network, `network autowifi on` then `wificonnect`. The engineering candidates are unchanged and none is memory work: nofrendo's `mem` 3076, `apu` 1100 and `ppu` 496 are worth about 4.7 KB if allocated in PSRAM at `nes` start and freed at stop, the fast-blit path would recover most of the frame at 19 fps, and nofrendo still keeps battery SRAM in RAM only so a Zelda save does not survive a reset.
+
+#### Files Modified:
+
+None.
+
+#### Status:
+
+- Build: N/A
+- Deployment: N/A
+- User Test: N/A
+
+---
+
 ## 58 COMMIT Unreleased 2026-11-12T23:12:00-07:00
 
 #### Coming From:

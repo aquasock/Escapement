@@ -1,4 +1,4 @@
-# Handoff — Escapement / TinyDesk on T-Watch Ultra, 2026-11-12T23:12
+# Handoff — Escapement / TinyDesk on T-Watch Ultra, 2026-11-12T23:20
 
 Orientation, not authority. Verify before acting on it.
 
@@ -22,8 +22,17 @@ disconnecting alone let it re-associate within seconds. So it will NOT come back
 by itself: to restore, `network autowifi on` then `wificonnect`. While it is off
 there is no SSH — drive the board over the USB terminal instead.
 
-**No backup since `352c4c3`** — `working-2026-11-12-2235.bin` predates the buffer
-change. Operator has deferred it deliberately, not by oversight.
+**Backup `working-2026-11-12-2307.bin`**, 16 MiB, sha256 `bdf7215d…`,
+`verify OK (digest matched)` with the board held in the stub across read and
+compare. App region at `0x10000` is **byte-identical** to `build/tinydesk.bin` at
+`352c4c3` (md5 `c50472f3…`), so it is a record of that commit. Supersedes
+`working-2026-11-12-2235.bin`.
+
+**A never-connected boot is a fourth heap state, and the best one: 143,275 free**
+(49,152 largest), stable. With `autowifi off` nothing calls `esp_wifi_init()`, so
+the static pools are never allocated — 41,500 better than "connected then
+disconnected" (101,775), and more than the 30,160 Entry 57's buffer halving won.
+SOC-005 revised with this.
 
 Do NOT chase the same win by lowering `CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL`:
 `CONFIG_SPIRAM_ALLOW_STACK_EXTERNAL_MEMORY=y`, so it would move task stacks into
