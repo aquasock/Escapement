@@ -1,3 +1,35 @@
+## 74 COMMIT Unreleased 2026-11-13T13:21:00-07:00
+
+#### Coming From:
+
+Unreleased a48a592
+
+#### Purpose:
+
+Draw the Pokemon Mini's own controls into the framebuffer rows the picture leaves empty, so the console can be driven from the glass rather than only from the shell.
+
+#### Outcome:
+
+The watch now carries a d-pad and two round action buttons in the 224 framebuffer rows below the top-aligned picture, and the operator accepted them as exactly specified. The controls are one push of a 264x168 region at (28,220), drawn once at cartridge start rather than per frame, because they never change: adding them to the per-frame blit would have put 44,352 extra pixels on the bus every frame for a static image. The d-pad is 168 px square with 56 px arms, 28 px from the left and bottom edges, with the eight arm tips rounded at r=5 and the four inner corners left sharp; the outline and both circles use the margin buttons' own 2 px border weight, built as shape-minus-inset the way `display.c` builds a button rather than by thickening a one-pixel test, which would have left a notch at every rounded tip. The arrows are the desktop's own U+2190 to U+2193 taken from the same `font8x16`, doubled to 16x32 by sampling each source pixel as a 2x2 block, and the two circles carry A and B drawn the same way. Colours are read from the buttons at draw time through a new `display_margin_colours()` rather than written as constants, so the cluster cannot drift from the twelve margin buttons it sits beside: violet border `COL_EDGE` 0x58CB, dark grey face `COL_FILL` 0x10A2, and the ANSI green of `s_palette[2]` 0x0660 for the arrows and letters. The circles are 68 px across, which is what the width allows: the gap between the d-pad's right edge and the framebuffer's margin is 124 px, so 28 px at each side leaves 68 and no more, and the pair occupies the d-pad's own band so the margins match on all four sides. At that diameter the space between the two circles is 32 px against 28 px at the outer edges, which is unavoidable and reads as two buttons rather than as a column. Four faults in this work are worth recording because three of them were caught by looking rather than by a counter. The arrow placement first used arm centres of `A/2` and `3A/2`, but the arms are the OUTER thirds, so Down and Right were drawn on top of each other in the middle square; rendering the geometry off-device before flashing found it. Rounding the inner corners was attempted three ways and none looked right -- centred on the corner and added bulges into the notch, centred in the void and subtracted is tangent and removes almost nothing, and centred on the corner and subtracted is the true mirror but eats three quarters of its disc from a reflex angle and reads as over-rounded -- so the operator's call was to leave them sharp, which is also the conventional shape. The outline needed eight-neighbour connectivity rather than four once the tips were rounded, because the arc grazes the edge and leaves isolated one-pixel specks: measured 640 pixels drawn with 8 specks against 684 with none. Build PASS; deployment PASS with every written region hash-verified; frame rate unchanged throughout at 71.6 fps with `missed=0` over 23 s, since none of this touches the frame loop. A verified 16 MiB backup `working-2026-11-13-1319.bin` was taken after the operator's acceptance with the board held in esptool's stub across read and compare, sha256 `fd6072d16c013fccbf3db4ca7b5e0241f9d28a3beee6495554d1a0b052aa3644`. The core-syntax audit passed: 74 entries, both control files unchanged apart from this entry, which conforms to the six-section template and the 100-entry cap.
+
+#### Next Steps:
+
+Nothing drawn here responds to a touch yet, and that is the next cycle: the touch path has never been exercised on this port, so the first job is proving that a tap on the d-pad arm reaches `pm.c` at all before any of it is mapped to the emulated CPU. The geometry already agrees with the hit test that will be needed -- `pad_inside()`, `pad_cx()` and `pad_cy()` are the same functions the painter uses, so a hit test written against them cannot disagree with what is drawn, which is the fault `edges.h` exists to prevent for the margins. Two open questions belong with that work: the A and B labels on the circles were inferred rather than specified, since the operator asked only for a colour, and A and B are what the console's own layout puts beside a d-pad while C is already a margin button; and the d-pad occupies the bottom-left with the circles to its right, leaving the remaining framebuffer space empty, which is where a third control or a status line could go later. Everything else is unchanged: the twelve margin labels still claim duties they do not perform, Puzzle Collection remains at 0.94x to 0.98x with optimization parked behind a repeat-run-to-median harness, audio is absent, save states and EEPROM persistence are untouched, the NES stays parked at 51 fps with battery-SRAM persistence and the skip-path test owed, GBC remains scoped with gnuboy recommended, the Tamagotchi still wants a Start menu entry, and the radio is off with auto-connect off.
+
+#### Files Modified:
+
+- ports/twatchultra/main/display.c
+- ports/twatchultra/main/display.h
+- ports/twatchultra/main/pm.c
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: PASS
+
+---
+
 ## 73 COMMIT Unreleased 2026-11-13T12:16:00-07:00
 
 #### Coming From:
