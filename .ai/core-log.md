@@ -1,3 +1,35 @@
+## 61 COMMIT Unreleased 2026-11-13T00:41:00-07:00
+
+#### Coming From:
+
+Unreleased 8825d96
+
+#### Purpose:
+
+Find where the NES blit's remaining 8.6 ms goes, because the previous cycle attributed it to an unexplained 2.6x excess in the SPI push and was about to design a DMA overlap on that basis.
+
+#### Outcome:
+
+The 2.6x excess does not exist, and the measurement that removed it is the cycle's result. Instrumenting `push_pixels_raw()` to time window programming separately from the transfer read 4,054 us per frame, of which 3,360 us is the transfer -- 1.10 times the 3,072 us bytes-and-clocks arithmetic at 80 MHz QIO, so the SPI is already running at essentially full speed -- and about 700 us is fifteen window programmings at 48 us each. The earlier 8,047 us figure was blit-minus-estimated-conversion, an inference that was reported as a measurement, and it inverted the conclusion: there was no waste to reclaim in the push and no 5,000 us waiting there. Per-frame terms are now all measured over runs of about 1,050 frames: interpreter and PPU 15,242 us, conversion 4,355 us, push 4,054 us, total 23,651 us at 42 fps. The one thing that did get cheaper is the conversion, from 5,127 to 4,355 us, by reading four source bytes per load instead of one -- the byte loads from the PSRAM frame buffer were the cost, not the table lookups -- and that gain was proved with an A/B of about 1,000 frames per side rather than by comparing last-second samples, because the first attempt at measuring it moved from 9,218 to 9,731 us and would have been read as a regression when it was one second of a wandering loop. That is why `nes status` now reports per-run averages alongside the sample. The arithmetic that closes the plan: deleting the entire blit still leaves 15,242 us, or 65.6 fps, so 60 fps is reachable only by running the conversion and the push concurrently with the emulation rather than after it. Build PASS, flash PASS, and the operator's earlier confirmation that the picture is correct still holds since the only change to the pixel path is the width of the source load.
+
+#### Next Steps:
+
+The concurrency change is now the only route to 60 fps, and it is not the DMA overlap the previous cycle proposed -- it is moving the blit to the second core, which is a bigger thing than it sounds and wants a decision rather than a start. On this board core 1 is idle, the blit needs 8,409 us and the emulator 15,242, so the two fit inside one frame with room to spare; but the display driver's contract is single-writer by design (DSP-005: only paint_task may touch flush_rect, s_tx and the SPI bus), and three parts of it would have to change. `s_tx` cannot stay shared, because a margin label repaint on core 0 would overwrite a band core 1 was about to send, so the blit task needs its own transmit buffer. Window programming currently happens before the bus is acquired, so two concurrent pushers could have their CASET/RASET exchange swapped between them, and the acquisition would have to be widened to span the window as well as the transfer. And `vidbuf` needs at least triple buffering, or the PPU writes a frame while the blitter is still reading the last one. Each is small and all three together change the one subsystem everything else depends on, with tearing on the glass as the failure mode. Nothing else in the backlog changed: nofrendo still keeps battery SRAM in RAM only, the nofrendo statics are still worth about 4.7 KB from PSRAM, the Tamagotchi still wants a Start menu entry, and a backup should be taken before the next change since the last one predates the whole streaming blit.
+
+#### Files Modified:
+
+- ports/twatchultra/main/display.c
+- ports/twatchultra/main/display.h
+- ports/twatchultra/main/nes.c
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: N/A
+
+---
+
 ## 60 COMMIT Unreleased 2026-11-12T23:52:00-07:00
 
 #### Coming From:
