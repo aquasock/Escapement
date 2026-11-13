@@ -144,27 +144,48 @@ port is cheap — but nobody should start it expecting a big picture.
 **Xtensa interpreter throughput on the watch. Everything else is measured.**
 
 That single number decides the platform, and it needs to be ~0.25 Mips or better
-for the lightest cartridges and ~0.4 Mips for the heaviest. The prepared binary
-answers it directly:
+for the lightest cartridges and ~0.4 Mips for the heaviest.
 
-```
-/run/media/vash/GIT/tinytama/for-escapement/pokemini_bench_target
-348 KB static Xtensa, no libc dependency, no ROM needed
-./pokemini_bench_target --synthetic 2000
-```
+### The prepared binary cannot run on the watch as it is configured
 
-Its README is explicit that this is the one check that could not be done
-off-target: there is no LX7 core in QEMU, so a hello-world compiled by the same
-toolchain fails identically on every QEMU Xtensa core. The first real execution
-is on the board.
+The obvious route — copy `for-escapement/pokemini_bench_target` to the watch and
+run it — **does not work, and the reason is not fixable by retrying.** That binary
+is a **Linux** ELF: built by Escapement's own crosstool-NG (GCC 14.1.0) against
+uClibc, with `_start` and `__libc_start_main` and no ESP-IDF runtime. The watch as
+it stands runs **ESP-IDF v5.3.1 with TinyDesk Shell**, which is not Linux and has
+no ELF loader — `tdsh` reports `command not found` and has no `chmod` or `exec`.
+
+Attempted on 2026-11-13: WiFi on, `ssh start`, SFTP to `/sd` (392,204 bytes at
+18.1 KiB/s, md5 matching), `chmod` absent, execution refused. File removed, radio
+off again. The `for-escapement/` directory name was literal — it was built for
+the Linux watch, not for this firmware.
+
+So the measurement needs one of two routes, and they are not equivalent:
+
+**A. Flash the Escapement Linux image and run it there.** This is what the binary
+was built for and it needs no new code. It also replaces the TinyDesk firmware,
+which is the platform the NES and GBC work lives on. Reversible: a verified 16 MiB
+backup of the current firmware exists (`working-2026-11-13-0019.bin`). The number
+this produces is the frame rate of Pokémon Mini **on Linux**, which is a different
+question from the one the NES and GBC scopes answered.
+
+**B. Build the core into TinyDesk as a `pmbench` command.** This costs real work —
+vendoring `core/pokemini/` as a component and writing a shell command — but it
+measures the platform the other emulator work actually targets, and it is step 1
+of that port rather than a detour around it. Sizing is comfortable: 114,708 bytes
+of text against 347 KB free in the app partition, and 14,984 bytes of bss against
+143 KB of free internal DRAM.
+
+**Recommend B**, because NES and GBC are both TinyDesk ports. A Pokémon Mini that
+runs on a different operating system would be a third parallel platform, and the
+recommendation would then depend on which OS the next session happens to have
+flashed.
 
 **Do not estimate this by scaling the host figure.** `POKEMINI-CORE.md` says so
 directly — "the host figure cannot be scaled to the target by a ratio — any such
 ratio would be invented". An attempt while writing this document produced
 anything from 0.3 to 1.3 Mips depending on which anchor was chosen, which is the
-same non-answer in three costumes. Run the binary.
-
----
+same non-answer in three costumes.
 
 ## 7. Recommendation
 
