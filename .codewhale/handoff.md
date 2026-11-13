@@ -5,17 +5,18 @@ Orientation, not authority. Verify before acting on it.
 ## One line
 
 **The Tamagotchi runs full-screen on the watch as firmware.** It takes the whole
-framebuffer (black, with the margin buttons still live), paces the guest at its
-own 16 Hz, and pushes only the rows that changed. Next is wiring the touch panel
-to the guest, then launching it from the Start menu instead of typing `tama`.
+framebuffer (black), paces the guest at its own 16 Hz, and pushes only the rows
+that changed. While it runs the thirteen margin buttons are inert and relabelled
+(columns blank, strip shows a degree circle); the desktop labels come back on
+`tama stop`. Next is wiring those margins to the guest, then a Start menu entry.
 
 ## Repositories, both clean and pushed
 
-- **Fork** `~/GIT/tinydesk-twatch`, branch `t-watch-ultra`, HEAD `2df2b0e`.
+- **Fork** `~/GIT/tinydesk-twatch`, branch `t-watch-ultra`, HEAD `a17059a`.
   `fork` remote = `aquasock/tinydesk` (push here). `origin` = upstream
   `tinydesk-project/tinydesk` — **never push there**.
-- **Escapement** `~/GIT/Escapement`, branch `main`, HEAD `b1e3528`. Log entry 47
-  is the current cycle; DSP-006 and EMU-018 are the durable findings.
+- **Escapement** `~/GIT/Escapement`, branch `main`, HEAD `d9833d3`. Log entry 48
+  is the current cycle; TCH-011, DSP-006 and EMU-018 are the durable findings.
 
 ## Permissions and limits
 
@@ -50,11 +51,13 @@ to the guest, then launching it from the Start menu instead of typing `tama`.
 - `./scripts/tamacore-sync.sh check` → `in sync (13 files)`, and proven able to
   fail: a one-line edit to a copy gave `DIFFERS segmap.h`, RC 1.
 - Fork host suite **41/41**.
-- **Backup `working-2026-11-12-1705.bin`, 16 MiB, sha256 `9cc526cc…`,
+- **Backup `working-2026-11-12-1737.bin`, 16 MiB, sha256 `64c58067…`,
   `verify OK`** (digest matched with the board held in the bootloader across read
-  and compare). Taken after a clean reboot from a fresh build, so it covers the
-  Tamacore work: the 2,667,616-byte app region at `0x10000` is byte-identical to
-  the build at `67842a8` (md5 `626995fd886e5e6e7fec41aa17b50ea4`).
+  and compare). Covers everything through `a17059a`: the app region at `0x10000`
+  is byte-identical to the build (md5 `f2a91ffbbf2f090719aaa4c8e1783a70`).
+- `tests/test_twatch_edges` **1,567 checks, 0 failures**, including
+  `test_margin_labels`; proved able to fail (3 failures on a wrong code point, 6
+  on an empty label). Host suite **41/41**.
 
 ## The two things this cycle cost
 
@@ -75,6 +78,11 @@ to the guest, then launching it from the Start menu instead of typing `tama`.
    (DSP-006). The margin bars need no such handling -- they are painted once at
    init in controller coordinates, outside `s_fb`, so a framebuffer clear cannot
    reach them.
+4. **Two ownership predicates existed and the margin gate asked the wrong one.**
+   `td_wm_app_owns_screen()` is false for an app that claims pixels without being
+   a WM window -- the Tamagotchi -- so the gate was inert for the one app that
+   needed it. Gate on `display_pixels_claimed()` (TCH-011). Every desktop-path
+   test passes either way; only an app using the port's own API can catch it.
 
 ## Open, in order of cost
 
@@ -86,9 +94,11 @@ to the guest, then launching it from the Start menu instead of typing `tama`.
 3. **`tama stop`'s one-second wait** and the `tama start <rom>` argument path are
    written but unexercised.
 4. **Untested under load:** whether the guest holds 16 Hz with the painter active.
-5. **The margins still send desktop keys under ownership** — Enter mid-game goes
-   to a hidden shell, not the pet. Whether they should change meaning is the
-   operator's call, not a bug to fix unasked.
+5. **The margins are inert under an app, not wired to it.** The plan is the
+   columns for the pet's controls and the strip for the three V3 buttons; the
+   press path should call `tmc_button()` instead of refusing. The degree circle is
+   the placeholder. Watch the label direction — columns are rotated, the strip is
+   not.
 5. **`board.example.conf` still calls the SD keys unproven.** They work. Stale.
 6. **`td_vterm_t.bell` is probably redundant** — `td_sysinfo_t.bell` is the path
    that works. Both exist as a debugging hedge. Revisit rather than defend.
