@@ -285,6 +285,7 @@ TCH-008: "In the 15-byte report block only event 0x06 is a press, byte 6 must be
 TCH-009: "TP_INT is GPIO 12, active low, and the pull-up is part of the contract because the controller only pulls the line down and releases it; interrupt-driven touch cuts idle bus traffic about 8x"
 TCH-010: "The interrupt, not the poll, discovers a touch: with a 5 s idle poll, eight taps one second apart produced eight presses and eight releases and 255 interrupts on IRQ 33"
 TCH-011: "The margin buttons must be gated on display_pixels_claimed(), not on td_wm_app_owns_screen() -- the latter is false for an app that claims pixels without being a window manager window, so the Tamagotchi received the margins' desktop keys and pressing Enter mid-game typed into the hidden shell"
+TCH-012: "The CST9217 block carries TWO points six bytes apart -- second at byte 7 (event 0x16), bytes 8-10 coordinates in the same encoding, byte 12 validity -- numbered by ARRIVAL order; idle is fifteen 0xFF bytes, not 0x00 or 0xAB; and lifting the first finger of a chord PROMOTES the survivor into the primary slot with event 0x16, which is why the press test must be an exact b[0] == 0x06 and not a nibble mask"
 PMU-001: "AXP2101 capacity is register 0xa4 bits 6:0 (0x64 = 100, above 100 = not settled); voltage is registers 0x34/0x35, 14 bits, already in mV, and the power_supply property is uV so multiply by 1000"
 PMU-002: "The AXP2101 has no mainline driver, so it lives in patches/kernel/axp2101/; a non-recursive patch glob plus '|| true' silently dropped the series and a rebuild produced a kernel with no PMU driver and no error"
 PMU-003: "CONFIG_AXP20X_POWER publishes /sys/class/power_supply/axp20x-usb and is off by default; its absence is silent because axp20x-battery still appears"
@@ -376,6 +377,7 @@ DSP-005: "Only paint_task may touch flush_rect, s_tx or the SPI bus; calling it 
 DSP-006: "The button bars and key columns live OUTSIDE the framebuffer in controller coordinates and are painted once at init by paint_buttons()/paint_column(), not by the cell painter, so a full-screen app can clear s_fb without erasing the watch's controls -- but a framebuffer clear alone is not enough to take the screen, because a blit leaves the previous console text in the rest of s_fb and ownership then stops anything from overwriting it"
 EMU-018: "Internal DRAM is scarce enough that 4,148 bytes of .bss starved the SSH server of its 65,536-byte floor (`insufficient internal RAM (62443 bytes free; need at least 65536)`), so the emulator's dirty-row tables are a refcounted PSRAM heap allocation and internal free went 62,443 to 66,599; a component that adds .bss can break a peripheral with nothing to do with it"
 EMU-019: "tmc_button() writes the emulated CPU's pin state that tmc_run() reads, so it may only be called from the guest task: one instance is not reentrant, and the touch poll task runs on core 0 at the same priority as the unpinned guest task -- presses go through a queue drained between frames, not straight at the machine"
+EMU-020: "splb32_audio_emits() counts square-wave TOGGLES, not sounds -- one held tone raises it thousands of times a second -- so a front end keyed on it plays continuously and falls silent only when the guest stops stepping; the envelope is the signal and the waveform is a clock, so splb32_audio_active() exists and callers fire on its rising edge"
 ```
 
 ---
@@ -751,6 +753,21 @@ EMU-019: "tmc_button() writes the emulated CPU's pin state that tmc_run() reads,
     - "tinydesk-twatch ports/twatchultra/main/tama.c: display_pixels_claim(true) and the absence of any window manager involvement"
     - "DSP-001 for the ownership contract itself, and DSP-005 for the one-writer rule this gate protects"
   verification: "Verified on hardware 2026-11-12 by the operator, who asked for the margins to stop controlling the desktop and confirmed the result as perfect after a reboot from a fresh build; the guest ran and stopped cleanly across that cycle. The specific pre-fix fault -- Enter reaching the hidden shell -- was reasoned from the two predicates and their callers rather than caught in a log, and the fix is therefore verified by the requirement it was written for rather than by observing the bad state first."
+
+- record_id: TCH-012
+  kind: TOUCH
+  topic_id: TCH
+  status: VERIFIED
+  verified_date: 2026-11-12
+  title: "The report block carries two points six bytes apart, idle is 0xFF, and lifting the first finger promotes the second with event 0x16"
+  statement: "Measured by dumping raw 15-byte report blocks to /sd/touch.txt while performing deliberate two-finger gestures. (1) A block carries two points at six-byte stride: point 1 has its event at byte 0 (0x06 for a press) and coordinates at bytes 1-3; point 2 has its event marker at byte 7 (0x16), coordinates at bytes 8-10 in the SAME 12-bit encoding as the first (x = (hi1 << 4) | (lo >> 4), y = (hi2 << 4) | (lo & 0x0F)), and validity 0xAB at byte 12. (2) An IDLE read is fifteen 0xFF bytes -- NOT the 0x00 or 0xAB the driver's own comments had claimed -- and is rejected today only because the finger count in byte 5 decodes to 127. (3) Points are numbered by ARRIVAL ORDER: the finger placed first stays point 1 for the whole chord. (4) LIFTING THE FIRST FINGER of a chord PROMOTES THE SURVIVOR into the primary slot, moving its coordinates to bytes 1-3 and giving it event code 0x16."
+  consequence: "Two of these change code and one changes a test. The promotion in (4) is the dangerous one: 0x16 & 0x0F == 0x06, so a driver testing the nibble accepts a promoted second finger as a fresh primary press -- and since the survivor keeps its own coordinates, releasing an arming finger would fire whatever button the other finger was resting on, with any interlock already satisfied and gone. The press test is therefore an exact b[0] == 0x06. The 0xFF idle value in (2) means the driver's documented understanding of 'nothing there' was wrong even though its behaviour was right by accident, which is the kind of thing that breaks when someone later 'fixes' the finger-count check. And (3) plus the six-byte stride mean a consumer must treat a report as a SET of points, not as an ordered pair with a designated first -- which is exactly how the Tamagotchi's hold-to-arm interlock is written, so that it cannot invert when the arm finger happens to land second."
+  sources:
+    - "tinydesk-twatch ports/twatchultra/main/touch.c: the second-point decode at bytes 7..12 and the exact-event press test"
+    - "tinydesk-twatch ports/twatchultra/main/touch.c: touch_dump(), the raw-block capture"
+    - "captures preserved at ~/twatch-backup/touch-captures/: touch2.txt (single finger on a bar), touch3.txt (reserved + bottom-left), touch7.txt (full chord with lift-order, md5 1718e025e60e7e5a7086c478cbe03032)"
+    - "TCH-003 and TCH-008 for the single-point layout and the acknowledge rule these extend"
+  verification: "Verified on hardware 2026-11-12 across four captures with four different gestures. The second point was confirmed independently twice: a second finger on the left column's TOP slot decoded to controller y 92 (slot 0), and on the bottom slot to y 432 (slot 4), which are different answers for different gestures rather than one pattern matched twice. The promotion was seen in the lift-order capture as a run of 226 blocks at n=1 carrying event 0x16 with the surviving finger's coordinates in the primary slot. Idle-as-0xFF was seen in every capture as runs of identical ff-blocks."
 
 - record_id: LCD-008
   kind: DISPLAY
@@ -1671,6 +1688,21 @@ EMU-019: "tmc_button() writes the emulated CPU's pin state that tmc_run() reads,
     - "patches/harness/core0/tmc_core.h: 'one instance is not reentrant', and tmc_button()'s contract"
     - "tinydesk-twatch ports/twatchultra/main/touch.h for why the sink is registered for the life of the process"
   verification: "Verified on hardware 2026-11-12. The queue path was first exercised from the host with three `tama press`/`tama release` pairs, which the report recorded as `presses=3 drops=0` -- so the drain was proven before the touch path existed. The operator then played the pet from the strip on the glass and confirmed it works, and that run's report recorded `presses=31 drops=0` over 9,107 frames and 569 s of guest time. That the guest's own game logic responds correctly to those presses is the operator's report, not a measurement."
+
+- record_id: EMU-020
+  kind: EMU
+  topic_id: EMU
+  status: VERIFIED
+  verified_date: 2026-11-12
+  title: "The audio emit counter counts square-wave toggles, so a front end keyed on it plays one tone for ever"
+  statement: "splb32_sound emulates the V3's PWM and tone channels. `splb32_sound_toggle()` is called on every driver timer overflow while the channel's envelope is non-zero, and it increments `emits` on each call -- so a single held tone raises the counter thousands of times a second. `splb32_sound_set_data()` also increments it on register writes. The firmware's first version treated any change in this counter as 'the guest made a sound' and raised a beep, so a BEL played back to back for as long as the guest made any noise, and went silent only while the emulator was paused -- because pausing stops stepping the guest and therefore stops the timer overflows that generate the toggles."
+  consequence: "The waveform is a clock and the envelope is the signal, and confusing the two is the fault. `splb32_audio_active()` answers the question a front end actually has -- is either channel currently driving its speaker -- by testing the envelope and the last written level, and a caller fires on its rising edge to get one event per sound. Two alternative fixes are both wrong and both were ruled out by measurement: watching the LEVEL fails because toggle_state alternates on every call, so it would fire twice per period; and watching the counter's slope fails because the slope is the pitch. A 250 ms floor sits on top of the edge because a beep is 200 ms long, so two closer together overlap into noise rather than reading as two sounds. The diagnostic value of this record is the clue that identified it: PAUSING SILENCED IT, which points at the waveform's clock rather than at the guest's intent."
+  sources:
+    - "patches/harness/splb32/splb32_sound.c: splb32_sound_toggle(), which increments emits on every call"
+    - "patches/harness/splb32/splb32.c: splb32_audio_active(), and splb32_audio_emits() which exposes the counter"
+    - "patches/harness/core0/tmc_core.c: tmc_audio_active(), the portable wrapper the firmware uses"
+    - "tinydesk-twatch ports/twatchultra/main/tama.c: the rising-edge test with its 250 ms floor"
+  verification: "Verified on hardware 2026-11-12: the operator reported a BEL that never stopped and that ceased while paused, and confirmed it fixed after the change. The fault is stated as a number by tools/tamacore/check_audio.c, run with ./scripts/tamacore-host.sh audio: 'one 1000-toggle tone is one sound (1000 emits, envelope constant)'. The check was proved sensitive by removing the toggle_state inversion from splb32_sound.c, which makes it fail with 'level did not alternate across a toggle'."
 
 - record_id: NFC-001
   kind: BOARD

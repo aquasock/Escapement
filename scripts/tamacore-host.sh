@@ -79,6 +79,18 @@ check() {
     "$OUT/check_dirty" "$@"
 }
 
+# Why a beep per "audio event" never stopped: the emit counter counts square-wave
+# toggles, not sounds. Links splb32_sound.c alone -- no CPU, no ROM -- because the
+# question is arithmetic about that one model.
+audio() {
+    mkdir -p "$OUT"
+    echo "building $OUT/check_audio"
+    gcc -std=gnu11 -O2 -Wall -Wextra -Wno-unused-parameter \
+        -Ipatches/harness/splb32 -o "$OUT/check_audio" \
+        tools/tamacore/check_audio.c patches/harness/splb32/splb32_sound.c
+    "$OUT/check_audio"
+}
+
 run() {
     [ -x "$OUT/tmc_host" ] || build
     "$OUT/tmc_host" "$@"
@@ -102,6 +114,7 @@ case "${1:-}" in
     check) shift; check "$@" ;;
     run) shift; run "$@" ;;
     frames) shift; frames "$@" ;;
+    audio) audio ;;
     *)
         sed -n '2,10p' "$0" | sed 's/^# \{0,1\}//'
         exit 2

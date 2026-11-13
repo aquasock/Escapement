@@ -1,3 +1,52 @@
+## 50 COMMIT Unreleased 2026-11-12T18:57:46-07:00
+
+#### Coming From:
+
+Unreleased f74feac
+
+#### Purpose:
+
+Give the Tamagotchi seven margin controls gated by a hold-to-arm interlock, which required establishing that the touch panel reports two simultaneous fingers at all.
+
+#### Outcome:
+
+Seven controls work and the destructive three cannot be pressed by accident. The left column carries Pause, Save, Load, Speed and Sound; the right column carries the arm at the top, Shot next to it, and Reset at the bottom where a sliding thumb arrives last. Save, Load and Reset fire only while a second finger holds the arm -- the reserved slot the desktop had been carrying blank since it was first painted. THE ARGUMENT THAT MADE THE INTERLOCK TRUSTWORTHY IS ABOUT WHICH REPORT IT CHECKS. `tama_ui.c` holds the button map and the rules with no ESP dependency, so `tests/test_tama_ui.c` walks the whole thing on a host: 206 checks, including the order a person testing deliberately does not try -- arm down, arm lifted, then Reset, which must be refused. It also pins the reverse order, where holding an action and then adding the arm must NOT fire it retrospectively, because that would be a way to arm by accident. The rule is a property of the SET of points rather than of arrival order, because the controller numbers points by arrival and a rule keyed on "point 1 is the arm" would invert silently when the arm finger landed second. The interlock was proved able to fail rather than assumed: checking the arm against the previous report instead of the current one produces 70 failures, removing the gate produces 59, and gating on the wrong slot produces 59. TWO FAULTS WERE FOUND BY MEASUREMENT AND EACH COST A CYCLE. The first was mine and crashed the board: `overrides_for()` cast a `char[COL_N][OVR_MAX]` to `const char **` and returned it, so element 1 read eight bytes into the middle of row 0 and the label painter dereferenced garbage -- on the glass, `tama do speed` rebooted the watch and left a Displays window open. A pointer array and a 2-D char array are not the same layout, so the pointers are now built into a real array. The second is the more interesting one and it was in the emulator's contract rather than in this cycle's code: a BEL played continuously for as long as the guest made any sound, and stopped only while paused. The cause is that `splb32_audio_emits()` counts square-wave TOGGLES -- a held tone raises it thousands of times a second -- and the firmware was treating a change in it as an event. Pausing stopped it because pausing stops stepping the guest and therefore stops the waveform, which is the clue that identifies the fault. The waveform is a clock and the envelope is the signal, so `splb32_audio_active()` was added and the firmware now fires on the rising edge of it, with a 250 ms floor so two 200 ms beeps cannot overlap into noise. `tools/tamacore/check_audio.c` is the check and it states the fault as a number: one 1000-toggle tone is one sound, 1000 emits, envelope constant. It also rules out the obvious alternative fix by showing `toggle_state` alternates on every call, so "the level changed" would fire twice per period. The same investigation produced the multi-touch facts this cycle rests on, gathered with a new `touchdump` command that writes raw 15-byte report blocks to the card: a block carries two points six bytes each with the second at byte 7 (event), bytes 8-10 (coordinates, same 12-bit encoding) and byte 12 (validity); IDLE IS FIFTEEN 0xFF BYTES, not the 0x00 or 0xAB the driver's own comments claimed; points are numbered by arrival; and LIFTING THE FIRST FINGER OF A CHORD PROMOTES THE SURVIVOR INTO THE PRIMARY SLOT WITH EVENT 0x16, whose low nibble is 0x06. That last one turned the press test from `(b[0] & 0x0F) == 0x06` into `b[0] == 0x06`, because with the mask a stray finger left on the glass after a chord was accepted as a fresh press at its own position -- firing whatever it rested on, with the interlock already satisfied and gone. The capture that proves it is preserved at `~/twatch-backup/touch-captures/touch7.txt` on the development machine. One design decision is worth recording because it is a place two meanings of "save" could have quietly fought: the exit checkpoint is SKIPPED after a Reset, because quitting after one would otherwise overwrite the deliberate save with the fresh pet, destroying exactly what the interlock protects. The operator tested all seven controls, the three bottom bars, Pause, a screenshot and every speed setting, reported everything working, and confirmed after the fix that the sound is occasional rather than continuous. The build was clean with 0 warnings, binary `0x28ca20`, host suite 42 of 42 including the new `test_tama_ui`, and the backup `working-2026-11-12-1856.bin` is 16 MiB with sha256 `ffd5ccd12f298df7d07afcdd6bfe530eb066902895c91856c190f9238f1adf68` and a matching verify. ONE VERIFICATION HABIT NEEDED CORRECTING ALONG THE WAY: a rebuild of unchanged sources produces a different binary, because the app descriptor embeds the build date and time and the ELF hash. Comparing the flashed image against a freshly built one therefore shows dozens of differing bytes that are not code -- measured here as 70 bytes in three clusters, at the descriptor's time field, at its embedded ELF sha256, and in the image's trailing hash, with ZERO differences anywhere in the code region. So "the backup is byte-identical to the build" is a true and useful claim only when nothing has been rebuilt in between; the durable form of the check is to diff the two images and confirm the code region is empty, which is what was done to establish that the tested firmware and the committed source are the same program.
+
+#### Next Steps:
+
+Two blank slots remain in the right column and they are deliberate: an unused button that does nothing looks broken, so empty glass is the honest placeholder. The degree circle on the bottom strip is now the last stale label -- it was chosen when the bars were inert and they play the pet, but no short word for the V3's three buttons fits 41 px, so it wants the operator's decision rather than another guess. A Start menu entry is the remaining gap in reachability, since `tama` is still typed into the shell; `display_pixels_claim()` is all an app needs to take the screen. The `touchdump` command should be kept rather than removed -- it is how the multi-touch facts above were obtained, and the next question about this panel will want the same tool. One limitation is now visible and unaddressed: the two columns send desktop keys on the desktop and app actions under an app, so there is no way to reach six of the seven controls without launching the emulator, which is fine while the emulator is the only app that claims the screen but will need a decision when a second one exists.
+
+#### Files Modified:
+
+- ports/twatchultra/CMakeLists.txt
+- ports/twatchultra/main/CMakeLists.txt
+- ports/twatchultra/main/display.c
+- ports/twatchultra/main/display.h
+- ports/twatchultra/main/edges.h
+- ports/twatchultra/main/link_twatch.c
+- ports/twatchultra/main/tama.c
+- ports/twatchultra/main/tama_ui.c
+- ports/twatchultra/main/tama_ui.h
+- ports/twatchultra/main/touch.c
+- ports/twatchultra/main/touch.h
+- ports/twatchultra/README.md
+- tests/test_tama_ui.c
+- tests/test_twatch_edges.c
+- patches/harness/core0/tmc_core.c
+- patches/harness/core0/tmc_core.h
+- patches/harness/splb32/splb32.c
+- patches/harness/splb32/splb32.h
+- scripts/tamacore-host.sh
+- tools/tamacore/check_audio.c
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: PASS
+
+---
+
 ## 49 COMMIT Unreleased 2026-11-12T18:03:24-07:00
 
 #### Coming From:
