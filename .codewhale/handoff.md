@@ -1,16 +1,30 @@
-# Handoff — Escapement / TinyDesk on T-Watch Ultra, 2026-11-13T01:35
+# Handoff — Escapement / TinyDesk on T-Watch Ultra, 2026-11-13T02:10
 
 Orientation, not authority. Verify before acting on it.
 
 ## One line
 
-**NES is PARKED at 51 fps** (operator: "320x240 is just too small for this screen").
-Code is shipped and backed up; SRAM persistence and the skip-path test are owed.
+**Three platforms scoped. NES is PARKED at 51 fps** ("320x240 is just too small");
+its code is shipped and backed up. SRAM persistence and the skip-path test owed.
 
-**GBC scoped: use gnuboy.** Measured over 4 commercial ROMs, best of 3 — gnuboy
-9,308-13,620 fps vs binjgb 5,684-8,848, i.e. **1.54-1.79x faster**, and it emits
-`GB_PIXEL_565_BE` (panel byte order) so a port needs **no pixel conversion**.
-Scope doc: `docs/gbc-scoping.md`. Records GBC-001, GBC-002.
+**Pokemon Mini: existing work is in `~/GIT/tinytama`, not here** — PokeMini
+vendored at `8a64225e` (GPL-3.0), desktop build played across 12 cartridges,
+114 KB Xtensa text, three scope docs. `docs/pokemini-scoping.md` is this repo's
+scope. Records PM-001, PM-002.
+
+**Two corrections to that old work, both measured:** the CPU requirement is
+**0.22-0.36 MIPS, not 1 MIPS** (1 MIPS is the 4 MHz/4-cycle *ceiling*; 12 carts
+measure 3,091-5,053 instr of a 13,889 budget); and the **display gate is 5.4x
+cheaper than when it was taken** — 64-byte chunks at 357 ns/px, versus our
+16,384-pixel path at 66.5 ns/px. 288x192 costs 3,675 us of 13,889, not 19,741.
+Risk inverted: display is comfortable, CPU is the one unknown.
+
+**Against PM, plainly:** 96x64 is 3:2 landscape on a portrait panel. At max
+integer scale (3x) it is 288x192 = 41.5% of the fb — smaller in area than the NES
+just parked, with 112 rows of letterbox.
+
+**GBC scoped: gnuboy** (1.54-1.79x faster than binjgb, needs no pixel
+conversion). Its picture is much better: 2x = 320x288 = 69%.
 
 **The picture is the reason; the speed is not.** 160x144 at 2x = 320x288: full
 width, 69% of the framebuffer, no side margins. NES reaches 46% and cannot
