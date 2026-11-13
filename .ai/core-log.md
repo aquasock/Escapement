@@ -1,3 +1,33 @@
+## 78 COMMIT Unreleased 2026-11-13T16:32:00-07:00
+
+#### Coming From:
+
+Unreleased 5b178c3
+
+#### Purpose:
+
+Give Pokemon Mini a Start menu entry so the emulator can be launched from the glass rather than from a shell prompt.
+
+#### Outcome:
+
+Pokemon Mini is in the Start menu and the operator launched it and passed it. The entry reads "Pokémon Mini" with the accented character intact, which the font can draw -- U+00E9 is present in the 8x16 set and the on-device filename carries it as UTF-8 bytes C3 A9, confirmed by reading the directory listing back. The route to it was not the obvious one and the reason is a pre-existing board limit worth recording. The natural implementation is a `.tdapp` script calling the shell, and that cannot work here: `tdsh run` starts a script worker with `TDSH_SCRIPT_TASK_STACK` of 32,768 contiguous bytes, and this board's largest free internal block has been 31,744 since long before the emulator was added -- entry 57 records that figure on a firmware with no Pokemon Mini in it at all, and the same 1 KB shortfall is what refused the 32 KB internal cartridge in entry 66. Every `.tdapp` and `.tdsh` therefore fails with "failed to start script worker (-12)", which is ENOMEM, and that is why `~/Apps` and `~/Start menu` were both empty: no app on this port has ever had a Start menu entry, including the NES and the Tamagotchi. The route that does work is MicroPython, which needs no worker of that size: the firmware exposes `tinydesk.shell()` (implemented in `third_party/tdsh/python/td_py_tdsh.c` as `tdsh_execute_line` with the script's own cwd and rights), so a Python file can run any shell command the shell can. Two files result, `~/Apps/pm.py` holding `tinydesk.shell("pm start /sd/pinball.min")` and `~/Start menu/Pokémon Mini.tdlink` whose `target=` line names it. One code change was needed and it is in `apps/shortcut.c`: a shortcut whose target has a Run command now runs it instead of opening it, where previously only the compiled targets ran and a shortcut to Python source opened the editor. The check is scoped to the shortcut branch deliberately, so opening a `.py` from Files still opens the editor -- a file manager's job is to show a file and a launcher's is to start one, and widening `td_is_compiled_app()` would have conflated them. The Start menu rebuilds its list on every open, so the entry appears without a reboot. Verification on the device was the whole chain rather than the last link: `py ~/Apps/pm.py` produced "pm: running /sd/pinball.min (524288 bytes)" and a `pm status` read of 71.4 fps with 6 missed in 24.8 s, and the operator then launched it from the menu and passed it. Build PASS; deployment PASS with every written region hash-verified; one stray build directory was created at the repository root by running `idf.py build` from the wrong directory and was removed before committing. The core-syntax audit passed: 78 entries, `core.md` and `core-reference.md` unchanged, and this entry conforms to the six-section template and the 100-entry cap.
+
+#### Next Steps:
+
+The launcher hard-codes `pinball.min`, and the obvious next step is a cartridge picker or a last-used memory; the shell already has `/sd` with twelve cartridges on it, so a small Apps-side script that lists them and passes the chosen name to `pm start` would need no firmware change at all. The larger outstanding item is unchanged and is now the only thing between this port and being playable without the shell: nothing drawn on the framebuffer responds to a touch, and the app-mode touch sink has never fired on this port. Two pieces of geometry must be shared with that hit test rather than duplicated -- the d-pad's inverse rotation, and the band split, since a point's allowable x depends on which band its row falls in -- and the clean shape is one function mapping a framebuffer point to the control that owns it, used by the painter and the hit test both. Two cosmetic items remain accepted rather than outstanding: the d-pad's left arm is clipped 1 px at the framebuffer's left edge, and A has a 4 px flat edge where it meets the right column. The `tdsh run` limit is worth a cycle of its own at some point, because 32,768 contiguous bytes is unavailable to any script on this board and that is a silent constraint on a documented feature; either the stack shrinks or the allocator is taught to find that much, and neither is a small change. Everything else is unchanged: Puzzle Collection remains at 0.94x to 0.98x with optimization parked behind a repeat-run-to-median harness, audio is absent, save states and EEPROM persistence are untouched, the NES stays parked at 51 fps with battery-SRAM persistence and the skip-path test owed, GBC remains scoped with gnuboy recommended, the twelve cartridges and the BIOS dump remain on `/sd` and in neither repository, and the radio is off with auto-connect off.
+
+#### Files Modified:
+
+- apps/shortcut.c
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: PASS
+
+---
+
 ## 77 COMMIT Unreleased 2026-11-13T16:16:00-07:00
 
 #### Coming From:
