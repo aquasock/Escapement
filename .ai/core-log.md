@@ -1,3 +1,34 @@
+## 76 COMMIT Unreleased 2026-11-13T14:18:00-07:00
+
+#### Coming From:
+
+Unreleased 70e76c5
+
+#### Purpose:
+
+Give the Pokemon Mini's controls a background, rotate the A and B labels, and let the operator position each circle by counting grid squares on the glass.
+
+#### Outcome:
+
+The area below the picture is now the desktop's grid pattern instead of black, spanning the full width of the glass, and both circles sit where the operator placed them by eye. The grid is 16 px, which is the only grid in this port -- `display_test_pattern()` case 1 draws a line wherever either coordinate is a multiple of 16 -- after the instruction guessed 5 or 10; it is kept at 16 so the background matches what the `pattern 1` command draws, and the line is `0x18C3`, RGB565(3,6,3), rather than the pattern's white because as a background behind controls white competes with them while the controls are what the eye needs to find. Reaching the edges took two fixes on the same fault. The region was 320 wide, the framebuffer's width, when the glass is 410 -- the picture is a 320 px window inset 45 px into the panel, so a background that stops at the window stops 45 px short on both edges. Then `display_panel_rows()` clipped at x 410 when the controller's last visible column is `PANEL_COL_OFFSET + DISPLAY_PANEL_W - 1` = 431, because the RAM is 432 columns wide but the glass starts at column 22; that second one was latent, invisible on a black background and only reachable once something spanned the full width. The region is now panel x 22..431 by y 237..501, an exact fit to the glass, and the callback receives framebuffer x -45..364. The A and B labels are rotated 45 degrees counter-clockwise, the opposite sense from the d-pad's clockwise rotation, which was the instruction and is recorded as deliberate contrast rather than inconsistency: they are the circles' own marks and not part of the d-pad. Both go through the same `PM_ROT_K` 16.16 cosine so the arithmetic is shared, and the rotation direction was verified by rendering both senses side by side off-device before flashing, since getting it backwards is a one-character mistake that looks plausible in source. The circles are now placed independently, in grid cells, because the operator positions them by counting squares rather than in pixels: A is 3 cells right and 2 down from the pair's original column, B is 1 cell left and 1 down, and one cell is `PM_GRID`, so the offsets read as "how far did it move on the grid". They land at A x272..339 y292..359 and B x208..275 y376..443, with a 16 px gap between them and both inside the push region. One stale comment was caught and corrected in the process: `PM_PAD_YBASE` documented its value as 240 when the nudge had already made it 260, which would have misled the next reader about where the base sits. Build PASS; deployment PASS with every written region hash-verified; the operator confirmed the grid, the rotated labels and both circle positions on the glass, and unplugged the watch afterwards. Frame rate unaffected at 71.6 fps with `missed=0` over 22 s, since the background is drawn once at start like the controls. The core-syntax audit passed: 76 entries, `core.md` and `core-reference.md` unchanged, and this entry conforms to the six-section template and the 100-entry cap.
+
+#### Next Steps:
+
+The last verified backup is `working-2026-11-13-1319.bin`, which predates entries 75 and 76, so the first thing the next session owes is a fresh full backup once the watch is reconnected -- the binary now on the device carries the rotation, the nudge, the blank slots, the grid and the circle positions, and none of that is in the archive. After that, the controls remain drawn and inert: nothing on the glass responds to a touch, which is the last thing between this port and being playable without the shell. The first job there is proving a tap reaches `pm.c` at all, because the app-mode touch sink has existed since the Tamagotchi work and has never fired on this port. The geometry is positioned for it, with one caveat that must not be duplicated: the painter maps each pixel back through the d-pad's inverse rotation, so the hit test needs the same transform applied to the touch point and that arithmetic should be factored out rather than written twice. Two open questions still stand: the A and B letters were inferred rather than specified, and the panel's 45-degree chamfers make the bottom-left the tightest part of the layout. Everything else is unchanged: Puzzle Collection remains at 0.94x to 0.98x with optimization parked behind a repeat-run-to-median harness, audio is absent, save states and EEPROM persistence are untouched, nothing is committed for the twelve margin labels' duties, the NES stays parked at 51 fps with battery-SRAM persistence and the skip-path test owed, GBC remains scoped with gnuboy recommended, the Tamagotchi still wants a Start menu entry, and the radio is off with auto-connect off. The board was unplugged by the operator at the end of this cycle rather than faulting.
+
+#### Files Modified:
+
+- ports/twatchultra/main/display.c
+- ports/twatchultra/main/pm.c
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: PASS
+
+---
+
 ## 75 COMMIT Unreleased 2026-11-13T14:01:00-07:00
 
 #### Coming From:
