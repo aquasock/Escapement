@@ -1,3 +1,34 @@
+## 62 COMMIT Unreleased 2026-11-13T00:52:00-07:00
+
+#### Coming From:
+
+Unreleased 51ccdd8
+
+#### Purpose:
+
+Run the NES blit concurrently with the emulator on the second core, which the previous cycle's arithmetic left as the only route past 42 fps.
+
+#### Outcome:
+
+Zelda's title screen runs at 51 fps with 11,055 frames, 11,055 blits and 0 skipped over a 20-second run, and dropped frames fell to 36 in 11,055 (0.3 percent), up from 42 fps. The operator played it and reported no tearing and that it now feels mostly full speed. The change replaces DSP-005's single-writer rule with three mechanisms rather than one: `s_tx_app`, a second transmit band so a margin relabel on one core cannot overwrite a band the blitter is about to send; `reg_write_bus()` and `set_window_bus()`, so a band's window programming and its pixel stream happen under one bus acquisition, since CASET and RASET are panel state and a second pusher's window between another's window and its pixels would send those pixels to the wrong rectangle; and three PSRAM frame buffers handed between the emulator on core 0 and a blit task on core 1 through two queues, because the renderer must never write a buffer the blitter is reading. Three buffers and not two, because with two the renderer would wait for the blitter and there would be nothing to overlap. The ordering inside the blit callback is the whole safety argument and is easy to invert: a free buffer is taken before the finished one is published, so a dry pool skips the frame rather than letting the renderer keep writing a buffer that has just been queued. Per-frame blit cost rose from 8,360 to 10,272 us, conversion from 4,266 to 6,266, because the two cores contend for PSRAM bandwidth, and throughput improved anyway, so the contention costs less than the overlap gains. One failure belongs in this entry because it cost a build cycle and it was the agent's: the CS assertion that follows window programming was consumed by the rewrite and not re-added, so every frame was pushed with chip select de-asserted. The SPI transmitted every byte, the timing accounted for every microsecond, and `nes status` reported 53 fps with a full set of blits and zero skips while the glass was black. The operator found it, not a counter. The margins stayed painted because their push sites kept their own CS line, which was the available clue. A display change is not verified until someone has looked at the screen, and a timing match is not that. Backup `working-2026-11-13-0019.bin`, 16777216 bytes, sha256 `d208bd93e966487a3bf7f9c92f36a2c9b08b79e0f8748bf56b03c5566202b54b`, verify OK with the board held in the stub across read and compare, app region byte-identical to the build at md5 `0ccae46a3362419d8d4e71244b9ef628`.
+
+#### Next Steps:
+
+51 fps is short of 60 and the reason is now the emulator rather than the display: a 51 fps frame is 19,608 us against 15,242 us of interpreter and PPU, so the remaining gap would have to come from the 6502 or the PPU and not from anything this cycle touched. Two smaller things are worth a cycle before that. The frame pool should be checked for the case the counters cannot see -- `skipped` staying at zero over a long run proves the pool never ran dry, but a deliberate test that makes the blit slower than a frame would prove the skip path works rather than merely never firing. And `nes status` reporting has grown a second line of counters per cycle; it is now the main evidence surface for this app and should be tidied into one block whose fields are all labelled with the state they were measured in. Nothing else in the backlog changed: nofrendo still keeps battery SRAM in RAM only so a Zelda save does not survive a reset, the nofrendo statics are still worth about 4.7 KB from PSRAM, and the Tamagotchi still wants a Start menu entry. The wifi buffers and heap work of entries 57 to 59 are unaffected and the radio is still off with auto-connect off.
+
+#### Files Modified:
+
+- ports/twatchultra/main/display.c
+- ports/twatchultra/main/nes.c
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: PASS
+
+---
+
 ## 61 COMMIT Unreleased 2026-11-13T00:41:00-07:00
 
 #### Coming From:

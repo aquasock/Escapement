@@ -1,24 +1,26 @@
-# Handoff — Escapement / TinyDesk on T-Watch Ultra, 2026-11-13T00:45
+# Handoff — Escapement / TinyDesk on T-Watch Ultra, 2026-11-13T00:55
 
 Orientation, not authority. Verify before acting on it.
 
 ## One line
 
-**NES: Zelda's title 19 -> 42 fps** (`4f646f3` + `d4e2798`). Measured per frame
-over ~1,050-frame runs: **interpreter 15,242 + convert 4,355 + push 4,054 =
-23,651 us**. `nes status` prints the breakdown now.
+**NES: Zelda's title 19 -> 51 fps.** Blit now runs on core 1 while the emulator
+runs on core 0 (`64ccc7d`). frames=11055 blits=11055 skipped=0 over 20 s,
+dropped 36 (0.3%). Operator: "no tearing... mostly full speed."
 
-**The push is NOT wasteful — 1.10x its arithmetic floor.** The earlier "2.6x
-excess" was blit-minus-estimated-conversion, an inference I reported as a
-measurement, and it had pointed at a DMA overlap with nothing to reclaim.
-NES-003 revised. Transfer 3,360 us vs 3,072 theoretical; window 723 us for 15
-bands. Do not go looking for waste there.
+**DSP-005's single-writer rule is now lifted, in three parts — do not remove one.**
+`s_tx_app` (own transmit band), `reg_write_bus()`/`set_window_bus()` (window
+inside the bus acquisition), and a 3-buffer pool handed through queues. The
+callback takes a free buffer BEFORE publishing the finished one; invert that and
+a dry pool pushes half-written frames. DSP-008.
 
-**60 fps needs the blit on core 1, and that is a decision, not a start.** Even
-deleting the whole blit leaves 15,242 us (65.6 fps), so cheaper is not the axis —
-concurrent is. Three blockers, all in DSP-005's single-writer contract: `s_tx`
-must stop being shared, window programming must move inside the bus acquisition,
-`vidbuf` needs triple buffering. Failure mode is tearing on the glass.
+**A DISPLAY CHANGE IS NOT VERIFIED UNTIL SOMEONE LOOKS AT THE GLASS.** This cycle
+shipped a build that reported 53 fps, 0 skips, correct timings — and was pure
+black, because the CS assertion after window programming was consumed by the
+rewrite. Every counter said healthy. The operator found it. DSP-007.
+
+**51, not 60:** a frame is now 19,608 us against 15,242 us of interpreter+PPU.
+The remaining gap is the emulator, not the display.
 
 Tried and rejected, with numbers in the code (`NES_VIDBUF_STATIC`, default 0):
 static internal vidbuf = 45 fps, +65,800 B permanently, breaks SSH with WiFi on.
