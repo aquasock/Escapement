@@ -1,3 +1,42 @@
+## 54 COMMIT Unreleased 2026-11-12T21:41:19-07:00
+
+#### Coming From:
+
+Unreleased 4a2ba85
+
+#### Purpose:
+
+Put the NES on the watch's screen and play it, which is Phases 3 and 4 of the port: PSRAM for the frame buffer, and the glue between nofrendo and this board's display, input and timing.
+
+#### Outcome:
+
+THE NES WORKS. The operator started a ROM, began a game and flew around with the margin buttons, so the display, the input and the emulation are all correct end to end. It is not yet fast enough: 21 frames a second against 60, and the measurement says where that goes. The split, taken on the board over one second with the emulator running, is 8,160 microseconds in the 6502 interpreter and 6,166 in the blit against a 16,667 microsecond budget -- 49 and 37 percent, with the rest lost between them. THE BLIT FIGURE IS THE SURPRISE AND THE EASIEST WIN. Moving 61,440 pixels should cost about a hundred microseconds; it costs sixty times that, because `display_picture_rgb()` copies the frame into `s_fb` and `flush_rect()` then byte-swaps it into `s_tx`, and both of those buffers are in PSRAM while the source is too. So each frame makes four passes over external memory where one would do. A direct path for a full-frame app -- convert straight into the flush buffer, skipping the intermediate copies entirely -- is the next change and should remove most of that 6,166 microseconds. The emulator half needs different work and is not addressed here: 8,160 microseconds for a frame the host runs in 41 means the S3 is roughly two hundred times slower than x86 on this workload, and the two likely causes are the PPU writing 65 KB per frame into PSRAM and the ROM living in internal DRAM. PHASE 3 TURNED OUT TO BE SMALLER THAN EXPECTED, AND ONE POSSIBILITY WAS RULED OUT BY READING RATHER THAN TESTING. The component has only 5.3 KB of .bss across 69 objects, and `vidbuf` is a plain pointer the CORE asks the port to supply, so there was no linker fragment to write: `nes.c` allocates the 65,280-byte frame buffer and the 122,880-byte converted frame from PSRAM with `heap_caps_malloc`, which is the pattern EMU-018 established. PHASE 4 IS SHORT BECAUSE NOFRENDO ASKS FOR ALMOST NOTHING -- three callbacks, `blit_func`, `vsync` and `input`, plus `nes_setvidbuf`. The blit skips the core's eight-pixel overdraw on each side rather than presenting it, converts through a 256-entry RGB565 table built from nofrendo's own palette data, and calls `display_picture_rgb()` once per frame rather than once per scanline, because each call takes the lock and reprograms the panel window. Notably the retro-go front end is still not vendored: `nofrendo_buildpalette()` lives in `nofrendo.c`, so the table is rebuilt here in four lines from `nes_palettes[][]`, which keeps the component free of that dependency altogether. TWO REAL FAULTS WERE FOUND AND FIXED ALONG THE WAY, both of the same shape as ones this project has already paid for. The first is EMU-018 happening again: adding the component's 4 KB of .bss pushed internal DRAM to 60,143 bytes and `ssh start` began refusing with "insufficient internal RAM (need at least 65536)". The culprit turned out to be `sound.c`'s beep buffer -- 16,000 bytes of .bss held for the life of the firmware to be used for 250 milliseconds at a time -- and moving it to a per-call PSRAM allocation took internal free from 60,143 to 76,147. That fix stands on its own and has nothing to do with the NES. The second is a collision the port created for itself: `touch_set_app_touch()` REPLACES its consumer, and with two apps that now claim the screen -- the Tamagotchi and the NES -- whichever registered last silently disabled the other. There is now `touch_add_app_touch()`, a bounded table of consumers where each decides for itself whether a frame is meant for it, because only one app can own the screen at a time. ONE UPSTREAM EDIT WAS NEEDED AND IT IS RECORDED IN PLACE: `nes/utils.h` defines `IRAM_ATTR` as empty, which collides with ESP-IDF's own definition of that macro and fails `-Werror`; it is now guarded by `#ifndef`. That is the only change to vendored code. The backup `working-2026-11-12-2136.bin` is 16 MiB, sha256 `dda6c8ce926e88e631c3f221f70d3653745fbee3cb283b2c008d7aaafd4b1131`, verify OK, and its app region is byte-identical to the build with zero differing bytes. The firmware is `0x2a8ba0` with 11 percent of the app partition free, and the host benchmark still reports 142x realtime on the same ROM it reported 233x earlier -- the difference is host load rather than a regression, which is worth stating because a falling host number with an unchanged core looks like a problem and is not.
+
+#### Next Steps:
+
+Make the blit cheap. The change is a display API addition -- a full-frame RGB565 push that converts into `s_tx` in flush order and skips `s_fb` -- and it should be measurable on the host before it is flashed, because the cost is a memcpy and a byte swap whose durations do not depend on the emulator. That also benefits the Tamagotchi, which blits rows through the same path. After that, re-measure the split, because a blit that costs 500 microseconds instead of 6,166 changes how much of the frame the interpreter actually gets and may make the emulator half irrelevant to whether the game is playable. If the emulator is then still over budget, the next question is where the PPU's 65 KB per frame is going -- PSRAM writes are the likely cost -- and whether `vidbuf` can live in internal DRAM once the blit stops competing for it. SELECT is unmapped, which a few games need to choose a mode and which the left column has three free slots for. Nothing about correctness is outstanding: the picture is right, the buttons are right, and the ROM loads.
+
+#### Files Modified:
+
+- ports/twatchultra/main/nes.c
+- ports/twatchultra/main/nes.h
+- ports/twatchultra/main/CMakeLists.txt
+- ports/twatchultra/main/link_twatch.c
+- ports/twatchultra/main/sound.c
+- ports/twatchultra/main/touch.c
+- ports/twatchultra/main/touch.h
+- ports/twatchultra/main/tama.c
+- ports/twatchultra/components/nofrendo/nes/utils.h
+- ports/twatchultra/README.md
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: PASS
+
+---
+
 ## 53 COMMIT Unreleased 2026-11-12T21:24:28-07:00
 
 #### Coming From:
