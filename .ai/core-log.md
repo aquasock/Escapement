@@ -1,3 +1,33 @@
+## 69 COMMIT Unreleased 2026-11-13T10:17:00-07:00
+
+#### Coming From:
+
+Unreleased 63e2fd6
+
+#### Purpose:
+
+Fix the inverted picture that the operator found by putting the watch beside the desktop emulator on the same screen.
+
+#### Outcome:
+
+The port had been rendering every frame inverted, and the operator found it by running Pokemon Puzzle Collection on the watch and on the tinytama desktop reference at the same time and comparing them: the desktop was correct and the watch was the negative of it. The cause is a semantic error rather than a colour choice. The Pokemon Mini's panel is a white-on-black monochrome LCD, meaning a set pixel is a DARK dot on a pale background, and PokeMini's `LCDPixelsD` holds one byte per dot with non-zero meaning lit; `pmgui.c` renders a non-zero dot as `0xFF16161A`, near black, against `0xFFC8C8BE` for an unlit one, which is the reference the port should have matched. `pm.c` mapped non-zero to white and shipped the negative. The fix is two renamed constants, `PM_DOT_LIT` 0x0000 and `PM_DOT_UNLIT` 0xFFFF, with the names chosen so the next reader cannot invert them by accident again. It is explicitly NOT the hardware's own inversion: `MinxLCD` has `InvAllPix` and `SetAllPix` registers that a cartridge can set, and `MinxLCD_Render()` applies them into `LCDPixelsD` before the port sees it, so the polarity in the port is fixed and absolute and nothing a game does should change it. What makes this fault worth recording is how invisible it was to every instrument the port has: the frame rate, the speed ratio, the push count and the identical-frame skip were all exactly as measured before, because none of them cares what a pixel means, and the watch had been signed off as working at 0.999x with a picture that was upside down in tone. Only looking at the two screens together found it, which is the third time this project has paid for that lesson. Pokemon Pinball Mini was then booted on both machines and the operator confirmed the picture correct, running at 71.9 fps, 0.999x of real time with `missed=0` over 84.1 s, emulation 13.0 ms against the 13.89 ms budget. Build PASS at 0x2bc4d0 bytes with 278,320 free; deployment PASS with every written region hash-verified; the desktop comparison used the cartridge at sha256 `5ac75fd2b6d5dea85e17e5e6131339e0e19eefe978a6f4b7f8700fb28c89cc23` on both sides. The core-syntax audit passed: 69 entries, both control files unchanged apart from this entry, which conforms to the six-section template and the 100-entry cap.
+
+#### Next Steps:
+
+Puzzle Collection is still the one cartridge below full speed at 0.971x with emulation at 14.1 ms against the 13.89 ms budget, and the picture fault means its earlier sweep result should be treated as a rate measurement only -- the frames were counted correctly but displayed inverted, so nothing about its render path has been verified against the reference. Re-running it on the glass is therefore worth a minute before the `synccycles` experiment is judged, because that experiment will be read off the same status figures and a second undetected display fault would invalidate the comparison the same way this one did. The rest is unchanged: buttons are still unwired and unverified, so neither emulator can be played on the watch without tapping the glass and the touch path has never been exercised; audio is absent; save states and EEPROM persistence are untouched; the twelve cartridges and the BIOS dump remain on `/sd` and in neither repository. The NES stays parked at 51 fps with battery-SRAM persistence and the skip-path test owed, GBC remains scoped with gnuboy recommended, the Tamagotchi still wants a Start menu entry, and the radio is off with auto-connect off.
+
+#### Files Modified:
+
+- ports/twatchultra/main/pm.c
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: PASS
+
+---
+
 ## 68 COMMIT Unreleased 2026-11-13T10:05:00-07:00
 
 #### Coming From:
