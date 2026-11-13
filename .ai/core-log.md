@@ -1,3 +1,53 @@
+## 46 COMMIT Unreleased 2026-11-12T17:00:23-07:00
+
+#### Coming From:
+
+Unreleased 358100f
+
+#### Purpose:
+
+Put the Tamagotchi V3 emulator on the watch's own screen as firmware, which is Phase 4 of the Tamacore port and the first cycle in which guest pixels reach the glass.
+
+#### Outcome:
+
+The pet runs on the watch. `ports/twatchultra/components/tamacore` is the emulator copied out of this project's `patches/harness`, and `main/tama.c` is the board's half: it reads the 512 KiB ROM from `/sd/rom.bin` into a PSRAM heap buffer, allocates the 300x308 RGB565 frame the same way, claims the screen with `display_pixels_claim(true)` before the first blit, and runs a task that steps the guest 250,000 cycles at a time and pushes only the rows that changed through `display_picture_rgb()`. Measured on the board over three runs: 549 frames with 69 blits, 358 with 45, and 255 with 32 after the final build, so roughly 88 percent of frames cost no SPI traffic -- the same ratio the host harness reports, arriving on the hardware. `tama status` prints frames, blits, cycles and guest seconds; `tama press` and `tama release` work the guest's three buttons from the shell; `tama stop` saves the 512-byte EEPROM image to `/sd/tama.sav`, releases the screen and asks the painter for a full repaint, so the desktop comes back whole, and the next `tama` loads the saved pet. The ROM went over SFTP in 19.25 s at 26.6 KiB/s with md5 verified both ways. TWO FAILURES ALONG THE WAY ARE WORTH MORE THAN THE SUCCESS. First, the emulator's dirty-row tables were `.bss`, 4,148 bytes of internal DRAM, and adding them broke `ssh start` with `insufficient internal RAM (62443 bytes free; need at least 65536)` -- a refusal with no visible connection to the emulator, found only because a transfer over SSH failed with a bare EOF. They are now a refcounted heap allocation that lands in PSRAM and is freed when the last instance goes, and internal free went 62,443 to 66,599. Second, the first test run appeared to have crashed: the screen showed the desktop, `tama status` read `running=0 frames=0` and the device had rebooted. It had not. The USB mirror goes stale the moment a bitmap owns the panel, so a running emulator and a dead board look identical from the host, and the reboot reading was a second flash reset; the fix is that the guest now rewrites `/sd/tama.txt` every 64 frames with frames, blits, cycles and `esp_reset_reason()`, which is the only view of the guest that survives the mirror going stale, and after that `tama stop` was verified to complete with uptime continuing unbroken. The dirty-row tracking was re-verified on the host before flashing, 2000 frames with 250 pushed and 0 pixels differing from a full repaint, and the emulator's row tables were confirmed to be the only reason the firmware binary changed by nothing but a heap pointer. A COPY IS A LIABILITY UNLESS SOMETHING CHECKS IT, so `scripts/tamacore-sync.sh` compares the thirteen files in `patches/harness` against the component and exits non-zero on any difference; it was verified to fail on a one-line change to a copy and to pass when restored, because a check that cannot fail is not a check. The port's README now documents the subsystem and its stale "no picture support, no sound, no PMU battery reporting" line is corrected, all three having worked for several cycles. Touch is deliberately not wired to the guest yet: the panel still reports to the desktop as a mouse, so the guest's buttons are reachable only from the shell, which proves the emulator's own input path before a driver is added to it.
+
+#### Next Steps:
+
+Phase 5 should wire the touch panel to the guest -- touches on the framebuffer mapped to the three buttons, which is a small change to `touch.c` behind the ownership test it already makes -- and after that, the Tamagotchi should be launched from the Start menu as an app rather than typed in the shell. Two things measured this cycle constrain that work and are already recorded: an app that draws pixels must claim the screen, and the USB mirror is useless while it does, so diagnostics belong in a file on the card. The Launcher/app work also has to answer whether the guest keeps its 16-frame cadence while the desktop's painter is idle, which nothing has yet measured under load. `tama` currently ignores the ROM argument on a bare invocation after the first start, and `tama stop` waits up to a second for the task to leave and refuses to free if it does not -- neither has been exercised, and the second exists because freeing underneath a running task is worse than leaking.
+
+#### Files Modified:
+
+- ports/twatchultra/components/tamacore/CMakeLists.txt
+- ports/twatchultra/components/tamacore/con_v3_ir.c
+- ports/twatchultra/components/tamacore/con_v3_ir.h
+- ports/twatchultra/components/tamacore/ht24lc08.c
+- ports/twatchultra/components/tamacore/ht24lc08.h
+- ports/twatchultra/components/tamacore/include/tmc_core.h
+- ports/twatchultra/components/tamacore/render.h
+- ports/twatchultra/components/tamacore/segmap.c
+- ports/twatchultra/components/tamacore/segmap.h
+- ports/twatchultra/components/tamacore/splb32.c
+- ports/twatchultra/components/tamacore/splb32.h
+- ports/twatchultra/components/tamacore/splb32_sound.c
+- ports/twatchultra/components/tamacore/splb32_sound.h
+- ports/twatchultra/components/tamacore/tmc_core.c
+- ports/twatchultra/main/CMakeLists.txt
+- ports/twatchultra/main/link_twatch.c
+- ports/twatchultra/main/tama.c
+- ports/twatchultra/main/tama.h
+- ports/twatchultra/README.md
+- patches/harness/core0/tmc_core.c
+- scripts/tamacore-sync.sh
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: PASS
+
+---
+
 ## 45 COMMIT Unreleased 2026-11-12T16:43:49-07:00
 
 #### Coming From:

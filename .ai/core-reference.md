@@ -372,6 +372,7 @@ DSP-002: "A static RGB565 full-panel buffer does not fit: 320x416 costs 256 KB a
 DSP-003: "The USB mirror stops describing the panel once a bitmap owns the screen, because the desktop's diff stream no longer matches the glass, so a diagnostic that exists only in that terminal is unreadable exactly when a picture is up; counters must also go to a file"
 DSP-004: "The leftover strips are a transfer-height fault: `flush_rect` sized a transaction from `5120 / w`, so an 8-pixel column went out as one 640-row window and dropped bands while full-width 16-row flushes were always clean; capping the rows at 16 whatever the width fixes it, and this is LCD-009's unestablished cause"
 DSP-005: "Only paint_task may touch flush_rect, s_tx or the SPI bus; calling it from the shell task produced a scrambled taskbar and a hung shell, because a second writer raced the painter over a buffer and bus that had never needed a lock"
+EMU-018: "Internal DRAM is scarce enough that 4,148 bytes of .bss starved the SSH server of its 65,536-byte floor (`insufficient internal RAM (62443 bytes free; need at least 65536)`), so the emulator's dirty-row tables are a refcounted PSRAM heap allocation and internal free went 62,443 to 66,599; a component that adds .bss can break a peripheral with nothing to do with it"
 ```
 
 ---
@@ -1621,6 +1622,22 @@ DSP-005: "Only paint_task may touch flush_rect, s_tx or the SPI bus; calling it 
     - "TamaHarness/portable/tamafb.c: BTN_DEV_NAME \"touch-buttons\" and the BTN_0..BTN_2 read, the contract the device name satisfies"
     - "TCH-004 for the 440 threshold, and EMU-010 for the 30 percent the daemon cost"
   verification: "Verified on hardware 2026-11-10. /proc/bus/input/devices lists a fourth device, Name=\"touch-buttons\", as event3 alongside cst92xx-touch on event2. The emulator's own log confirms `buttons: /dev/input from touch-buttons` rather than its 'buttons will do nothing' error, and the operator confirmed the pet responds to all three bars and that the emulator is materially faster than with the daemon running."
+
+- record_id: EMU-018
+  kind: EMU
+  topic_id: EMU
+  status: VERIFIED
+  verified_date: 2026-11-12
+  title: "Adding the emulator to the firmware starved the SSH server of internal RAM, so its row tables are a PSRAM heap allocation"
+  statement: "Putting tmc_core into the TinyDesk firmware, with its dirty-row tables as file-static arrays, added 4,148 bytes of .bss to internal DRAM. The board then refused to start its SSH server: `ssh: insufficient internal RAM (62443 bytes free; need at least 65536 before start)`, against a hard floor of 65,536 bytes that tdsh checks before creating the server task (src/tdsh_ssh.c, ssh_internal_needed()). Moving the tables to a single refcounted heap allocation, freed when the last emulator instance goes, moved internal free from 62,443 to 66,599 bytes and `ssh start` succeeded immediately; `heap` then reported `minimum-free=59919`. The allocation lands in PSRAM rather than internal RAM because the port sets CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL=4096, so an 8 KB request is served externally."
+  consequence: "This is the second time this port has been bitten by the same shape and the first time it was diagnosed rather than fixed blind: a component's .bss is internal DRAM by construction (extram.lf maps only libtinydesk, libtdsh and libmicropython to PSRAM), so DSP-002's 88,896-byte overflow and this 4 KB starvation are the same scarce resource failing two different ways -- one loudly at link time, one silently at runtime in a completely unrelated subsystem. The consequence for anyone adding to this firmware is that internal DRAM must be budgeted before the build, not discovered by a peripheral refusing to start: the board idles around 66 KB free, tdsh wants 65,536 for SSH alone, and the failure reports the number it could not meet but never the component that took the last bytes. Anything an app-sized feature needs should be a heap allocation, and a feature that is only sometimes in use should give the memory back -- which the refcount does. The same cycle found the companion diagnostic fact recorded as DSP-003: with a bitmap owning the panel the USB mirror no longer describes the glass, so a guest that is running and a board that has crashed both look like a stale desktop from the host, and the only view that survives is a file on the card. `tama` therefore rewrites /sd/tama.txt every 64 frames with frames, blits, cycles and esp_reset_reason()."
+  sources:
+    - "ports/twatchultra/components/tamacore/tmc_core.c: struct tmc_tables, tables_acquire() and tables_release()"
+    - "ports/twatchultra/main/tama.c: report(), which writes /sd/tama.txt"
+    - "third_party/tdsh/ports/esp_idf/components/tdsh/src/tdsh_ssh.c: ssh_start() and its internal-RAM floor"
+    - "ports/twatchultra/sdkconfig.defaults: CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL=4096"
+    - "DSP-002 for the same scarce resource failing at link time, and DSP-003 for why the diagnostics go to a file"
+  verification: "Verified on hardware 2026-11-12 in three steps. The failure was observed as the exact refusal above with 62,443 bytes free. After the change `heap` reported free=66599 and `ssh start` returned without an error, with the SFTP server answering on 10.10.0.15:22 and a 524288-byte ROM transferred at 26.6 KiB/s with md5 3bd0c293351ebb2bb221e9c69cc1c83b matching. The claimed cause is confirmed rather than assumed because the 4,148-byte figure is the .bss the component's tables occupied before the change and 66,599 - 62,443 = 4,156 recovered, which is that figure plus alignment."
 
 - record_id: NFC-001
   kind: BOARD

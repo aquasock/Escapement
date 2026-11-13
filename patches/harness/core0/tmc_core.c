@@ -67,6 +67,7 @@ _Static_assert(SEG_DOT == TMC_DOT && SEG_GAP == TMC_GAP, "dot pitch disagrees wi
 struct tmc
 {
     splb32 *cpu;
+    struct tmc_tables *tables;        /* shared, refcounted; see above */
     uint16_t *frame;                  /* the caller's buffer, TMC_FRAME_W x TMC_FRAME_H */
     uint8_t dpram_shadow[DPRAM_BYTES];
     bool shadow_valid;
@@ -74,17 +75,42 @@ struct tmc
 
 /* --- row tables: built once, and there is only one geometry ---------------
  *
- * These were file-static in tamacore_task.c, keyed to SHM_ constants. They are
- * still static because the geometry is a compile-time property of the artwork
- * and there is exactly one of it; making them per-instance would cost 4 KB per
- * instance to describe the same picture twice.
+ * They were file-static in tamacore_task.c, keyed to SHM_ constants. They are
+ * still shared rather than per-instance, because the geometry is a compile-time
+ * property of the artwork and there is exactly one of it -- two instances would
+ * describe the same picture twice.
+ *
+ * BUT THEY ARE ON THE HEAP NOW, AND THAT WAS NOT A TIDINESS CHANGE. As .bss
+ * they were 4,148 bytes of internal DRAM, which reading the number alone does
+ * not reveal the cost of: on the watch this board has 62,443 bytes of internal
+ * RAM free after boot and tdsh's SSH server refuses to start below 65,536, so
+ * the emulator's tables turned a working `ssh start` into
+ *
+ *     ssh: insufficient internal RAM (62443 bytes free; need at least 65536)
+ *
+ * a refusal that has nothing to do with the emulator and no visible connection
+ * to it. A heap allocation of this size lands in PSRAM (the port sets
+ * CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL to 4096) and is released when the last
+ * instance goes away, so the memory is held only while the guest runs -- and
+ * internal DRAM, which is the scarcest thing on the board, is not spent on a
+ * picture that is only sometimes on screen. The refcount is what makes a shared
+ * table safe once it is a heap allocation.
+ *
+ * The scratch array was a 1 KiB local in build_tables(), which is a large slice
+ * of a small task's stack; it is dead after the first build, so it lives here.
  */
-static uint16_t byte_first[DPRAM_BYTES];
-static uint16_t byte_nitem[DPRAM_BYTES];
-static uint16_t byte_items[ITEM_MAX];
-static uint16_t item_row_lo[SEG_MATRIX_H + SEG_ICON_COUNT];
-static uint16_t item_row_hi[SEG_MATRIX_H + SEG_ICON_COUNT];
-static bool tables_built;
+struct tmc_tables
+{
+    uint16_t byte_first[DPRAM_BYTES];
+    uint16_t byte_nitem[DPRAM_BYTES];
+    uint16_t byte_items[ITEM_MAX];
+    uint16_t item_row_lo[SEG_MATRIX_H + SEG_ICON_COUNT];
+    uint16_t item_row_hi[SEG_MATRIX_H + SEG_ICON_COUNT];
+    uint16_t fill[DPRAM_BYTES];
+};
+
+static struct tmc_tables *s_tables;
+static int s_tables_refs;
 
 static uint16_t item_first_row(uint16_t e)
 {
@@ -92,7 +118,7 @@ static uint16_t item_first_row(uint16_t e)
                            : (uint16_t)ITEM_IDX(e);
 }
 
-static void build_tables(void)
+static void build_tables(struct tmc_tables *t)
 {
     const int pitch = TMC_DOT + TMC_GAP;
     int i, r, c;
@@ -104,8 +130,8 @@ static void build_tables(void)
     {
         int y0 = TMC_PAD + SEG_MATRIX_OY + r * pitch;
 
-        item_row_lo[r] = (uint16_t)y0;
-        item_row_hi[r] = (uint16_t)(y0 + TMC_DOT);
+        t->item_row_lo[r] = (uint16_t)y0;
+        t->item_row_hi[r] = (uint16_t)(y0 + TMC_DOT);
     }
 
     /* Icon rows come from the artwork's own run list rather than a guess. */
@@ -124,12 +150,12 @@ static void build_tables(void)
             if ((uint16_t)(yy + 1) > hi)
                 hi = (uint16_t)(yy + 1);
         }
-        item_row_lo[SEG_MATRIX_H + i] = (uint16_t)(TMC_PAD + lo);
-        item_row_hi[SEG_MATRIX_H + i] = (uint16_t)(TMC_PAD + hi);
+        t->item_row_lo[SEG_MATRIX_H + i] = (uint16_t)(TMC_PAD + lo);
+        t->item_row_hi[SEG_MATRIX_H + i] = (uint16_t)(TMC_PAD + hi);
     }
 
     for (i = 0; i < DPRAM_BYTES; i++)
-        byte_nitem[i] = 0;
+        t->byte_nitem[i] = 0;
 
     /* Count, then place: two passes so byte_items is exactly sized and
      * byte_first can be the prefix sum. */
@@ -139,24 +165,23 @@ static void build_tables(void)
             uint8_t b = (uint8_t)(seg_matrix[r * SEG_MATRIX_W + c] >> 8);
 
             if (b != 0xFF)
-                byte_nitem[b]++;
+                t->byte_nitem[b]++;
         }
     for (i = 0; i < SEG_ICON_COUNT; i++)
-        byte_nitem[seg_icons[i].byte]++;
+        t->byte_nitem[seg_icons[i].byte]++;
 
     acc = 0;
     for (i = 0; i < DPRAM_BYTES; i++)
     {
-        byte_first[i] = acc;
-        acc = (uint16_t)(acc + byte_nitem[i]);
+        t->byte_first[i] = acc;
+        acc = (uint16_t)(acc + t->byte_nitem[i]);
     }
 
     {
-        uint16_t fill[DPRAM_BYTES];   /* 1 KiB: fine on a task stack, but see
-                                       * the caller's stack size */
+        uint16_t *fill = t->fill;
 
         for (i = 0; i < DPRAM_BYTES; i++)
-            fill[i] = byte_first[i];
+            fill[i] = t->byte_first[i];
 
         for (r = 0; r < SEG_MATRIX_H; r++)
             for (c = 0; c < SEG_MATRIX_W; c++)
@@ -166,14 +191,13 @@ static void build_tables(void)
 
                 if (b == 0xFF)
                     continue;         /* padding cell */
-                byte_items[fill[b]++] = ITEM_ENC(0, r, v & 0xFF);
+                t->byte_items[fill[b]++] = ITEM_ENC(0, r, v & 0xFF);
             }
         for (i = 0; i < SEG_ICON_COUNT; i++)
-            byte_items[fill[seg_icons[i].byte]++] =
+            t->byte_items[fill[seg_icons[i].byte]++] =
                 ITEM_ENC(1, i, seg_icons[i].bit);
     }
 
-    tables_built = true;
 }
 
 /* --- drawing ------------------------------------------------------------- */
@@ -251,9 +275,9 @@ static int dirty_rows(tmc *m, int *y_lo, int *y_hi)
 
         m->dpram_shadow[b] = dp[b];
 
-        for (int k = 0; k < byte_nitem[b]; k++)
+        for (int k = 0; k < m->tables->byte_nitem[b]; k++)
         {
-            uint16_t e = byte_items[byte_first[b] + k];
+            uint16_t e = m->tables->byte_items[m->tables->byte_first[b] + k];
             unsigned bit = ITEM_BIT(e);
 
             /* Only an item whose own bit actually changed contributes rows. */
@@ -262,10 +286,10 @@ static int dirty_rows(tmc *m, int *y_lo, int *y_hi)
 
             uint16_t ir = item_first_row(e);
 
-            if (item_row_lo[ir] < lo)
-                lo = item_row_lo[ir];
-            if (item_row_hi[ir] > hi)
-                hi = item_row_hi[ir];
+            if (m->tables->item_row_lo[ir] < lo)
+                lo = m->tables->item_row_lo[ir];
+            if (m->tables->item_row_hi[ir] > hi)
+                hi = m->tables->item_row_hi[ir];
         }
     }
 
@@ -284,6 +308,40 @@ static int dirty_rows(tmc *m, int *y_lo, int *y_hi)
 
 /* --- lifecycle ----------------------------------------------------------- */
 
+/*
+ * The shared table set, built on first use and freed when the last instance
+ * goes. Returns NULL when the allocation fails, which tmc_new turns into
+ * TMC_ERR_MEMORY -- the tables are not optional, and a guest that runs without
+ * them would draw nothing and report nothing changed.
+ */
+static struct tmc_tables *tables_acquire(void)
+{
+    if (!s_tables)
+    {
+        s_tables = (struct tmc_tables *)calloc(1, sizeof(*s_tables));
+
+        if (!s_tables)
+            return NULL;
+
+        build_tables(s_tables);
+    }
+
+    s_tables_refs++;
+    return s_tables;
+}
+
+static void tables_release(void)
+{
+    if (s_tables_refs > 0)
+        s_tables_refs--;
+
+    if (s_tables_refs == 0)
+    {
+        free(s_tables);
+        s_tables = NULL;
+    }
+}
+
 tmc_err tmc_new(const uint8_t *rom, size_t rom_len, uint16_t *frame, tmc **out)
 {
     if (!rom || !frame || !out)
@@ -298,12 +356,19 @@ tmc_err tmc_new(const uint8_t *rom, size_t rom_len, uint16_t *frame, tmc **out)
         rom[2] != TMC_ROM_SIG2 || rom[3] != TMC_ROM_SIG3)
         return TMC_ERR_SIGNATURE;
 
-    if (!tables_built)
-        build_tables();
+    struct tmc_tables *tables = tables_acquire();
+
+    if (!tables)
+        return TMC_ERR_MEMORY;
 
     tmc *m = (tmc *)calloc(1, sizeof(*m));
     if (!m)
+    {
+        tables_release();
         return TMC_ERR_MEMORY;
+    }
+
+    m->tables = tables;
 
     m->cpu = splb32_new(rom, rom_len);
     if (!m->cpu)
@@ -344,6 +409,8 @@ void tmc_free(tmc *m)
         return;
     if (m->cpu)
         splb32_free(m->cpu);
+    if (m->tables)
+        tables_release();
     free(m);
 }
 
