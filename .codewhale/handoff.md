@@ -67,9 +67,11 @@ strip's `°` label is now stale. Next lever: launch it as an app, not `tama`.
   on an empty label). Host suite **41/41**.
 - The button queue drained correctly from the host before any finger touched the
   glass: three `tama press`/`release` pairs → `presses=3 drops=0`.
-- Backup `working-2026-11-12-1856.bin`, sha256 `ffd5ccd1…`, `verify OK`. Covers
-  everything through `1b447ac` (the flashed image and the build differ only in the
-  descriptor timestamp: 70 bytes, zero in the code region).
+- **Backup `working-2026-11-12-2006.bin`, 16 MiB, sha256 `6108e743…`,
+  `verify OK`** (digest matched, board held in the bootloader across read and
+  compare). Covers `99e42ed` — the EEPROM-size fix. The 2,673,184-byte app region
+  is **byte-identical to the build, 0 differing bytes**, because nothing was
+  rebuilt between flashing and reading.
 - Host suite **42/42**, including `test_tama_ui` (206 checks; the interlock fails
   70/59/59 ways when broken) and `test_twatch_edges` (1,567).
 - `./scripts/tamacore-host.sh audio` → `one 1000-toggle tone is one sound`.
