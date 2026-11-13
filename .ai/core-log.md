@@ -1,3 +1,33 @@
+## 56 COMMIT Unreleased 2026-11-12T22:39:57-07:00
+
+#### Coming From:
+
+Unreleased dc490a7
+
+#### Purpose:
+
+Play real games with the real controller, which is the only test that says whether the NES port and the gamepad mapping are actually correct.
+
+#### Outcome:
+
+Two commercial games were played to the satisfaction of the operator and every controller button works. Super Mario Bros (mapper 0, 32K PRG, vertical mirroring) and The Legend of Zelda (mapper 1, MMC1, 128K PRG) both loaded from the card and ran, and the operator confirmed A, B, START, LEFT and RIGHT by playing them. THAT CLOSES A CLAIM THIS PROJECT WAS CARRYING UNVERIFIED. The four face buttons had been mapped from the press ORDER recorded during the descriptor capture, never from a named press, and the previous cycle said so explicitly rather than presenting the guess as a measurement. Playing settled it: the order was right, and the note that was honest about being an assumption can now be replaced by the test that confirmed it. The one thing the operator did NOT confirm is UP and DOWN, which the hat decode had already shown working for UP, LEFT and RIGHT in the sampler; nothing suggests DOWN differs, but it was not exercised and is not claimed. THE FRAME RATE IS NOW CONFIRMED FROM BOTH SIDES. The counter reads 18 frames per second on Super Mario Bros and 19 on Zelda, and the operator reports it FEELS like 19 -- which is worth more than the number alone, because a counter can be right about frames and wrong about experience if frames are being dropped between the count and the glass. The split is unchanged from NES-002: about 1,000,000 microseconds in the 6502 interpreter and 720,000 in the blit over each second, against a 16,667 microsecond budget per frame. So the game is playable and not smooth, and the blit -- 37 percent of the frame for work that should be one percent -- remains the next fix. TWO OPERATIONAL FACTS WERE ESTABLISHED THAT WOULD OTHERWISE COST A FUTURE CYCLE. First, SFTP writes have got worse, not better: 8 KiB now times out where the tool's own documentation says 16 KiB works, and the first attempt at Zelda reported `EXIT=124` from the timeout while leaving a 0-byte file on the card, which then failed to load with "File size error" rather than saying anything about the transfer. `--chunk 4096` is reliable and moved 131,088 bytes at 17.2 KiB/s with the md5 matching at both ends. The lesson is the same one this session has already recorded twice: an exit code from a timeout is not evidence about what the remote end did, so the file was checked with `ls -l` rather than trusted. Second, and more consequential for play: NOFRENDO KEEPS BATTERY SRAM IN RAM ONLY. Zelda is an MMC1 game that saves, the save works in the emulator, and nothing writes it anywhere, so a file does not survive a reset. The port supplies `InfoNES_ReadRom`-style loading and a PSRAM frame buffer but no SRAM persistence, and the operator was told before investing time in a file rather than after. The backup `working-2026-11-12-2235.bin` is 16 MiB, sha256 `53bc90b4e544dcd8fff32a6d0e3ca0a33abb9bb2e6939a6e68cf0d92e915c31c`, verify OK, app region byte-identical to the build with zero differing bytes.
+
+#### Next Steps:
+
+SRAM persistence is the smallest change with the largest effect on whether a game is worth starting: the emulated cartridge's battery-backed RAM needs saving to `/sd` on stop and loading on start, which is what the Tamagotchi already does for its EEPROM and enough of a pattern to copy rather than design. After that the blit, which is the only thing standing between 19 frames per second and 60: converting straight into the flush buffer instead of through `s_fb` and `s_tx` should remove most of 720,000 microseconds per second, and it can be measured on the host before it is flashed because the cost is a memcpy and a byte swap rather than emulation. Both are worth doing before any scaling discussion -- 1x is pixel-perfect and the picture is not the problem. Unchanged and still open: UP and DOWN on the controller are unexercised; the controller's analogue stick is decoded but unused; the NES has no Start menu entry and is launched by typing `nes`; and the gamepad's MENU button maps to START, which is a guess that a game with a real pause menu may disagree with.
+
+#### Files Modified:
+
+- ports/twatchultra/README.md
+
+#### Status:
+
+- Build: NOT RUN
+- Deployment: PASS
+- User Test: PASS
+
+---
+
 ## 55 COMMIT Unreleased 2026-11-12T22:17:33-07:00
 
 #### Coming From:
