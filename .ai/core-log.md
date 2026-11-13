@@ -1,3 +1,33 @@
+## 68 COMMIT Unreleased 2026-11-13T10:05:00-07:00
+
+#### Coming From:
+
+Unreleased f99aaf8
+
+#### Purpose:
+
+Sweep all twelve retail cartridges rather than the one, because entry 67 proved full speed on Pokemon Pinball Mini and explicitly did not prove it for the platform.
+
+#### Outcome:
+
+Eleven of the twelve cartridges run at 0.998 to 0.999x of real time on the watch, and Pokemon Puzzle Collection does not: at 0.971x over a 75-second run its emulation takes 14.1 ms against the 13.89 ms frame budget and it falls 145 ticks behind without recovering. Every cartridge in the set was transferred to `/sd` and run twice, `pm bench` for 400 unpaced frames and then `pm start` for 15 s paced, with the radio off throughout so the figures are comparable; all twelve loaded, booted and rendered. The distribution is narrow and the outlier is not the cartridge with the most instructions: per frame the set needs 3,483 to 4,489 instructions, and the Party Mini family is the heaviest at about 4,486 and yet the cheapest per instruction at 2.45 us, running at 11.9 ms. Puzzle Collection needs only 3,678 instructions per frame but each costs 3.34 us, the highest in the set, which puts it over the budget; Pinball at 3.16 us and 3,811 instructions lands at 13.0 ms and clears by 0.9 ms. The conclusion is that the cost that matters on this board is the interpreter's time per instruction rather than a game's instruction count, and the two are not correlated across these titles. Every cartridge also reports its own PRC divisor, which decides how fast it draws and therefore whether a dither will beat: the Party Mini family runs at divisor 3 and draws at 24 Hz, and the other seven run at divisor 2 and draw at 36 Hz. This corrects entry 67's projection of 16.1 ms for the heaviest cartridge, which scaled the host survey's 5,053 instructions per frame by 3.19 us; no cartridge here exceeds 4,489 instructions and the real worst case is 14.1 ms from expense rather than volume, so the estimate was pessimistic and named the wrong mechanism while reaching the right conclusion. Heap was read after every cycle and returns to 110,363 bytes from 110,675 at boot on the first cycle and is flat thereafter across twelve start and stop cycles, so there is no per-run leak. Two faults in the sweep harness produced a confident wrong answer before the corrected run and belong in the entry: `/dev/null` does not exist in tdsh's filesystem jail, so `pm stop > /dev/null` failed with a redirection error and never ran, which left the first cartridge running for the whole sweep while every later cartridge was refused with "stop the emulator first" and its `pm status` reported the first one -- eleven of twelve rows were the same measurement, and a redirection failure is a command that does not run rather than a command that runs and fails. The board also went silent once during that attempt and needed an esptool reset with no panic in the console capture; afterwards internal RAM read 26,919 bytes with the radio up against 70,031 at a clean boot and the SSH server refused to start below its 65,536-byte floor, which is consistent with one emulator left running beside WiFi but was not established, and it did not reproduce in eight consecutive start and stop cycles or in the corrected sweep, so it is recorded as an observation rather than a cause. Build N/A because no firmware changed; deployment N/A; the sweep ran on the image accepted in entry 67 and left the watch with the radio off, the emulator stopped and the scratch output files removed.
+
+#### Next Steps:
+
+Puzzle Collection is 2 percent slow and the fix is not another overlap, because the overlap is already done and the emulator task is what exceeds the budget on its own. The measured lever is cost per instruction, and the candidate worth testing first is the core's `synccycles` value, which defaults to 64 in the performance build and sets how often the hardware blocks are synchronised; raising it trades accuracy for speed and would show up immediately in Puzzle Collection's emulation figure. Beyond that the interpreter's per-instruction dispatch is the target, and the EMU records already establish what the floor looks like on this board. Buttons remain unwired and unverified, which the operator has twice accepted as out of scope, and the shock sensor still has no watch equivalent; audio is still absent; save states and EEPROM persistence are untouched, so no cartridge keeps progress across a restart. The twelve cartridges remain on `/sd` for re-testing and neither they nor the BIOS dump are in either repository. The NES stays parked at 51 fps with battery-SRAM persistence and the skip-path test owed, GBC remains scoped with gnuboy recommended, the Tamagotchi still wants a Start menu entry, and the radio is off with auto-connect off.
+
+#### Files Modified:
+
+- docs/pokemini-scoping.md
+
+#### Status:
+
+- Build: N/A
+- Deployment: N/A
+- User Test: N/A
+
+---
+
 ## 67 COMMIT Unreleased 2026-11-13T09:15:00-07:00
 
 #### Coming From:

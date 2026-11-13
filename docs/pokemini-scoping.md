@@ -6,11 +6,13 @@ display gate that used to block this platform has since been overtaken by the
 NES blit work. What follows is what is measured, what is inherited, and what the
 watch itself reported when asked.
 
-**Headline: the port runs at 0.999x of real time on hardware. Pokemon Pinball
-Mini plays at 71.9 fps against the machine's 71.97 Hz tick, with the display
-pushed from the second core. The platform is no longer scoped but shipped for
-this cartridge -- with the honest qualification that emulation has 5 percent of
-headroom, so the heaviest retail cartridges would still run below full speed.**
+**Headline: eleven of the twelve cartridges run at 0.998-0.999x of real time on
+the watch, and one does not. Pokemon Pinball Mini plays at 71.9 fps against the
+machine's 71.97 Hz tick with the display pushed from the second core; Pokemon
+Puzzle Collection drifts to 0.971x because its instructions are the most
+expensive in the set at 3.34 us each. The platform works and is not uniformly at
+full speed, and the difference is the interpreter's time per instruction rather
+than how much work a game asks for.**
 
 ---
 
@@ -262,14 +264,65 @@ dithers at 36 Hz on hardware, which means at 0.765x it dithered at 27.5 Hz and
 beat against nothing in particular -- an audible cadence that reads as "the frame
 rate is wrong" and was in fact the machine running slow.
 
-### The ceiling this port does not clear
+### All twelve cartridges, swept
 
-Emulation has 5 percent headroom, not more: 13.2 ms of a 13.89 ms frame. That is
-enough for Pinball and not proven for anything heavier. At 3.19 us per
-instruction, a cartridge needing the heaviest figure in the survey (5,053
-instructions per frame) costs 16.1 ms before any display work, so **full speed
-for the heaviest cartridges is not reachable on this board** and the port should
-be described as full speed for this cartridge rather than for the platform.
+Every cartridge in the set was run on the watch: `pm bench` for 400 frames
+unpaced to measure emulation, then `pm start` for 15 s paced to measure the real
+loop. Radio off throughout, so the figures are comparable with each other.
+
+| Cartridge | bench fps | instr/frame | us each | emu ms | speed | PRC | drawn Hz |
+|---|---|---|---|---|---|---|---|
+| Lunch Time | 89.3 | 3,483 | 3.22 | 11.8 | 0.998x | /2 | 36 |
+| Party Mini - Baseline Judge | 90.6 | 4,486 | 2.46 | 11.9 | 0.998x | /3 | 24 |
+| Party Mini - Chansey's Dribble | 90.9 | 4,486 | 2.45 | 11.9 | 0.998x | /3 | 24 |
+| Party Mini - Ricochet Dribble | 90.9 | 4,486 | 2.45 | 11.9 | 0.998x | /3 | 24 |
+| Party Mini - Rocket Start | 90.6 | 4,486 | 2.46 | 11.9 | 0.998x | /3 | 24 |
+| Party Mini - Slowking's Judge | 90.9 | 4,486 | 2.45 | 11.9 | 0.998x | /3 | 24 |
+| Party Mini | 91.1 | 4,489 | 2.45 | 11.1 | 0.998x | /3 | 24 |
+| Pinball Mini | 83.1 | 3,811 | 3.16 | 13.0 | 0.998x | /2 | 36 |
+| **Puzzle Collection** | **81.3** | **3,678** | **3.34** | **14.1** | **0.971x** | /2 | 36 |
+| Tetris | 89.7 | 3,484 | 3.20 | 11.2 | 0.999x | /2 | 36 |
+| Zany Cards | 103.0 | 4,382 | 2.22 | 9.7 | 0.999x | /2 | 36 |
+| Snorlax's Lunch Time | 88.6 | 3,483 | 3.24 | 11.8 | 0.998x | /2 | 36 |
+
+**Eleven of twelve run at full speed. Puzzle Collection does not**, and it is the
+one that matters for honesty: over a 75-second run it drifts to **0.971x** with
+emulation at **14.1 ms against the 13.89 ms budget**, 145 ticks behind and never
+recovering. Its instruction count is the second lowest in the set (3,678 per
+frame) but its instructions are the most expensive at **3.34 us**, so the cost is
+in the interpreter's time per instruction rather than in how much work the game
+asks for. A 15-second sample read 0.992x, which is why the short sweep would have
+called it a pass; the longer run is the number to believe.
+
+**This corrects the estimate in the previous version of this document.** Entry 67
+projected 16.1 ms for the heaviest cartridge by scaling the host survey's 5,053
+instructions per frame. No cartridge here exceeds 4,489, and the real worst case
+is Puzzle Collection at 14.1 ms from expensive instructions rather than numerous
+ones. The estimate was pessimistic and pointed at the wrong mechanism, though it
+reached the right conclusion: the port is not uniformly at full speed.
+
+Heap was read after every cycle and returns to 110,363 bytes each time, against
+110,675 at boot: a 312-byte one-time cost, flat across twelve start/stop cycles,
+so there is no per-run leak.
+
+**Two faults in the harness cost more than the firmware did, and both are worth
+recording because they produced confident wrong answers.**
+
+`/dev/null` does not exist in tdsh's filesystem jail, so `pm stop > /dev/null`
+failed with a redirection error and never executed. The first sweep therefore
+left cartridge one running for its entire duration, and every later cartridge's
+`pm bench` was refused with "stop the emulator first" while its `pm status`
+reported cartridge one. Eleven of the twelve rows in that run were the same
+measurement. A redirection failure is a command that does not run, which is a
+different fault from a command that runs and fails.
+
+The board also went silent once during that first sweep and needed an esptool
+reset. The console capture held no panic. After the wrecked sweep internal RAM
+read 26,919 bytes with the radio up, against 70,031 at a clean boot, and the SSH
+server refused to start below its 65,536-byte floor -- consistent with one
+emulator left running plus WiFi, but not established. It did not reproduce in
+eight consecutive start/stop cycles or in the corrected sweep, and is recorded as
+an observation rather than a cause.
 
 ### Cost, measured rather than estimated
 
