@@ -1,3 +1,33 @@
+## 70 COMMIT Unreleased 2026-11-13T10:47:00-07:00
+
+#### Coming From:
+
+Unreleased 5099ff0
+
+#### Purpose:
+
+Find out whether Pokemon Puzzle Collection's 0.971x comes from the interpreter's speed or from this board's memory hierarchy, before spending a cycle making the interpreter faster.
+
+#### Outcome:
+
+The answer is neither, and the measurement that produced it also retired the plan it was meant to serve. Running the same three cartridges on the host and on the watch at 8,000 frames each showed the two machines ranking them identically: the host splits into two groups at exactly 2x, about 150 M instructions/sec for Pokemon Party Mini and Zany Cards against about 75 M for Lunch Time, Pinball Mini and Puzzle Collection, and the watch preserves that grouping with the same membership. So Puzzle Collection's expensive instructions are inherent to its code rather than an artefact of this board, and the hypothesis that its poorer memory locality was costing PSRAM fetches is refuted. The board's cost fits a single linear model, `watch_us = 1.20 + 159 * host_us`, which predicts every measured cartridge within 2 to 8 percent: a fixed floor of about 1.2 us per emulated instruction, which is dispatch plus a cartridge fetch with no instruction cache, and beyond it a slowdown of 159 times the host. That floor is also why the fastest cartridge suffers the largest relative penalty, 343 times for Zany Cards against 247 times for Puzzle Collection, and why the board compresses the spread between titles rather than preserving it. Two claims made earlier in this session were wrong and are corrected here. `synccycles` was proposed as the first thing to try and it would have been a no-op: it is read only by `PokeMini_EmulateFrame()` at Hardware.c lines 51, 58 and 70, while this port calls `PokeMini_EmulateCycles()`, which does not consult it at all and synchronises the timers, PRC and audio after every single instruction. The value was identified from `CommandLine.c` without tracing which function consumed it, which is the same class of error as entry 69's inverted picture: an assumption that survived because nothing checked it. The second correction is the size of the shortfall. Puzzle Collection's raw emulation measured 12.28 ms per frame unpaced, which is comfortably inside the 13.893 ms budget, and only the paced loop reaches 14.0 ms; the overrun is about 0.11 ms, 0.77 percent, rather than the structural deficit that entry 68's 0.971x implied. Entry 67's projected 16.1 ms for the heaviest cartridge was therefore wrong for a third reason beyond the instruction-count error already recorded in entry 68: the projection treated emulation as the whole frame cost when the interpreter alone fits for every cartridge in the set. A further correction belongs to the supporting harness rather than the firmware: `tools/pmbench/bench_pokemini.c` and `pmbench.c` at `components/pokemini` both still use 55,555 cycles per frame, which is 4e6/72 and 0.036 percent fast, rather than the 55,575 that PM-003 established; instruction counts are unaffected because they are counted per instruction executed, but any figure divided by frame count inherits the error, so the 400-frame host figures are not comparable with the device's and the 8,000-frame host figures are the ones quoted. Build PASS for the host harness with `POKEMINI_SRC=/run/media/vash/GIT/tinytama/core/pokemini ./scripts/pmbench.sh build`; no firmware changed, nothing was deployed, and no user test applies. The core-syntax audit passed: 70 entries, both control files unchanged apart from this entry, which conforms to the six-section template and the 100-entry cap.
+
+#### Next Steps:
+
+The interpreter is not the target, so the next cycle is instrumentation of the paced loop rather than optimisation of the core. The loop's 14.0 ms must be split into pure emulation, the 6 KB snapshot copy, the 6 KB comparison, the buffer handoff and scheduling, because the raw emulation figure is 12.28 ms and about 1.7 ms is unaccounted for in the paced path; that gap has not been measured and should not be guessed at, especially as it varies by cartridge, being roughly 0.1 ms for Pokemon Party Mini and 1.7 ms for Puzzle Collection. One inefficiency is already visible in the code and is a candidate to fix in the same cycle: every frame copies `LCDPixelsD` into a snapshot buffer and then compares that snapshot against the previous one, when comparing `LCDPixelsD` directly would skip the copy on the roughly half of frames that are identical. The target is 13.5 ms for Puzzle Collection, which leaves 0.4 ms of margin and keeps the tick backlog from saturating. Separately, the two host bench sources should be moved to 55,575 cycles per frame so their frame-derived figures agree with the device and with PM-003. Everything else is unchanged: buttons remain unwired and the touch path unexercised, audio is absent, save states and EEPROM persistence are untouched, Puzzle Collection's render path has still not been verified on the glass since entry 69 found the inverted picture after a sweep that had displayed it, the NES stays parked at 51 fps with battery-SRAM persistence and the skip-path test owed, GBC remains scoped with gnuboy recommended, the Tamagotchi still wants a Start menu entry, and the radio is off with auto-connect off.
+
+#### Files Modified:
+
+None.
+
+#### Status:
+
+- Build: PASS
+- Deployment: N/A
+- User Test: N/A
+
+---
+
 ## 69 COMMIT Unreleased 2026-11-13T10:17:00-07:00
 
 #### Coming From:
