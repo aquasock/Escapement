@@ -1,3 +1,35 @@
+## 77 COMMIT Unreleased 2026-11-13T16:16:00-07:00
+
+#### Coming From:
+
+Unreleased 652aae3
+
+#### Purpose:
+
+Settle the Pokemon Mini's on-glass controls: three slots per side column, a background that is black rather than the grid, and A and B sized and placed by the operator against the glass.
+
+#### Outcome:
+
+The control layout is finished and the operator accepted it, and the run below records five distinct faults along the way because four of them were the same class and only one was caught by a counter. Seven margin slots are now completely blank -- no box and no label -- so Pause, Reset, Shake, A, B, C and the reserved slot are bare glass while SS, Save, Load, Hold, Sound and Speed keep both, and the blankness is a single space rather than an empty string because `display_margin_label()` reads the empty string as "clear the override and fall back to the shared table", which would have restored the Tamagotchi's words on exactly the slots meant to be silent. The side columns draw three slots instead of five through a new `display_margin_column_slots()`, which is a count rather than a re-division: the buttons keep the geometry every other screen gives them and the bar simply stops, so the operator's rule that everything below the third button belongs to the app's own controls means what it says. `COL_N` is untouched, so the Tamagotchi and its test are unaffected and still pass 206 checks. The background is black -- the grid is behind `PM_GRID_ON` rather than deleted, because it earned its place by making three rounds of positioning specifiable in cells, and it will be wanted again -- while `PM_GRID` stays 16 because the cell offsets are still measured in it and the increment must not drift from the unit. A and B grew from 68 to 84 px with their labels staying at the doubled 16x32 as instructed, the labels returned to 0 degrees, and their offsets are separate values from a shared base column rather than derived from each other, which is what let A move without dragging B. The five faults. First, the push region was the framebuffer's width, panel 67..386, so anything right of it was clipped whatever the glass had room for; the operator diagnosed this directly by pointing out that the old buttons' boundary was being used as the limit, and the region is now two bands -- framebuffer width down to the column bottom, and full glass width below it, which is the space the three-slot columns freed. Second, the bands' origins were passed for x but not for y, so the lower band drew every shape 102 rows too low: the d-pad was cut in half by the bottom of the glass, B fell off it, and A clipped, all from one missing offset. Third, `display_picture_rows()` clips at the framebuffer while `display_panel_rows()` clips at the panel, and the horizontal bound of the latter was `DISPLAY_PANEL_W` alone when the last visible column is `PANEL_COL_OFFSET + DISPLAY_PANEL_W - 1` = 431, which was latent until a background spanned the width. Fourth, and the one to remember: the app's push window had been shortened to the drawn slots on the stated reasoning that a full-height black column was clipping A, and that reasoning was wrong because the columns paint before the app draws its controls -- so anything the column writes is painted over a moment later, and the real effect of the shorter window was that the desktop's own labels from boot survived in the two spare slots, which the operator reported as "Supe" in the left column and a left arrow in the right. The window is full height again, and the fault it was meant to fix was A running into the right column, which is a collision and not a clip. Fifth, the horizontal headroom is the right column and not the screen: at 84 px from a base of x 224, an x offset of one clips 4 px, two clips 20 and three clips 36, which the operator saw as a rectangular notch in A photographed against the Speed button. A sits at one cell right with a 4 px flat edge and B at two cells left, accepted as the compromise; shrinking the circles does not help, because the wall is a column boundary rather than a size limit. Build PASS; deployment PASS with every written region hash-verified; frame rate unchanged at 71.6 fps with `missed=0` over 22 s throughout, since none of this touches the frame loop. A verified 16 MiB backup `working-2026-11-13-1604.bin`, sha256 `ac46b080eb8a16a29007a86303ba0a60e3e74c6329935ba215e70a4e020803af`, was taken after acceptance with the board held in esptool's stub across read and compare, and it is the first archive to contain this whole layout. The core-syntax audit passed: 77 entries, `core.md` and `core-reference.md` unchanged, and this entry conforms to the six-section template and the 100-entry cap.
+
+#### Next Steps:
+
+The controls are drawn and inert, and touch is the last thing between this port and being playable without the shell. The first job is proving a tap reaches `pm.c` at all, because the app-mode touch sink has existed since the Tamagotchi work and has never fired here. Two pieces of the geometry must be shared with the hit test rather than written twice: the d-pad's inverse rotation, and now the band split, since a point's allowable x depends on which band its row falls in. The clean shape is one function that maps a framebuffer point to whichever control owns it, used by the painter and the hit test both, so the notch in A and the boundary at row 293 cannot disagree with what a finger does. Two cosmetic items are accepted rather than outstanding: the d-pad's left arm is clipped 1 px at the framebuffer's left edge, and A has a 4 px flat edge where it meets the right column. Puzzle Collection remains at 0.94x to 0.98x with optimization parked behind a repeat-run-to-median harness, audio is absent, save states and EEPROM persistence are untouched, the NES stays parked at 51 fps with battery-SRAM persistence and the skip-path test owed, GBC remains scoped with gnuboy recommended, the Tamagotchi still wants a Start menu entry, and the radio is off with auto-connect off. The board was unplugged and reconnected by the operator during this cycle rather than faulting, and the twelve cartridges and the BIOS dump remain on `/sd` and in neither repository.
+
+#### Files Modified:
+
+- ports/twatchultra/main/display.c
+- ports/twatchultra/main/display.h
+- ports/twatchultra/main/pm.c
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: PASS
+
+---
+
 ## 76 COMMIT Unreleased 2026-11-13T14:18:00-07:00
 
 #### Coming From:
