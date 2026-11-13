@@ -9,6 +9,14 @@ build/
 # repository's history when the commit id reproduces them exactly.
 third_party/nofrendo/
 
+# gnuboy, fetched by scripts/gbcbench.sh at the same pinned retro-go commit. Same
+# reasoning as nofrendo above: the sources are reproducible from the commit id,
+# and this repository does not need 10 MB of upstream GPL code in its history.
+third_party/gnuboy/
+
+# binjgb, fetched by scripts/gbcbench.sh for the speed/accuracy comparison.
+third_party/binjgb/
+
 # Upstream release blobs. scripts/fetch-images.sh downloads and verifies them.
 images/*.bin
 

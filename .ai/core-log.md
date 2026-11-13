@@ -1,3 +1,37 @@
+## 63 COMMIT Unreleased 2026-11-13T01:30:00-07:00
+
+#### Coming From:
+
+Unreleased 7a0d0b1
+
+#### Purpose:
+
+Scope a Game Boy Color emulator the way the NES was scoped, because 256x240 is too small for a 320x416 panel and the Game Boy's 160x144 divides 320 exactly.
+
+#### Outcome:
+
+Two cores were built and measured rather than one being read about, and the scoping reached a conclusion neither the operator nor the agent expected: the picture gets much better and the frame rate probably gets somewhat worse. gnuboy read 9,308 / 13,560 / 10,989 / 13,620 fps on Zelda Link's Awakening DX, Pokemon Crystal, Super Mario Bros. Deluxe and Tetris DX, against binjgb's 5,684 / 7,578 / 6,683 / 8,848, so gnuboy is consistently 1.54 to 1.79 times faster across CGB-only and CGB-compatible cartridges and three mappers; all figures are best of three at 1,500 frames because this host's run-to-run noise measures 7 to 12 percent. gnuboy also emits `GB_PIXEL_565_BE`, the panel's own byte order, so a port needs no per-pixel conversion where the NES spends 4,355 us of every frame on a palette lookup. The geometry is why the port is worth doing at all: 160x144 at 2x is 320x288, filling the full width with no side margins and 69.2 percent of the framebuffer, against the NES's 46.2 percent with 32-pixel margins that no integer scale can improve because 256 x 1.25 is not an integer. The arithmetic that sizes the disappointment is that a GBC's CPU runs at 2.34 times the NES's clock, so the watch's measured 1.95 Mcyc/s of 6502 cycles projects to 45 fps at an instruction normalisation and 28 fps at a cycle one, and 2x upscaling puts the transmitted pixel count at 1.5 times the NES's, so the cheaper blit does not pay for the dearer emulator. Peanut-GB was ruled out on its own README: it is the fastest portable Game Boy core and it is DMG-only. Two harness traps are worth recording because both produced plausible numbers that were wrong: omitting `gnuboy_reset()` segfaults inside the CPU rather than failing quietly, and running the diagnostic scan on every frame masked the format difference entirely because a 23,040-iteration loop cost more than the conversion it was measuring, which would have produced the confident and false conclusion that the pixel format does not matter. Build PASS for both harnesses; no firmware changed and no handset test applies because nothing was flashed.
+
+#### Next Steps:
+
+The port itself is the next step and the scoping document's recommendation is gnuboy, not binjgb, for four reasons that compound: it is 1.6 times faster, it needs no pixel conversion, its API is six calls rather than a front end, and it is already in this project's supply chain at a pin we control. The first hardware run decides the plan, because the projection's 28 to 45 fps band is wide enough that it could mean nothing to do or a Z80 interpreter that needs work, and no further optimisation should be designed before that number exists. It should be built at 2x scale from the first flash, since 1x is worse than the NES at 17 percent of the framebuffer and would not answer the complaint the port exists to answer. The display path needs no change at all: `display_picture_rows()` and the core-1 blit already exist and were built for this, which is the one place this cycle is cheap. Audio comes last as it did for the NES. The NES itself is parked with SRAM persistence and the skip-path test still owed, the Tamagotchi still wants a Start menu entry, and the radio remains off with auto-connect off, so the first GBC work must be driven over the USB terminal unless it is re-enabled.
+
+#### Files Modified:
+
+- scripts/gbcbench.sh
+- tools/gbcbench/bench_gnuboy.c
+- tools/gbcbench/bench_binjgb.c
+- docs/gbc-scoping.md
+- .gitignore
+
+#### Status:
+
+- Build: PASS
+- Deployment: N/A
+- User Test: N/A
+
+---
+
 ## 62 COMMIT Unreleased 2026-11-13T00:52:00-07:00
 
 #### Coming From:
