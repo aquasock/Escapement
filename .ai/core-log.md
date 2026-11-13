@@ -1,3 +1,33 @@
+## 72 COMMIT Unreleased 2026-11-13T11:35:00-07:00
+
+#### Coming From:
+
+Unreleased 07e2928
+
+#### Purpose:
+
+Top-align the Pokemon Mini picture in the framebuffer, which the operator asked for after reviewing the port on the glass.
+
+#### Outcome:
+
+The picture now sits flush against the top of the addressable framebuffer with all 224 unused rows below it, and the operator accepted it on the watch. The change is one constant: `PM_OY` went from `((416 - 64 * PM_SCALE) / 2)`, which is 112, to 0, so the 288x192 picture is placed at row 0 instead of being centred vertically. `PM_OX` is untouched at 16, so horizontal centring is unchanged and the margins either side stay symmetrical. Both call sites derive from the same constant -- the live blit in `blit_one()` and the `pm pattern` diagnostic -- so there was nothing else to edit, which is why the whole cycle is one line and a comment rather than a refactor. The reason recorded in `pm.h` for the operator's preference is that the eye tracks the top of a small screen, and a centred 192-row picture floats with equal dead space above and below it; the header also notes that the vacated rows are the natural home for a status line, battery indicator or save marker later, none of which would then intrude on the picture. The offset is confirmed by the diagnostic rather than assumed: `pm pattern` reports the coordinates it actually pushed to, and now prints `288x192 at (16,0), 3x` where it previously printed `(16,112)`. Frame rate is unaffected, as expected for a placement change: Pokemon Pinball Mini measured 71.7 fps with `missed=0` over 27.6 s at 13.0 ms of emulation against the 13.893 ms budget, identical to the figures before the change. Build PASS at 0x2bc510 bytes with 278,256 free, unchanged from the previous build because no code size changed; deployment PASS with every written region hash-verified; the operator confirmed the placement on the glass. The core-syntax audit passed: 72 entries, both control files unchanged apart from this entry, which conforms to the six-section template and the 100-entry cap.
+
+#### Next Steps:
+
+The port is feature-complete for playing one cartridge and the remaining work is the list that has been carried since the port shipped. Buttons are the largest gap: the margin and touch mapping exists in `pm.c` but has never been exercised, so the watch can only be driven by tapping the glass and the touch path's first test is still owed. Audio is absent and the core's `MinxAudio` is compiled but never started. Save states and EEPROM persistence are untouched, so no cartridge keeps progress across a restart. Puzzle Collection remains the one cartridge below full speed at 0.94x to 0.98x, and optimization is deliberately parked: two levers exist, dropping to 2x scale to halve push contention or a roughly 13 percent faster interpreter, but this board's run-to-run variance is about 5 percent, so neither can be measured one run at a time and a repeat-run-to-median harness should be built before either is attempted. The NES stays parked at 51 fps with battery-SRAM persistence and the skip-path test owed, GBC remains scoped with gnuboy recommended, the Tamagotchi still wants a Start menu entry, and the radio is off with auto-connect off.
+
+#### Files Modified:
+
+- ports/twatchultra/main/pm.h
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: PASS
+
+---
+
 ## 71 COMMIT Unreleased 2026-11-13T11:11:00-07:00
 
 #### Coming From:
