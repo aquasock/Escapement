@@ -10,6 +10,14 @@ through `cmd_tama` into tdsh's parser frame, and it died as a `fclose` on a
 corrupted FILE* three calls away. `_Static_assert` now ties the constant to
 `HT24LC08_SIZE`. Verified: two start/stop cycles, uptime 17 -> 27 -> 34 s.
 
+**A REAL CONTROLLER WORKS.** The operator's Xbox Wireless Controller connects
+over **BLE HID** (not Bluetooth Classic — I asserted otherwise and was wrong) and
+decodes. `hid_gamepad.c` discriminates on the top-level collection usage; bt_hid
+tries it **before** the mouse parser, because a gamepad's X/Y stick makes
+`hid_mouse_parse()` claim it as a mouse (that was the jittering cursor).
+Verified: `kbd=0 mouse=0 pad=1`, hat + button bits 10/11 decode. **Face-button
+bits (0,1,3,4) rest on press order and need one confirmation.**
+
 **The NES PLAYS on the watch.** ROM at `/sd/game.nes`, launched with `nes`.
 1x letterboxed, pixel-perfect, and the operator played a game with the margin
 buttons. **21 fps, not 60**, and the split names the cause:
@@ -32,11 +40,11 @@ strip's `°` label is now stale. Next lever: launch it as an app, not `tama`.
 
 ## Repositories, both clean and pushed
 
-- **Fork** `~/GIT/tinydesk-twatch`, branch `t-watch-ultra`, HEAD `4f15b61`.
+- **Fork** `~/GIT/tinydesk-twatch`, branch `t-watch-ultra`, HEAD `8caccc6`.
   `fork` remote = `aquasock/tinydesk` (push here). `origin` = upstream
   `tinydesk-project/tinydesk` — **never push there**.
-- **Escapement** `~/GIT/Escapement`, branch `main`, HEAD `b072044`. Log entry 54
-  is the current cycle; NES-002 (fps split), NES-001 (core choice), OTA-001 are the newest.
+- **Escapement** `~/GIT/Escapement`, branch `main`, HEAD `a39b122`. Log entry 55
+  is the current cycle; BLE-007 (gamepad), NES-002 (fps split), NES-001 are newest.
 
 ## Permissions and limits
 
@@ -145,7 +153,11 @@ strip's `°` label is now stale. Next lever: launch it as an app, not `tama`.
 3. **`tama stop`'s one-second wait** and the `tama start <rom>` argument path are
    written but unexercised.
 4. **Untested under load:** whether the guest holds 16 Hz with the painter active.
-10. **NES: make the blit cheap.** A full-frame RGB565 push that converts into
+10. **Gamepad: confirm the four face-button bits.** Hold each for a full second
+    and run `nes pad` (samples 30 s to `/sd/nespad.txt` — do not ask the operator
+    to press during a window opened by the command). If a game disagrees, the
+    table in `nes.c` is one edit away.
+11. **NES: make the blit cheap.** A full-frame RGB565 push that converts into
     `s_tx` in flush order and skips `s_fb`. Measurable on the host first — the
     cost is a memcpy and a byte swap, not emulation. Then re-measure the split;
     a 500 us blit may make the emulator half irrelevant.
