@@ -1,3 +1,35 @@
+## 75 COMMIT Unreleased 2026-11-13T14:01:00-07:00
+
+#### Coming From:
+
+Unreleased bbdd0b1
+
+#### Purpose:
+
+Finish the Pokemon Mini's on-glass controls: bare slots for the seven that the framebuffer supplies, a 45-degree rotation, a thumb-space nudge, and a push path that reaches the edge of the glass rather than the edge of the framebuffer.
+
+#### Outcome:
+
+The control cluster is where the operator wants it and the operator accepted it: the d-pad rotated 45 degrees clockwise into an X, nudged 20 px down and 20 px left, with every one of its twelve corners and all four arrows travelling with it, and the A and B circles unmoved horizontally and following it down. Seven margin slots are now completely blank -- Pause, Reset, Shake, A, B, C and the reserved slot have no box and no label -- while SS, Save, Load, Hold, Sound and Speed keep both, so a slot is either a named drawn button or nothing at all and the two never mix. The rotation is implemented as an inverse transform rather than a rotated rasteriser: every pixel is mapped back through the unrotate into the shape's own frame and tested there, so `dpad_inside()` and the arrow sampler are unchanged and the reasons a corner or a glyph looks the way it does live in one place. `PM_ROT_K` is 46341, cos 45 in 16.16 fixed point, chosen over float because the shape is rasterised once at start and an exactly-representable integer keeps the rendering identical run to run. The three faults worth recording are all the same fault in different clothes, and the last one is the cycle's real lesson. `display_margin_label()` treats an empty string as "clear the override and fall back to the shared table", so blanking the seven slots with `""` would have restored the Tamagotchi's words on exactly the slots meant to be silent; they use a single space, which is a real label that renders as nothing. The nudge was first computed as 10 px because at 20 the rotated bounding box reaches framebuffer row 425 and `display_picture_rows()` clips at 415 -- and that was arithmetic about the wrong rectangle. The framebuffer is a 320x416 window inside a 410x502 panel, the 41 rows below it are addressable and visible and already carry the bottom margin buttons, and the operator said so directly: there is space left on the OLED. The fix is `display_panel_rows()`, a second row-callback push identical to `display_picture_rows()` but clipped to the panel's own bounds, taking panel coordinates the way `edges.h` does; the d-pad and the circles now go through it, so the cluster's lowest row is framebuffer 427, which is panel 472, and nothing is shaved. That is the same path the margin buttons already used, which is what the operator asked for by describing the controls as needing to be drawn "like the side buttons". One constraint remains and is recorded rather than discovered later: the panel's 45-degree chamfers cut the corners, so the deep bottom-left is where a further nudge would start to lose the lower-left arm, not the clip. The centring from the previous cycle is also corrected in premise: the d-pad was centred in the band from the picture's bottom edge to the GLASS bottom rather than to the framebuffer's last row, which is a 41-row difference and is why 48 px sits above it and 49 below. Build PASS; deployment PASS with every written region hash-verified; frame rate unchanged at 71.5 fps with `missed=2` over 23 s, since none of this touches the frame loop. The core-syntax audit passed: 75 entries, `core.md` and `core-reference.md` unchanged, and this entry conforms to the six-section template and the 100-entry cap.
+
+#### Next Steps:
+
+The controls are drawn and inert: nothing on the glass responds to a touch yet, which is the next cycle and the last thing between this port and being playable without the shell. The first job there is proving a tap reaches `pm.c` at all, because the touch path has never been exercised on this port -- the margin buttons have been wired since the Tamagotchi and the app-mode sink in `pm.c` has never fired. The geometry is positioned for it: `dpad_inside()`, `pad_inside()`, `pad_cx()` and `pad_cy()` are the same functions the painter uses, and the d-pad's now needs the same inverse rotation applied to the touch point that the painter applies to the pixel, which is the one place that logic must not be duplicated. Two open questions still stand: the A and B letters were inferred rather than specified, and the panel chamfers mean the bottom-left corner is the tightest part of the layout. Everything else is unchanged: Puzzle Collection remains at 0.94x to 0.98x with optimization parked behind a repeat-run-to-median harness, audio is absent, save states and EEPROM persistence are untouched, the NES stays parked at 51 fps with battery-SRAM persistence and the skip-path test owed, GBC remains scoped with gnuboy recommended, the Tamagotchi still wants a Start menu entry, and the radio is off with auto-connect off. The board was unplugged by the operator during this cycle to test something else, which is what looked like a crash and was not; the firmware has not faulted.
+
+#### Files Modified:
+
+- ports/twatchultra/main/display.c
+- ports/twatchultra/main/display.h
+- ports/twatchultra/main/pm.c
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: PASS
+
+---
+
 ## 74 COMMIT Unreleased 2026-11-13T13:21:00-07:00
 
 #### Coming From:
