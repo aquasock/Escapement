@@ -22,8 +22,8 @@ strip's `°` label is now stale. Next lever: launch it as an app, not `tama`.
 - **Fork** `~/GIT/tinydesk-twatch`, branch `t-watch-ultra`, HEAD `99e42ed`.
   `fork` remote = `aquasock/tinydesk` (push here). `origin` = upstream
   `tinydesk-project/tinydesk` — **never push there**.
-- **Escapement** `~/GIT/Escapement`, branch `main`, HEAD `e136f46`. Log entry 51
-  is the current cycle; EMU-021, TCH-012, EMU-020 are the newest durable findings.
+- **Escapement** `~/GIT/Escapement`, branch `main`, HEAD `e136f46`. Log entry 52
+  is the current cycle; OTA-001, EMU-021, TCH-012, EMU-020 are the newest durable findings.
 
 ## Permissions and limits
 
@@ -67,11 +67,14 @@ strip's `°` label is now stale. Next lever: launch it as an app, not `tama`.
   on an empty label). Host suite **41/41**.
 - The button queue drained correctly from the host before any finger touched the
   glass: three `tama press`/`release` pairs → `presses=3 drops=0`.
-- **Backup `working-2026-11-12-2006.bin`, 16 MiB, sha256 `6108e743…`,
-  `verify OK`** (digest matched, board held in the bootloader across read and
-  compare). Covers `99e42ed` — the EEPROM-size fix. The 2,673,184-byte app region
-  is **byte-identical to the build, 0 differing bytes**, because nothing was
-  rebuilt between flashing and reading.
+- **Backup `working-2026-11-12-2059.bin`, 16 MiB, sha256 `e180f582…`,
+  `verify OK`**. Post-OTA-test state: BOTH app slots hold valid 0.4.0 images,
+  `otadata` seq 3 vs 2 pointing at `ota_0`.
+- **A/B firmware update is proven** (no code changed): install to the inactive
+  slot → restart → `Running: ota_1 (on trial)` → confirms after 30 s → install
+  again → `ota_0`. A truncated image is refused at boot, not booted.
+- The built-in update feed (`…/update-desktop-twatchultra.json`) is **HTTP 404**.
+  The mechanism is complete and has no feed — that is the real gap.
 - Host suite **42/42**, including `test_tama_ui` (206 checks; the interlock fails
   70/59/59 ways when broken) and `test_twatch_edges` (1,567).
 - `./scripts/tamacore-host.sh audio` → `one 1000-toggle tone is one sound`.

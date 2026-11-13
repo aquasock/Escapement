@@ -1,3 +1,33 @@
+## 52 COMMIT Unreleased 2026-11-12T21:03:50-07:00
+
+#### Coming From:
+
+Unreleased 815764b
+
+#### Purpose:
+
+Prove that this port can update its own firmware by writing the inactive OTA slot and booting into it, which is the A/B swap the operator proposed.
+
+#### Outcome:
+
+A/B firmware update works on the watch, in both directions, with no code written and no partition changed. The layout was already 2 x 3 MiB (ota_0 and ota_1), and the port already carries the whole ESP-IDF mechanism -- `esp_ota_set_boot_partition()` at `ota_esp.c:279`, `esp_ota_mark_app_valid_cancel_rollback()` at `:785`, `esp_ota_mark_app_invalid_rollback_and_reboot()` at `:630`, an `ota` shell command with status/feed/check/install/rollback/restart, and the Update app on top. What was missing was proof, and the round trip is now measured: starting on `ota_0` with `ota_1 is empty`, `ota install` reported `Version 0.4.0 is installed. Restart to use it.`, `ota restart` came up `Running: ota_1 (on trial: confirms itself 30 s after start-up)`, thirty-five seconds later the trial flag was gone, a second install then wrote `ota_0`, and a second restart came up `Running: ota_0` with `ota_1` holding a version. Both slots now carry valid 0.4.0 images and `otadata` records sequence 3 against 2, which is the bootloader's own account of which one to run. THE ROLLBACK PROTECTION WAS PROVED BY ACCIDENT AND THAT IS THE MOST VALUABLE RESULT. The first install attempt was interrupted by a hard reset during the write, leaving `ota_1` with a valid app descriptor but a truncated image. Attempting to boot it produced `E esp_image: invalid segment length 0xff9afffd` and the board stayed on `ota_0` instead of booting a broken slot. That is the safety property this whole mechanism exists for, demonstrated on a genuinely corrupt image rather than a contrived one -- and the corruption was this agent's fault for resetting mid-write, which is worth recording as the mistake it was. TWO ROUTES WERE TRIED AND ONLY ONE WORKED. SFTP to the card stalled and left a 0-byte file, which is the single-client wolfSSH wedge already recorded as SSH-003; the working route is HTTP, with the host serving the image and `ota install http://...` streaming it at about 52 KB/s. `ota install` also REFUSES until `board save` has run, because 28 pin settings are built into this port's firmware and would be lost by a generic image -- a guard worth knowing about, and running it confirmed `/fs` writes work (a 391-byte board.conf appeared). ONE CLAIM ABOUT THIS BOARD WAS CHECKED AND IS FALSE: the built-in update feed, `https://tnydesk-project.github.io/install/update-desktop-twatchultra.json`, returns HTTP 404, so the Update app's "Check for official updates" has nothing to talk to. The mechanism is complete and has no feed, which is the real gap in this feature and not partition sizes. The backup `working-2026-11-12-2059.bin` captures the post-test state: 16 MiB, sha256 `e180f58285866af475e1b827efb7126e6d98a1b7afe68c7cc6bb187654c68ebb`, verify OK, both app slots holding valid 0.4.0 images. Also answered, because it decides the next cycle: two 8 MiB firmware partitions are arithmetically impossible on a 16 MiB part -- the bootloader (32 KiB at 0x0), partition table (4 KiB at 0x8000), nvs, phy_init and otadata consume 72 KiB, leaving 15.93 MiB, and the largest equal split is 2 x 7.96 MiB with no filesystem at all. The current 3 MiB slot already caps the 2.55 MiB app at 15 percent headroom, so a move to 2 x 6 MiB would relax that to 58 percent at the cost of 3.93 MiB of filesystem, while 1 x 6 MiB would give the same headroom and 9.88 MiB of filesystem but would END the A/B swap just proved -- so the two proposals are not equivalent and the choice is a trade, not an improvement.
+
+#### Next Steps:
+
+The partition question is now the operator's to settle with numbers rather than impressions: keep 2 x 3 MiB (works, 15 percent headroom), move to 2 x 6 MiB (58 percent headroom, 3.93 MiB filesystem, keeps the swap), or 1 x 6 MiB (58 percent headroom, 9.88 MiB filesystem, loses the swap). Repartitioning is destructive to `/fs` -- `board.conf`, users and `/root` do not survive a storage offset change -- so it wants a fresh backup and a deliberate decision rather than incremental nudging, and the app should never be booted from a non-zero offset without a specific test, because that has not been tried. Two smaller pieces are worth having regardless: a `space` command, since `esp_littlefs_info()` is already called at mount and logs total and used but nothing exposes it interactively, and an understanding of what a 404 feed means for the Update app's "Check for official updates" button, which currently offers a feature that cannot work on this board. Separately, this cycle established the starting facts for a retro-go port, which is now the largest open question: retro-go is GPL-2.0 against this project's MIT, every one of its 17 targets is single-wire SPI while this panel is QSPI, and no target declares QUAD PSRAM while this board has only that -- so it is not a drop-in, and the display driver is the work.
+
+#### Files Modified:
+
+None.
+
+#### Status:
+
+- Build: NOT RUN
+- Deployment: PASS
+- User Test: PASS
+
+---
+
 ## 51 COMMIT Unreleased 2026-11-12T20:04:44-07:00
 
 #### Coming From:
