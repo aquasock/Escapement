@@ -4,19 +4,19 @@ Orientation, not authority. Verify before acting on it.
 
 ## One line
 
-**The Tamagotchi runs full-screen on the watch as firmware.** It takes the whole
-framebuffer (black), paces the guest at its own 16 Hz, and pushes only the rows
-that changed. While it runs the thirteen margin buttons are inert and relabelled
-(columns blank, strip shows a degree circle); the desktop labels come back on
-`tama stop`. Next is wiring those margins to the guest, then a Start menu entry.
+**The Tamagotchi is playable on the watch.** Full-screen, 16 Hz, dirty rows only,
+and the three bottom bars are its three buttons (31 presses, 0 drops, one
+session). The two side columns are still inert and logged `off`; a Start menu
+entry does not exist, so it is launched by typing `tama`. Next is the columns,
+then the menu entry.
 
 ## Repositories, both clean and pushed
 
-- **Fork** `~/GIT/tinydesk-twatch`, branch `t-watch-ultra`, HEAD `a17059a`.
+- **Fork** `~/GIT/tinydesk-twatch`, branch `t-watch-ultra`, HEAD `e076670`.
   `fork` remote = `aquasock/tinydesk` (push here). `origin` = upstream
   `tinydesk-project/tinydesk` — **never push there**.
-- **Escapement** `~/GIT/Escapement`, branch `main`, HEAD `d9833d3`. Log entry 48
-  is the current cycle; TCH-011, DSP-006 and EMU-018 are the durable findings.
+- **Escapement** `~/GIT/Escapement`, branch `main`, HEAD `8f63618`. Log entry 49
+  is the current cycle; EMU-019, TCH-011, DSP-006 and EMU-018 are the durable findings.
 
 ## Permissions and limits
 
@@ -58,6 +58,9 @@ that changed. While it runs the thirteen margin buttons are inert and relabelled
 - `tests/test_twatch_edges` **1,567 checks, 0 failures**, including
   `test_margin_labels`; proved able to fail (3 failures on a wrong code point, 6
   on an empty label). Host suite **41/41**.
+- The button queue drained correctly from the host before any finger touched the
+  glass: three `tama press`/`release` pairs → `presses=3 drops=0`.
+- **No backup since `e076670`** — `working-2026-11-12-1737.bin` covers `a17059a`.
 
 ## The two things this cycle cost
 
@@ -83,6 +86,10 @@ that changed. While it runs the thirteen margin buttons are inert and relabelled
    a WM window -- the Tamagotchi -- so the gate was inert for the one app that
    needed it. Gate on `display_pixels_claimed()` (TCH-011). Every desktop-path
    test passes either way; only an app using the port's own API can catch it.
+5. **An emulator's input surface is part of its state, not a message to it.**
+   `tmc_button()` writes pin state that `tmc_run()` reads, from a different task
+   on a different core. Presses go through a queue drained BEFORE each step --
+   after the step makes every press a frame late (EMU-019).
 
 ## Open, in order of cost
 
@@ -94,11 +101,13 @@ that changed. While it runs the thirteen margin buttons are inert and relabelled
 3. **`tama stop`'s one-second wait** and the `tama start <rom>` argument path are
    written but unexercised.
 4. **Untested under load:** whether the guest holds 16 Hz with the painter active.
-5. **The margins are inert under an app, not wired to it.** The plan is the
-   columns for the pet's controls and the strip for the three V3 buttons; the
-   press path should call `tmc_button()` instead of refusing. The degree circle is
-   the placeholder. Watch the label direction — columns are rotated, the strip is
-   not.
+6. **The two columns are inert under an app, and they are next.** Five buttons
+   a side, declined by the handler and logged `off`. Wiring them means extending
+   the same queue with a wider event and deciding what they do.
+7. **The strip's ° is now a stale placeholder.** Chosen when the bars were inert;
+   they play the pet now. No short word fits 41 px, so this wants a decision.
+8. **No Start menu entry.** `tama` is typed into the shell. `display_pixels_claim()`
+   is all an app needs to take the screen.
 5. **`board.example.conf` still calls the SD keys unproven.** They work. Stale.
 6. **`td_vterm_t.bell` is probably redundant** — `td_sysinfo_t.bell` is the path
    that works. Both exist as a debugging hedge. Revisit rather than defend.
