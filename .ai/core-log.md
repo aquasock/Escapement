@@ -1,3 +1,33 @@
+## 65 COMMIT Unreleased 2026-11-13T02:40:00-07:00
+
+#### Coming From:
+
+Unreleased 6715ac9
+
+#### Purpose:
+
+Run the Pokemon Mini benchmark on the watch, which was the one measurement standing between this project and a decision about that platform.
+
+#### Outcome:
+
+The measurement could not be taken, and the reason is the cycle's result: the prepared binary is built for the wrong operating system. `for-escapement/pokemini_bench_target` is a Linux ELF produced by this repository's own crosstool-NG (GCC 14.1.0) against uClibc, carrying `_start` and `__libc_start_main` and no ESP-IDF runtime, while the watch runs ESP-IDF v5.3.1 with TinyDesk Shell, which has no ELF loader and whose `tdsh` reports `command not found` and has neither `chmod` nor `exec`. The transfer itself worked perfectly and that is what makes the finding clean: WiFi was enabled with `network autowifi on` and `wificonnect`, `ssh start` reported internal free=91687, and SFTP moved 392204 bytes to `/sd` at 18.1 KiB/s in 21.2 seconds with md5 `c4ebd6cb6705d0d423c0add5082fddaf` matching at both ends. Execution was refused. The file was removed, the SSH server stopped, and the radio returned to `autowifi off` plus `wifidisconnect` with ping failing, as the operator asked. The scoping document was corrected rather than left standing: its "what is still unknown" section had instructed the next reader to copy that binary to the watch and run it, and that instruction is wrong. It now records the operating-system mismatch, the two routes that would actually produce the number, and their difference. Route A flashes the Linux image, which is what the binary was built for and needs no code, but it replaces TinyDesk -- the platform the NES and GBC work lives on -- and the figure it yields describes Pokemon Mini on Linux rather than here; it is reversible, since `working-2026-11-13-0019.bin` is a verified 16 MiB image of the current firmware. Route B builds `core/pokemini/` into TinyDesk as a `pmbench` command, which is real work but is step one of the port rather than a detour, and it is sized comfortably at 114708 bytes of text against 347 KB free in the app partition and 14984 bytes of bss against 143 KB of free internal DRAM. Route B is recommended, because NES and GBC are both TinyDesk ports and a third platform running on a different operating system would make the recommendation depend on which OS a later session happened to have flashed. Two findings from the previous cycle are unaffected because neither depends on the target: the CPU requirement is 0.22 to 0.36 MIPS rather than 1 MIPS, and the display gate is 5.4 times cheaper than when it was measured. Only the on-target CPU figure is blocked.
+
+#### Next Steps:
+
+Route B is the next cycle's work and it is well defined: vendor `core/pokemini/` into the fork as a component, which the tinytama tree already carries with its provenance and its one 2-line patch recorded, then add a `pmbench` shell command that runs the core with `--synthetic` and prints instructions per second, and flash it. The acceptance threshold is 0.22 to 0.36 MIPS rather than the 1 MIPS the older scope asked for, and the run should be repeated three times because this board's clock scaling makes single runs noisy. `scripts/pmbench.sh target` already cross-compiles the host harness against the ESP-IDF toolchain for reference, but the path that matters is the component build, not the standalone binary. Until that number exists, no Pokemon Mini UI work should start, and the operator's call on whether to spend a cycle on it at all is still open. Everything else is unchanged: the NES is parked at 51 fps with battery-SRAM persistence and the skip-path test owed, GBC is scoped with gnuboy recommended and its 28-45 fps estimate flagged, the Tamagotchi still wants a Start menu entry, and the radio remains off with auto-connect off so any network work needs `network autowifi on` and `wificonnect` first.
+
+#### Files Modified:
+
+- docs/pokemini-scoping.md
+
+#### Status:
+
+- Build: N/A
+- Deployment: N/A
+- User Test: N/A
+
+---
+
 ## 64 COMMIT Unreleased 2026-11-13T02:05:00-07:00
 
 #### Coming From:
