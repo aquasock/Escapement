@@ -6,12 +6,11 @@ display gate that used to block this platform has since been overtaken by the
 NES blit work. What follows is what is measured, what is inherited, and what the
 watch itself reported when asked.
 
-**Headline: the platform clears its CPU requirement on the watch. The display
-gate passes with 4x headroom, the CPU requirement was mis-stated by a factor of
-3 in the original scope, and the watch retires 383,000 instructions per second
-emulating a worst-case cartridge -- 1.61x realtime. The margin against the
-heaviest retail cartridges is thin rather than comfortable, because real code
-executes more instructions per frame than the synthetic benchmark does.**
+**Headline: the port runs at 0.999x of real time on hardware. Pokemon Pinball
+Mini plays at 71.9 fps against the machine's 71.97 Hz tick, with the display
+pushed from the second core. The platform is no longer scoped but shipped for
+this cartridge -- with the honest qualification that emulation has 5 percent of
+headroom, so the heaviest retail cartridges would still run below full speed.**
 
 ---
 
@@ -185,27 +184,92 @@ PSRAM, and the 383,000 figure is that configuration rather than a pessimistic
 one that could be better. It also means the internal-SRAM-versus-PSRAM penalty is
 not measurable at 32 KB and is left unmeasured rather than guessed.
 
-### The caveat that keeps this from being a comfortable margin
+### Measured on a real cartridge: the port reaches full speed
 
-Synthetic instructions and real ones are not the same workload, and the
-difference cuts against the platform:
+Pokemon Pinball Mini (USA, Europe) was run on the watch with a retail BIOS dump.
+The measurements below are in the order they were taken, because each one found
+the next problem and the last one was not where the port was looking.
 
-- The synthetic cartridge executes **3,302 instructions per frame**. Twelve
-  retail cartridges measured **3,091 to 5,053**. A heavy real cartridge runs
-  about 1.5x as many instructions as this benchmark does in the same emulated
-  time.
-- Host cost is paid per instruction, so if real instructions cost the same as
-  synthetic ones, a 5,053-instruction cartridge would take 5,053 x 2.61 us =
-  13.2 ms against a 13.9 ms frame, which is **1.05x realtime, not 1.61x**.
-- The synthetic mix is pessimistic the other way: random 12-bit words hit
-  disproportionately many slow paths, so a real instruction should on average be
-  cheaper than 2.61 us. The two effects oppose each other and neither magnitude
-  is known.
+- **Emulation alone, unpaced: 82.4 fps** (`pm bench`), i.e. 12.1 ms of a 13.9 ms
+  frame, 3,809 instructions per frame at 3.19 us each.
+- **With the display, sequentially: 54.3 fps**, from emulation 13.0 ms + blit
+  5.4 ms = 18.4 ms. The blit had been 9.9 ms until the row expansion was cached:
+  a 3x vertical scale reads each source row three times, and the first callback
+  re-derived the source column per destination pixel, so a 6,144-dot picture cost
+  55,296 divisions a frame. Caching one expanded row took 9.9 ms to 5.3 ms.
+- **Final: 0.999x of real time**, 71.9 fps against the machine's 71.97 Hz tick,
+  `missed=0` over 6,295 frames and 2 missed ticks in 20,249 over 281 s. Per frame:
+  emulation 13.2 ms overlapped with a 5.6 ms core-1 push, 13.2 ms against a
+  13.89 ms budget.
 
-The honest statement is that the platform clears the requirement on the measured
-workload and that the margin against the heaviest cartridges is somewhere
-between thin and comfortable. **A real `.min` would settle it in one more run**,
-and `pmbench` does not yet accept one — that is a small addition, not an unknown.
+**The caveat in the previous version of this section was in the wrong
+direction.** It guessed that real cartridges would be cheaper per instruction
+than the synthetic mix, because random 12-bit words hit disproportionately many
+slow paths. They are not: synthetic instructions measure 2.61 us and Pinball's
+measure 3.19 us, 22 percent dearer. So the synthetic figure is optimistic per
+instruction, and the real margins are these.
+
+**Three changes produced the last 30 percent, and the third was not the one
+that was planned.**
+
+Overlapping the blit onto core 1 was the planned change and it moved 0.765x to
+0.983x. It costs what it costs: emulation rose from 12.8 to 13.8 ms because the
+pusher and the cartridge now share the PSRAM bus, which is the same contention
+the NES port measured. Paying 1.0 ms to remove 5.6 ms from the critical path is
+still the right trade.
+
+Skipping frames identical to the one already pushed removed about half the
+pushes -- `pushes=3070 identical=3225` -- because Pinball draws at the PRC's
+rate, once every 2 ticks, and the loop was pushing on every tick. A 6 KB
+`memcmp` against 5.7 ms of SPI, and it is also what the real panel does: it only
+changes when the PRC copies.
+
+**The pacing was the remaining cap, and it read as an emulator fault.** After
+those two changes the frame cost 13.2 ms against a 13.89 ms budget, yet the
+measured speed was still 0.981x. The tell was `missed=33` of 1,837 ticks -- 1.8
+percent, matching the shortfall exactly. A binary semaphore holds one pending
+give, so when emulation overran slightly the next two ticks collapsed into one
+and the second was lost for good: every overrun silently deleted emulated time.
+A counting semaphore with a depth of 8 lets the loop drain a backlog and catch
+up, and the figure went to 0.996x and then 0.999x. Nothing in the emulator
+changed.
+
+### What the machine's frame rate actually is
+
+**The Pokemon Mini is not a 60 Hz machine and its picture rate is not its tick
+rate.** Three rates matter and only the first is fixed:
+
+- **The tick is 71.97 Hz.** The PRC counter runs `0x01000000` to `0x42000000`, a
+  span of 65 x 2^24, advancing 2^24/855 per CPU cycle, so a frame is exactly
+  65 x 855 = 55,575 cycles. At 4 MHz that is 71.9748 Hz. The core's own function
+  is named `MinxPRC_On72HzRefresh`; the 72 is a rounded label on a 71.97 Hz
+  event. An earlier version of this port used 4e6/72 = 55,555 cycles, which ran
+  the machine 0.036 percent fast.
+- **A cartridge draws at the tick divided by 2 to 12**, chosen through PRC rate
+  control (register 0x81). The match value is `(divisor-1) << 4`, so the divisor
+  is `match >> 4 + 1`, and **there is no divisor of 1** -- the fastest a game can
+  draw is 36 Hz. Measured for Pinball: `prc rate reg 0x19, match 0x10 -> draws
+  every 2 ticks = 36.0 Hz`.
+- **Wikipedia's infobox says 30 fps**, citing a 2001 IGN preview rather than a
+  datasheet. It matches neither 71.97 nor 36 and is not used here. The technical
+  source (`pokemon-mini.net/documentation/prc/`) was unreachable during this
+  work -- Cloudflare blocks it and the Wayback Machine rate-limited the request --
+  so the discrepancy is recorded rather than resolved.
+
+This matters for a dithering game: alternating-pixel greyscale works because one
+drawn frame is one field, so the dither alternates at the drawn rate. Pinball
+dithers at 36 Hz on hardware, which means at 0.765x it dithered at 27.5 Hz and
+beat against nothing in particular -- an audible cadence that reads as "the frame
+rate is wrong" and was in fact the machine running slow.
+
+### The ceiling this port does not clear
+
+Emulation has 5 percent headroom, not more: 13.2 ms of a 13.89 ms frame. That is
+enough for Pinball and not proven for anything heavier. At 3.19 us per
+instruction, a cartridge needing the heaviest figure in the survey (5,053
+instructions per frame) costs 16.1 ms before any display work, so **full speed
+for the heaviest cartridges is not reachable on this board** and the port should
+be described as full speed for this cartridge rather than for the platform.
 
 ### Cost, measured rather than estimated
 

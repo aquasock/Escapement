@@ -1,3 +1,37 @@
+## 67 COMMIT Unreleased 2026-11-13T09:15:00-07:00
+
+#### Coming From:
+
+Unreleased 9c30082
+
+#### Purpose:
+
+Make Pokemon Mini playable at the machine's real speed on the watch, since the benchmark in entry 66 proved throughput but rendered nothing.
+
+#### Outcome:
+
+Pokemon Pinball Mini runs at 0.999x of real time on the watch: 71.9 fps against the machine's 71.97 Hz tick, `missed=0` over 6,295 frames and 2 missed ticks in 20,249 over 281 s, reported by the operator as looking good. The port is `main/pm.c` with `main/pm.h`, built on the component vendored in entry 66; `pm start` reads a cartridge from `/sd` into PSRAM and runs a 96x64 PRC picture through the existing `display_picture_rows()` blit at 3x integer scale, 288x192 centred at (16,112), with the margins switched to app mode so the desktop stops painting. The picture took three passes to become fluid and only the first was the change that had been planned. Sequentially the frame cost emulation 12.8 ms plus a 5.4 ms blit against a 13.89 ms budget, which is 0.765x: the machine ran in slow motion rather than dropping display frames, a distinction invisible in an fps figure and audible in the operator's own test, since a dithering game alternates once per drawn frame. Overlapping the blit onto core 1 through three 6 KB dot buffers and two queues, with the DSP-008 ordering of taking a free buffer before publishing the finished one, took 0.765x to 0.983x and cost 1.0 ms of emulation to PSRAM contention in exchange for removing 5.6 ms from the critical path. Pushing only frames that differ from the one already on the glass removed about half the pushes -- `pushes=3070 identical=3225` -- because a cartridge draws at the PRC rate, once every 2 ticks for this one, and the loop had been pushing on every tick. The remaining cap was the pacing and it read as an emulator fault: with 13.2 ms against a 13.89 ms budget the measured speed was still 0.981x, and the tell was `missed=33` of 1,837 ticks, 1.8 percent against the same shortfall, because a binary semaphore holds one pending give and each slight overrun silently deleted the following tick's emulated time; a counting semaphore of depth 8 took it to 0.999x with nothing in the emulator changed. Three facts about the platform were established and are now recorded as PM-003: the frame tick is 71.97 Hz, not 72, being 65 x 855 = 55,575 cycles at 4 MHz and derived here from the core's own counter constants rather than assumed, so an earlier 4e6/72 = 55,555 ran the machine 0.036 percent fast; a cartridge draws at that tick divided by 2 to 12 with no divisor of 1, so 36 Hz is the fastest possible picture rate and 60 Hz does not exist on this hardware; and Pinball measures divisor 2 live from its own register, which is why its dither alternated at 27.5 Hz at 0.765x and beats. Wikipedia's infobox states 30 fps from a 2001 IGN preview, which matches neither figure and is recorded as an open conflict rather than adopted, because the primary source at pokemon-mini.net returned 403 from Cloudflare and 429 from the Wayback Machine on every attempt. One further correction is part of the port: a retail cartridge needs a retail BIOS, the free GPL BIOS compiled into the core idles at $0040 and never hands over, and since `PokeMini_Create()` memcpy's it on every start there is no file whose absence prevents its use, so `pm start` reads `PokeMini_FreeBIOS` after loading and refuses to run if the free BIOS is in memory rather than presenting a healthy frame rate over the BIOS idle loop. Buttons are not mapped yet, which the operator accepted as out of scope for this cycle. Build PASS with the image at 0x2bc3b0 bytes and 284,752 free; deployment PASS with every written region hash-verified and the final figures taken on the exact source on the device; a verified 16 MiB backup `working-2026-11-13-0909.bin`, sha256 `79f2073f389c20c44005b849083f6b54206799b11d41da5b21b5ac166c92bc94`, was taken after the operator's acceptance with the board held in esptool's stub across read and compare. The core-syntax audit passed: 67 entries, 66 of 66 settled entries unchanged, one added entry conforming to the six-section template and the 100-entry cap, `core-reference.md` gaining PM-003 with a matching fast-lookup index entry and 127 record ids all unique and all indexed.
+
+#### Next Steps:
+
+The port is at full speed for this cartridge and not proven for the platform, and the entry should not be read as claiming otherwise: emulation has 13.2 ms of a 13.89 ms budget, so 5 percent, and at the measured 3.19 us per instruction the heaviest cartridge in the twelve-cartridge survey would need 16.1 ms of emulation before any display work. Running each of the other eleven cartridges once through `pm bench` and `pm start` is therefore the next measurement and it decides whether this is a port or a demonstration. Buttons come next after that: the margins and touch are wired into `pm.c` through the same `EDGE_BOTTOM` and `EDGE_RIGHT` mapping `nes.c` uses, but nothing has been verified on the glass, so the mapping needs the operator's hands before it can be called done, and the shock sensor has no watch equivalent because a reed switch is not a touch panel -- a screen-tap gesture is the natural stand-in and the panel already reports multi-touch. Audio is last, as on every platform here, and the core's MinxAudio is compiled but never started, so a sound path does not exist yet. Save states and EEPROM persistence are untouched and Pinball keeps nothing across a restart. The NES stays parked at 51 fps with battery-SRAM persistence and the skip-path test owed, GBC remains scoped with gnuboy recommended, the Tamagotchi still wants a Start menu entry, and the radio remains off with auto-connect off; `/sd/pinball.min` and `/sd/bios.rom` are on the device only and neither a cartridge nor a BIOS dump is in either repository.
+
+#### Files Modified:
+
+- docs/pokemini-scoping.md
+- ports/twatchultra/main/pm.c
+- ports/twatchultra/main/pm.h
+- ports/twatchultra/main/CMakeLists.txt
+- ports/twatchultra/main/link_twatch.c
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: PASS
+
+---
+
 ## 66 COMMIT Unreleased 2026-11-13T08:15:00-07:00
 
 #### Coming From:
