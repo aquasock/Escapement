@@ -1,3 +1,33 @@
+## 71 COMMIT Unreleased 2026-11-13T11:11:00-07:00
+
+#### Coming From:
+
+Unreleased a888764
+
+#### Purpose:
+
+Find the roughly 1.7 ms per frame that separated Puzzle Collection's raw emulation figure from its paced figure, and decide whether the port's loop or the interpreter was responsible.
+
+#### Outcome:
+
+Neither was, in the way expected, and the cycle's real result is a negative one about measurement rather than about the emulator. Phase timers around the paced loop put the snapshot copy, the duplicate-frame comparison, the buffer handoff and everything else together at 0.15 ms per frame, so the loop was never the cost. A new `pm start <rom> noblit` diagnostic -- which runs the semaphore, the snapshot and the timing with no push at all -- then separated the two remaining candidates and found that the core-1 blitter costs the emulator between 0.5 and 1.2 ms of contention: Puzzle Collection emulates in 13.40 ms without a blitter and 13.9 to 14.6 ms with one. That matters because 13.40 ms is only 0.5 ms inside the 13.893 ms budget, so this cartridge has roughly half a millisecond of headroom to absorb display contention that costs up to 1.2 ms. The interpretation recorded in entry 70 was therefore too generous: the interpreter is not comfortably inside the frame for this cartridge in the paced loop, it nearly fills it, and the earlier 12.28 ms figure came from a tight unpaced loop in `pm bench` that does not reproduce the paced path. The optimisation attempted in this cycle -- comparing `LCDPixelsD` directly against the last pushed frame so that the snapshot is skipped entirely on the half of frames that are identical -- produced contradictory results and was reverted. It measured 13.9 ms when instrumented and 14.5 ms when lean, while the original copy-then-compare measured 14.5 ms when instrumented and 13.9 ms when lean: the two variants changed places between runs, which means the difference between them is smaller than run-to-run variance. That variance was then measured directly on one binary and is about 5 percent, spanning 0.94x to 0.98x for this cartridge across nominally identical builds and a cold boot, so any change of a few percent cannot be A/B tested on this board without many repetitions and single-run comparisons here are not evidence. The observation is recorded in the source above the diagnostic so a later cycle does not repeat the attempt blind. The final state keeps the original proven loop, gains the `noblit` diagnostic and its recorded figures, and leaves all eleven full-speed cartridges untouched: Pokemon Party Mini re-measured at 71.7 fps with `missed=0` and 11.3 ms of emulation. Build PASS; deployment PASS with every written region hash-verified; the operator's earlier acceptance of the picture stands and nothing visible changed. The core-syntax audit passed: 71 entries, both control files unchanged apart from this entry, which conforms to the six-section template and the 100-entry cap.
+
+#### Next Steps:
+
+Puzzle Collection at 0.94x to 0.98x is the last cartridge below full speed and the port should be described that way rather than as uniformly working. Two levers exist and the measurement now says which is binding: the display's contention is up to 1.2 ms and the emulator's headroom is 0.5 ms, so reducing push traffic is the cheaper target -- a 2x integer scale moves 24,576 pixels instead of 55,296 and would cut that contention by more than half, at the cost of a smaller picture than the 3x the operator has been reviewing. Faster interpretation is the other lever and needs roughly a 13 percent improvement in time per instruction, which is a much larger piece of work. Neither should be attempted until the variance is controlled, because a 5 percent noise floor makes both unmeasurable one run at a time; the practical fix is a repeatable measurement harness that runs the same cartridge several times and reports a median, which the `noblit` diagnostic already makes cheap to add. Everything else is unchanged: buttons remain unwired and the touch path unexercised so neither emulator can be played without tapping the glass, audio is absent, save states and EEPROM persistence are untouched, the NES stays parked at 51 fps with battery-SRAM persistence and the skip-path test owed, GBC remains scoped with gnuboy recommended, the Tamagotchi still wants a Start menu entry, and the radio is off with auto-connect off.
+
+#### Files Modified:
+
+- ports/twatchultra/main/pm.c
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: N/A
+
+---
+
 ## 70 COMMIT Unreleased 2026-11-13T10:47:00-07:00
 
 #### Coming From:
