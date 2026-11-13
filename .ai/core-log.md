@@ -1,3 +1,36 @@
+## 64 COMMIT Unreleased 2026-11-13T02:05:00-07:00
+
+#### Coming From:
+
+Unreleased 92b9f76
+
+#### Purpose:
+
+Scope a Pokemon Mini emulator, which the operator noted was already built during the Tamagotchi work.
+
+#### Outcome:
+
+The recollection was right and the work is in a different repository: `~/GIT/tinytama` holds PokeMini vendored at revision `8a64225e` under GPL-3.0 with one 2-line patch, a playable desktop reference build the operator confirmed across twelve cartridges including two levels of Pinball cleared, a cross-compile measurement of 114,708 bytes of Xtensa text, and three scope documents. What this cycle adds is a correction, a re-measurement and the harness to reproduce both. The correction is that the platform's CPU requirement was overstated threefold: the original scope states 1 MIPS, but 1 MIPS is the S1C88's hardware ceiling (4 MHz / 4-cycle fetch), while a game needs instructions-per-frame times 72 Hz, and the twelve retail cartridges measured at 3,091 to 5,053 instructions against a 13,889-per-frame budget -- 0.22 to 0.36 MIPS. The re-measurement is that the display gate, which that scope called the platform's binding constraint, was taken through 64-byte SPI chunks at 357 ns per pixel, and the transmit path rebuilt for the NES on 2026-11-12 moves 16,384-pixel transactions at 66.5 ns per pixel, so a 288x192 frame costs 3,675 us of the 13,889 us budget rather than 19,741 us. The risk profile has inverted: the display is now comfortable and the CPU is the only unknown. One honest reservation belongs in the entry because it argues against the platform: Pokemon Mini is 96x64, a 3:2 landscape screen, so at its maximum integer scale of 3x it is 288x192 -- 41.5 percent of the framebuffer, smaller in area than the NES the operator just parked as too small, and with 112 rows of letterbox above and below. It wins on width and loses on height, and nobody should start this port expecting a large picture. Build PASS for both the host harness and a new static Xtensa cross-build; no firmware changed and nothing was flashed.
+
+#### Next Steps:
+
+One measurement decides the platform and it is one transfer away: `build/pmbench/pokemini_bench_target` is a 392 KB static Xtensa binary that needs no ROM, and its own README records why it cannot be exercised anywhere but the board -- QEMU has no LX7 core, and a hello-world compiled by the same toolchain fails identically on every Xtensa core QEMU offers. It should be run with `--synthetic 2000` three times, because this board's clock scaling makes single runs noisy, and the number that matters is against 0.22 to 0.36 MIPS rather than the 1 MIPS the old document asked for. It cannot be run yet because the radio is off by the operator's instruction, so the transfer needs either the network briefly re-enabled or a card route; that is a decision rather than a task. If it clears, the port has a week of work banked and the display path needs no change at all. If it does not, the platform is refused and that is worth knowing for the price of one command. Everything else in the backlog is unchanged: the NES is parked at 51 fps with SRAM persistence and the skip-path test owed, GBC is scoped with gnuboy as the recommendation, the Tamagotchi still wants a Start menu entry, and the radio remains off with auto-connect off.
+
+#### Files Modified:
+
+- scripts/pmbench.sh
+- tools/pmbench/bench_pokemini.c
+- docs/pokemini-scoping.md
+- .gitignore
+
+#### Status:
+
+- Build: PASS
+- Deployment: N/A
+- User Test: N/A
+
+---
+
 ## 63 COMMIT Unreleased 2026-11-13T01:30:00-07:00
 
 #### Coming From:

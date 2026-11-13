@@ -17,6 +17,9 @@ third_party/gnuboy/
 # binjgb, fetched by scripts/gbcbench.sh for the speed/accuracy comparison.
 third_party/binjgb/
 
+# PokeMini, vendored by tinytama and fetched by scripts/pmbench.sh.
+third_party/pokemini/
+
 # Upstream release blobs. scripts/fetch-images.sh downloads and verifies them.
 images/*.bin
 
