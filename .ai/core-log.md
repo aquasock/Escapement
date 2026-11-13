@@ -1,3 +1,34 @@
+## 79 COMMIT Unreleased 2026-11-13T16:51:00-07:00
+
+#### Coming From:
+
+Unreleased 75013f4
+
+#### Purpose:
+
+Place A on the A/B pair by half a grid cell rather than a whole one, and lower the two short words at the tops of the columns so they read where the operator wants them.
+
+#### Outcome:
+
+Both changes are on the glass and the operator passed them, and the second one needed a mechanism that did not exist. A's horizontal position was expressed in grid cells, one cell being 16 px, and the operator's instruction was to come back left by half of one -- which the table cannot say. Rather than re-base the whole thing on 8 px units, which would have turned B's -2 into -4 and made wrong every comment that reads in cells, `pad_off_t` grew a `dx` field in pixels alongside the cell counts: A is now one cell right then 8 px back, `pad_x = 224 + 16 - 8 = 232`. The side effect is worth recording because it retired a compromise rather than making one: at fb 232 A's widest row reaches 315, five pixels short of the 320 wall, so the 4 px flat right edge that xoff 1 carried in entry 77 is gone and A is a clean circle again. The labels had no vertical adjustment whatsoever -- `label_place()` centres in the face and that is the whole of it -- and centring is wrong for a four-character word stood on end in a 61-row face, because the slack reads as sitting high. The fix is one general setter rather than a special case for two slots: `display_margin_label_dy(col, index, dy)` stores a per-slot pixel offset, applied after centring and clamped inside the face so a nudge can never grow into a layout of its own, defaulting to 0 for every slot so the desktop and the Tamagotchi are untouched. `pm.c` sets `PM_TOP_DY 8` on the top slot of each column, Exit and Hold; 8 px is one character width of the 8x16 label font, read literally from the operator's words, and doubling it to 16 -- the character advance -- is one number if that was the intent. While compiling this, a dormant fault surfaced and was deliberately left alone: `paint_column()` reads `s_nochrome[desk_right ? 1 : 0][s]`, but `desk_right == true` means the left column, so the bare-slot mask is read from the opposite column from the one being painted. It is invisible today only because both of the app's masks are identical, and it would fail silently the moment they diverge, by blacking the wrong column. The new `s_lab_dy` uses the correct mapping; the old line was not changed because fixing an invisible bug in the middle of UI tuning spends the operator's attention on something he cannot see. Build PASS; deployment PASS by app-only flash to 0x10000 with the image's hash verified by esptool, then `pm status` read 69.7 fps with no fault. Backup `working-2026-11-13-1647.bin`, 16,777,216 bytes, verify OK against the chip. The core-syntax audit passed: 79 entries, `core.md` and `core-reference.md` unchanged.
+
+#### Next Steps:
+
+The `s_nochrome` index inversion is the one thing this entry found and did not fix, and it should be repaired when the two column masks diverge for a real reason rather than on its own account. The half-cell channel `dx` now exists and is the way any future sub-cell placement is expressed, so the cell counts can keep meaning cells. Touch is unchanged and still the last thing between this port and playability without a shell: nothing on the framebuffer responds, the app-mode sink has never fired, and the two pieces of geometry that must be shared with a hit test rather than duplicated remain the d-pad's inverse rotation and the band split. The cartridge picker and the `tdsh run` 32 KiB contiguous-stack limit are both where entry 78 left them, and the NES, GBC and Tamagotchi backlog is unchanged.
+
+#### Files Modified:
+
+- ports/twatchultra/main/display.c
+- ports/twatchultra/main/display.h
+- ports/twatchultra/main/pm.c
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: PASS
+
+---
 ## 78 COMMIT Unreleased 2026-11-13T16:32:00-07:00
 
 #### Coming From:
