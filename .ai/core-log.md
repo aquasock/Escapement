@@ -1,3 +1,45 @@
+## 53 COMMIT Unreleased 2026-11-12T21:24:28-07:00
+
+#### Coming From:
+
+Unreleased b82d124
+
+#### Purpose:
+
+Choose an NES emulator for the watch by measurement rather than by reading source files, and get the chosen core compiling on the target before writing any glue.
+
+#### Outcome:
+
+nofrendo is chosen, benchmarked, vendored and building on the ESP32-S3; nothing calls it yet. THE CHOICE WAS A MEASUREMENT AND IT REVERSED AN EARLIER ANSWER. Four cores were considered. FCEUmm and QuickNES could not be built at all on this machine without `libretro.h` and a full frontend, which is itself the answer about their porting cost. InfoNES and nofrendo both built with a hand-written system layer, and running the same ROMs through both with the render path AND the palette-to-RGB565 conversion live gave 394.9 against 201.6, 392.6 against 201.6, and 828.2 against 422.4 -- a ratio of 1.96 on all three, so it is a property of the cores rather than of a particular game. This reverses the recommendation made from source-reading a cycle earlier, which had favoured InfoNES on licence grounds: Apache-2.0 against GPL-2.0 looked like the deciding factor until the operator said licensing was flexible and compatibility and performance were what mattered, at which point nofrendo won on both. Compatibility was then measured rather than assumed: of the operator's 794-ROM collection, 14 are unsupported, so 98.2 percent coverage, and the misses are mapper gaps (Karnov, Holy Diver, Ring King) rather than a systemic fault, with 90 percent of the collection on mappers 0 to 4. THE HARNESS PRODUCED THREE SEPARATE FALSE PASSES, and that is the most transferable result in this cycle. Each one ran to completion and printed a plausible speed: a frame buffer never set, so the PPU was skipped by `draw = draw && nes.vidbuf != NULL` and 24,125x realtime was measured for the CPU alone; realtime arithmetic that multiplied frames per second by the 1.789 MHz clock instead of by cycles per frame, overstating by exactly the frame rate, a factor of 60; and, in the InfoNES harness, a ROM header read into a local struct rather than into the core's own `NesHeader`, leaving the mapper number and every flag clear so the ROM was never mapped and 11,000 frames a second of nothing were reported. Every one was caught by checksumming the whole frame buffer rather than counting blits, and the harness now FAILS rather than reporting a speed when the frame buffer is blank. A fourth near-miss in the same family: `vidbuf` must be set AFTER loading, because `nes_loadfile()` calls `nes_reset()` which clears it, so a buffer set beforehand is silently discarded. PHASE 1 is `scripts/nesbench.sh` in this repository plus `tools/nesbench/bench_nofrendo.c`: fetch, build, run and compare, with the upstream commit pinned so a benchmark today is comparable to one after the core is vendored. Fetching is gitignored -- 8.5 MB of upstream GPL sources do not belong in this repository's history when a pinned commit reproduces them. PHASE 2 is `components/nofrendo` in the tinydesk fork: 88 files, 18,144 lines, compiling clean on Xtensa at a cost of 120.4 KB of .text and 5.3 KB of .bss across 69 objects, including 49,420 bytes of .rodata for upstream's game database which is droppable if flash ever matters. The core needs NO retro-go: `nes/utils.h` already has an `#ifdef RETRO_GO` branch, and with the macro undefined logging becomes printf, IRAM_ATTR becomes empty and CRC32 becomes (0) -- that is the entire dependency, verified by grepping every rg_ symbol and finding the rest were struct fields named `prg_rom_banks` and the like. `port.c` converts that property into a build failure if RETRO_GO is ever defined, and the guard was proved to fire rather than assumed. Two build details are worth keeping: ESP-IDF applies `-Werror=all` to every component, and upstream prints `uint32` with `%u`, which fails `-Wformat` on this ABI, so this component alone carries `-Wno-error -Wno-format` -- silencing the diagnostic keeps 68 vendored files diffable against upstream, which is the reason to vendor rather than fork. And CMake caches the component list, so adding a component to `components/` does nothing until a reconfigure. The firmware binary is byte-identical to the previous cycle at `0x28ca20` because nothing references the component yet, so the linker drops it: that is the correct state for a phase that set out to prove the source builds and nothing more.
+
+#### Next Steps:
+
+Phase 3 is PSRAM, and it is not optional: `vidbuf` is a pointer the PORT supplies, and at `NES_SCREEN_PITCH * NES_SCREEN_HEIGHT` bytes it is 65 KB which cannot come from internal DRAM on a board where 4 KB once broke the SSH server (EMU-018). The same is true of the PPU and APU buffers. Phase 4 is the glue and it is genuinely small, because the core's whole platform surface is three callbacks -- `blit_func`, `vsync` and `input` -- plus `nes_setvidbuf`; the blit receives a 272x240 byte-per-pixel palette-index frame, so the port owns the conversion and should do it through a 256-entry RGB565 table straight into `display_picture_rgb()`. Phase 5 is the glass: 1x letterboxed is 256x240, which is 46 percent of the 320x416 panel and pixel-perfect, and should be the first target before any scaling is discussed. One thing this cycle does NOT establish and must not be mistaken for: the x86 ratio does not predict the watch's frame rate, because a 6502 interpreter is pointer-chasing and branch-heavy and Xtensa differs from x86 exactly there. What transfers is the ratio between cores. The strongest prior that nofrendo reaches full speed on the watch is not arithmetic but that retro-go, esp32-nesemu and esplay all ship it on a 240 MHz ESP32, and that should be confirmed on hardware before any scaling or frameskip work is designed.
+
+#### Files Modified:
+
+- scripts/nesbench.sh
+- tools/nesbench/bench_nofrendo.c
+- .gitignore
+- ports/twatchultra/components/nofrendo/CMakeLists.txt
+- ports/twatchultra/components/nofrendo/port.c
+- ports/twatchultra/components/nofrendo/config.h
+- ports/twatchultra/components/nofrendo/database.h
+- ports/twatchultra/components/nofrendo/palettes.h
+- ports/twatchultra/components/nofrendo/nofrendo.h
+- ports/twatchultra/components/nofrendo/COPYING
+- ports/twatchultra/components/nofrendo/CREDITS
+- ports/twatchultra/components/nofrendo/nes/
+- ports/twatchultra/components/nofrendo/mappers/
+
+#### Status:
+
+- Build: PASS
+- Deployment: NOT RUN
+- User Test: NOT RUN
+
+---
+
 ## 52 COMMIT Unreleased 2026-11-12T21:03:50-07:00
 
 #### Coming From:

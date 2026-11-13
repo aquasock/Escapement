@@ -2,6 +2,13 @@
 # revisions in scripts/build.sh.
 build/
 
+# nofrendo, fetched by scripts/nesbench.sh at a pinned retro-go commit. The
+# firmware's copy is vendored in the tinydesk fork (ports/twatchultra/
+# components/nofrendo); this one exists only so the benchmark can be rebuilt
+# from scratch, and 8.5 MB of upstream GPL sources do not belong in this
+# repository's history when the commit id reproduces them exactly.
+third_party/nofrendo/
+
 # Upstream release blobs. scripts/fetch-images.sh downloads and verifies them.
 images/*.bin
 

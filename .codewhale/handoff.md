@@ -10,6 +10,12 @@ through `cmd_tama` into tdsh's parser frame, and it died as a `fclose` on a
 corrupted FILE* three calls away. `_Static_assert` now ties the constant to
 `HT24LC08_SIZE`. Verified: two start/stop cycles, uptime 17 -> 27 -> 34 s.
 
+**NES is in progress: Phases 1-2 of 5 done.** nofrendo chosen by benchmark
+(1.96x InfoNES), vendored into `components/nofrendo`, **compiling on the S3 at
+120.4 KB .text / 5.3 KB .bss**, and not referenced by anything yet — so the
+firmware binary is unchanged and there is nothing to test on the watch. Next is
+Phase 3: PSRAM for the 65 KB `vidbuf` the port must supply.
+
 **The Tamagotchi is a playable app with seven controls.** Full-screen, 16 Hz,
 dirty rows only. Bottom strip = the pet's three buttons. Left column = Pause,
 Save, Load, Speed, Sound; right = Hold (the arm), Shot, blank, blank, Reset.
@@ -19,11 +25,11 @@ strip's `°` label is now stale. Next lever: launch it as an app, not `tama`.
 
 ## Repositories, both clean and pushed
 
-- **Fork** `~/GIT/tinydesk-twatch`, branch `t-watch-ultra`, HEAD `99e42ed`.
+- **Fork** `~/GIT/tinydesk-twatch`, branch `t-watch-ultra`, HEAD `6833d03`.
   `fork` remote = `aquasock/tinydesk` (push here). `origin` = upstream
   `tinydesk-project/tinydesk` — **never push there**.
-- **Escapement** `~/GIT/Escapement`, branch `main`, HEAD `e136f46`. Log entry 52
-  is the current cycle; OTA-001, EMU-021, TCH-012, EMU-020 are the newest durable findings.
+- **Escapement** `~/GIT/Escapement`, branch `main`, HEAD `e136f46`. Log entry 53
+  is the current cycle; NES-001 (core choice), OTA-001, EMU-021 are the newest.
 
 ## Permissions and limits
 
@@ -132,7 +138,12 @@ strip's `°` label is now stale. Next lever: launch it as an app, not `tama`.
 3. **`tama stop`'s one-second wait** and the `tama start <rom>` argument path are
    written but unexercised.
 4. **Untested under load:** whether the guest holds 16 Hz with the painter active.
-10. **Save and Load need re-testing** — their earlier pass happened while every
+10. **NES Phases 3-5.** 3: PSRAM for `vidbuf` (65 KB, must not be internal
+    DRAM — EMU-018). 4: the glue, which is small — 3 callbacks (`blit_func`,
+    `vsync`, `input`) plus `nes_setvidbuf`; blit gets a 272x240 palette-index
+    frame, the port owns the RGB565 conversion. 5: 1x letterboxed (256x240, 46%
+    of the panel, pixel-perfect) before any scaling.
+11. **Save and Load need re-testing** — their earlier pass happened while every
     press corrupted 512 bytes around the saved data. The file was right; the
     machine was not.
 11. **Add a boot log** (`/sd/boot.txt`, reset reason + monotonic ms per boot) if
