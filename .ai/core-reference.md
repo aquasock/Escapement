@@ -382,6 +382,7 @@ EMU-021: "The emulated EEPROM is 1024 bytes (HT24LC08_SIZE) and the save image m
 OTA-001: "A/B firmware update works on this port and needs no repartitioning -- 2 x 3 MiB slots were already there with esp_ota_set_boot_partition and rollback wired; install to the inactive slot, restart, the trial confirms itself after 30 s, and installing again writes the other slot. A truncated image is refused at boot with `invalid segment length`, so a corrupt slot cannot brick the board. The built-in update feed is a 404, which is the real gap, not partition size"
 NES-001: "nofrendo is 1.96x InfoNES on the same ROM (394.9/392.6/828.2 vs 201.6/201.6/422.4 Mcyc/s) with render and palette conversion live, covers 98.2 percent of a 794-ROM collection, and needs NO retro-go -- nes/utils.h has an #ifdef RETRO_GO branch, so with it undefined logging is printf and CRC32 is (0); FCEUmm and QuickNES cannot be built at all without libretro.h and a frontend"
 NES-002: "On the watch nofrendo runs at 21 fps, split 8,160us emulator and 6,166us blit against a 16,667us budget -- moving 61 KB in 6.1 ms is sixty times too slow because display_picture_rgb() copies into s_fb and flush_rect() byte-swaps into s_tx, making four passes over PSRAM where one would do; a full-frame path that converts straight into s_tx is the fix"
+BLE-007: "The operator's Xbox Wireless Controller is BLE HID, not Bluetooth Classic -- it connected to the ESP32-S3 on the first try -- and hid_mouse_parse() accepts its descriptor because a gamepad declares Generic Desktop X and Y for its left stick, which is why it moved the desktop cursor; the discriminator is the top-level collection usage (Game Pad 0x05, Joystick 0x04, Mouse 0x02, Keyboard 0x06) and the gamepad parser must be asked FIRST, or the mouse claims the device and the gamepad path is never reached"
 ```
 
 ---
@@ -1769,6 +1770,22 @@ NES-002: "On the watch nofrendo runs at 21 fps, split 8,160us emulator and 6,166
     - "on the watch 2026-11-12: emu=1036293us blit=783085us over 127 frames in one second"
     - "NES-001 for the host benchmark these figures must not be confused with"
   verification: "Verified on hardware 2026-11-12. The operator launched /sd/game.nes (Balloon Fight), the picture appeared correctly, and they played it with the margin buttons -- so display, input and emulation are all confirmed correct. Throughput was measured by `nes status` after six seconds of running. NOT verified: any improvement, since no optimisation has been attempted yet. The host benchmark is unchanged at 142x realtime on the same ROM, which is host load rather than a regression."
+
+- record_id: BLE-007
+  kind: BLE
+  topic_id: BLE
+  status: VERIFIED
+  verified_date: 2026-11-12
+  title: "An Xbox Wireless Controller is BLE HID here, and a gamepad is only distinguishable from a mouse by its top-level collection"
+  statement: "The operator's Xbox Wireless Controller (model EP2-29929) connects to this board as a Bluetooth LE HID-over-GATT peripheral and delivers input reports; it paired first try once put in pairing mode. This contradicted an earlier assertion in this project that it was Bluetooth Classic BR/EDR -- the ESP32-S3 has no Classic radio at all, so that reading implied it could not connect. Its report descriptor is 283 bytes and decodes as: report ID 1, 16 bytes, left stick at bits 0 and 16 (16-bit each), triggers at 32, right stick at 64 and 80 (10-bit each), hat switch at 96 (4 bits), fifteen buttons at 104, and a consumer control at 120. The hat reports 1..8 clockwise from up with 0 (or 15) centred, which is NOT the 0-based range a desk-mouse-style descriptor uses."
+  consequence: "Two things generalise beyond this controller. First, `hid_mouse_parse()` ACCEPTS a gamepad's descriptor: a gamepad declares Generic Desktop X and Y for its left stick, and X and Y are the only usages the mouse parser looks for. The controller was therefore claimed as a mouse and its stick moved the desktop cursor. The discriminator is the TOP-LEVEL COLLECTION -- Generic Desktop / Game Pad 0x05, or / Joystick 0x04, against / Mouse 0x02 and / Keyboard 0x06 -- and the gamepad parser must be asked BEFORE the mouse, because once the mouse has claimed a device the gamepad path is never reached. The ordering is the fix, not a detail. Second, and this is the more expensive lesson: an assertion about a device's protocol from its model generation was wrong, and only worked out because the operator said 'it is in pairing mode, try it'. Hardware claims from product families are not measurements."
+  sources:
+    - "tinydesk-twatch ports/esp_idf/app/hid_gamepad.c: the collection-usage discriminator and the field extraction"
+    - "tinydesk-twatch ports/esp_idf/app/bt_hid.c: the classification order in ready()"
+    - "tinydesk-twatch tests/xbox_btle.h: the 283-byte descriptor and ten raw reports captured from the device"
+    - "tinydesk-twatch tests/test_gamepad.c: 27 checks against that real data"
+    - "ESP-IDF 5.3.1 components/soc/esp32s3/.../Kconfig.soc_caps.in: no SOC_BT_CLASSIC_SUPPORTED on the S3"
+  verification: "Verified on hardware 2026-11-12. The descriptor and reports were captured from the controller onto the SD card and read back over SFTP. With the gamepad parser asked first, `bt status` reports the device as `kbd=0 mouse=0 pad=1` and the mouse slot stays idle, where it previously showed `last: connected: mouse`. A 30-second sample decoded the hat as up/left/right and button bits 10 and 11 correctly, which proves the button decode path. NOT verified: the four face buttons' bit assignment, which rests on the press order recorded during capture -- they did not land inside the sampling window, and the mapping is one table edit away if a game disagrees."
 
 - record_id: NFC-001
   kind: BOARD

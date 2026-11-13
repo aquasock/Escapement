@@ -1,3 +1,45 @@
+## 55 COMMIT Unreleased 2026-11-12T22:17:33-07:00
+
+#### Coming From:
+
+Unreleased b072044
+
+#### Purpose:
+
+Find out whether the operator's Xbox Wireless Controller can drive the watch, and make it drive the NES rather than the desktop cursor.
+
+#### Outcome:
+
+The controller works, and getting there reversed two of this agent's confident wrong answers. THE FIRST WAS THE PROTOCOL. Asked whether the controller would connect, this agent asserted it was Bluetooth Classic BR/EDR, noted correctly that the ESP32-S3 has no Classic radio at all (only the original ESP32 defines `SOC_BT_CLASSIC_SUPPORTED`), and concluded the watch could not see it. The operator put it in pairing mode and it connected immediately as a BLE HID-over-GATT peripheral. The second wrong answer was about why it then misbehaved. It connected into the Keyboard slot and moved the desktop cursor, which was read as a protocol oddity; the real cause is that `hid_mouse_parse()` ACCEPTS a gamepad's descriptor, because a gamepad declares Generic Desktop X and Y for its left stick and X and Y are the only things the mouse parser looks for. That is a parser doing its best with something outside its remit, and it made every stick movement a pointer movement. THE FIX IS AN ORDERING AND A DISCRIMINATOR. `hid_gamepad.c` walks the descriptor looking for the TOP-LEVEL COLLECTION usage -- Generic Desktop / Game Pad (0x05) or / Joystick (0x04), against / Mouse (0x02) and / Keyboard (0x06) -- and `bt_hid.c` now asks it BEFORE the mouse parser, because once the mouse has claimed a device the gamepad path is never reached. THE LAYOUT WAS MEASURED, NOT ASSUMED, and the measurement was worth the cycle. A temporary diagnostic wrote the Report Map and the raw input reports to the card, and the operator pressed buttons in a stated order; the descriptor decodes as report ID 1, 16 bytes, left stick at bits 0 and 16, triggers at 32, right stick at 64 and 80, hat switch at 96 (4 bits), fifteen buttons at 104, and a consumer control at 120. THE TEST FOUND TWO REAL PARSER BUGS, both of which produced plausible partial results. First, local items must be cleared on COLLECTION as well as on Input, Output and Feature: without that the collection's own usages stayed queued, the first Input consumed them instead of X and Y, and the sticks were never found while the hat and the buttons still resolved -- a partial parse that a test checking only "does it parse" would have passed. Second, the report ID was read after the whole descriptor walk, so it picked up a SECOND id from a PID collection at the end of the descriptor and rejected every report as belonging to another interface. Both were caught by asserting the fields' OFFSETS rather than merely their presence, and the local-reset bug escaped the first version of the test entirely -- it was found by mutating the parser, noticing a mutation did not fail, and concluding the test was wrong rather than the mutation being harmless. THE TEST IS HOST-SIDE AND RUNS AGAINST THE REAL DEVICE DATA. `hid_gamepad.c` was given no platform dependency precisely so `tests/test_gamepad.c` could compile it alone and feed it the captured descriptor and reports from `tests/xbox_btle.h`; 27 checks, and proved able to fail three ways (removing the collection check, skipping the local reset, and dropping the hat's 1..8 offset each produce failures). One subtlety cost a run: the captured payloads do NOT begin with the report ID, because BLE carries it in the attribute handle and `bt_hid.c` reconstructs it, so the test has to prepend it or it is testing a different byte string from the firmware's. VERIFIED ON THE WATCH: classified `kbd=0 mouse=0 pad=1`, and a 30-second sample decoded the hat as 1..8 clockwise from up with 0xFF centred, and buttons at bits 10 and 11. Those two bits arriving is the button decode path PROVEN end to end; the four face buttons did not land inside that sampling window, and their assignment still rests on the press order recorded during the descriptor capture. The NES maps the hat to its D-pad and bits 10 and 11 to SELECT and START, which also closes the SELECT gap recorded in the previous cycle.
+
+#### Next Steps:
+
+Hold a face button for a full second rather than tapping it and re-run `nes pad`, which samples to `/sd/nespad.txt` for thirty seconds precisely so the timing does not have to be coordinated with a command -- the earlier terminal-printing version asked the operator to press during a window that opened when the command was typed, which cannot work. Once bits 0, 1, 3 and 4 are confirmed against A, B, X and Y, the table in `nes.c` is either correct or one edit away. Two things are worth doing while the controller is in hand: the analogue stick is decoded but unused, and it is the obvious input for a future menu; and the controller's own MENU button currently maps to START, which is a guess that a game will probably disagree with. Unchanged from the previous cycle: the NES runs at 21 fps, and the split says the blit is 37 percent of the frame for work that should be one percent, so the full-frame display path remains the next real optimisation.
+
+#### Files Modified:
+
+- ports/esp_idf/app/hid_gamepad.c
+- ports/esp_idf/app/hid_input.h
+- ports/esp_idf/app/bt_hid.c
+- ports/esp_idf/app/app.cmake
+- ports/twatchultra/main/nes.c
+- tests/test_gamepad.c
+- tests/xbox_btle.h
+- tests/stub/esp_timer.h
+- tests/stub/freertos/FreeRTOS.h
+- tests/stub/freertos/task.h
+- tests/stub/tdsh_board.h
+- tests/stub/tinydesk/td_wm.h
+- CMakeLists.txt
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: PASS
+
+---
+
 ## 54 COMMIT Unreleased 2026-11-12T21:41:19-07:00
 
 #### Coming From:
