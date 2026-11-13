@@ -17,7 +17,10 @@ Quoting one state's figure as another is how the same board appears to gain or
 lose 50 KB in a minute.
 
 **WiFi is OFF now, by operator request — leave it off for the next test run.**
-That means no SSH; drive the board over the USB terminal instead.
+`network autowifi off` was set as well as `wifidisconnect`, because
+disconnecting alone let it re-associate within seconds. So it will NOT come back
+by itself: to restore, `network autowifi on` then `wificonnect`. While it is off
+there is no SSH — drive the board over the USB terminal instead.
 
 **No backup since `352c4c3`** — `working-2026-11-12-2235.bin` predates the buffer
 change. Operator has deferred it deliberately, not by oversight.
