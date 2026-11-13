@@ -3,13 +3,15 @@
 The third candidate platform. Unlike Game Boy Color, most of the work already
 exists: the core is vendored, a reference desktop build is playable, and the
 display gate that used to block this platform has since been overtaken by the
-NES blit work. What follows is what is measured, what is inherited, and the one
-number still missing.
+NES blit work. What follows is what is measured, what is inherited, and what the
+watch itself reported when asked.
 
-**Headline: the display gate that was the stated blocker now passes with 4x
-headroom, and the CPU requirement was mis-stated by a factor of 3 in the
-original scope. The one remaining unknown is Xtensa throughput, and a binary
-built to answer it is sitting on disk.**
+**Headline: the platform clears its CPU requirement on the watch. The display
+gate passes with 4x headroom, the CPU requirement was mis-stated by a factor of
+3 in the original scope, and the watch retires 383,000 instructions per second
+emulating a worst-case cartridge -- 1.61x realtime. The margin against the
+heaviest retail cartridges is thin rather than comfortable, because real code
+executes more instructions per frame than the synthetic benchmark does.**
 
 ---
 
@@ -139,60 +141,107 @@ port is cheap — but nobody should start it expecting a big picture.
 
 ---
 
-## 6. What is still unknown
+## 6. The measurement, taken on the watch
 
-**Xtensa interpreter throughput on the watch. Everything else is measured.**
+**The unknown is closed: the watch retires 383,000 S1C88 instructions per second
+while emulating a Pokemon Mini, which is 1.61x realtime on a worst-case
+cartridge and 1.06x the heaviest requirement in the band.**
 
-That single number decides the platform, and it needs to be ~0.25 Mips or better
-for the lightest cartridges and ~0.4 Mips for the heaviest.
+Route B was built and run. The prepared Linux binary described below was never
+usable, and nothing was gained by trying harder with it; what answered the
+question was `components/pokemini` (the core vendored into the fork as a
+component) plus `main/pmbench.c` (a shell command). Both are in
+`~/GIT/tinydesk-twatch` at `ports/twatchultra/`.
+
+### What was measured
+
+Run on 2026-11-13 on the watch itself, with the radio off, on core 0 at priority
+5 — the same core the NES port emulates on, so the figures are comparable.
+
+- 2,000 frames of 55,555 emulated cycles each, i.e. 27.8 seconds of emulated
+  Pokemon Mini time per run.
+- A 32 KB cartridge generated in memory from a fixed xorshift32 seed, which is
+  the largest a PM cartridge gets and therefore the worst case for the ROM read
+  path. No commercial ROM is used or distributed.
+- Four runs: **382,982 / 382,951 / 383,075 / 383,102 instructions per second**.
+  17.24 s each. The spread is 0.04%, so the noise that makes single runs
+  untrustworthy elsewhere is not present here.
+
+### The cartridge must live in PSRAM, and the board says so
+
+`pmbench` measures the cartridge in internal SRAM and in PSRAM because it does
+not copy the image — `PokeMini_SetMINMem()` keeps the caller's pointer, and the
+S1C88 fetches instructions out of the cartridge, so where it lives dominates the
+result. The internal case was **refused for lack of a contiguous block**:
+
+```
+Internal RAM: free=117475, largest=31744, minimum-free=100591 bytes
+```
+
+31,744 bytes is the largest free block against a 32,768-byte request: it misses
+by exactly 1 KB with 117 KB free in total. So a maximally-sized cartridge cannot
+be internal on this board, which settles the choice — a real port puts the ROM in
+PSRAM, and the 383,000 figure is that configuration rather than a pessimistic
+one that could be better. It also means the internal-SRAM-versus-PSRAM penalty is
+not measurable at 32 KB and is left unmeasured rather than guessed.
+
+### The caveat that keeps this from being a comfortable margin
+
+Synthetic instructions and real ones are not the same workload, and the
+difference cuts against the platform:
+
+- The synthetic cartridge executes **3,302 instructions per frame**. Twelve
+  retail cartridges measured **3,091 to 5,053**. A heavy real cartridge runs
+  about 1.5x as many instructions as this benchmark does in the same emulated
+  time.
+- Host cost is paid per instruction, so if real instructions cost the same as
+  synthetic ones, a 5,053-instruction cartridge would take 5,053 x 2.61 us =
+  13.2 ms against a 13.9 ms frame, which is **1.05x realtime, not 1.61x**.
+- The synthetic mix is pessimistic the other way: random 12-bit words hit
+  disproportionately many slow paths, so a real instruction should on average be
+  cheaper than 2.61 us. The two effects oppose each other and neither magnitude
+  is known.
+
+The honest statement is that the platform clears the requirement on the measured
+workload and that the margin against the heaviest cartridges is somewhere
+between thin and comfortable. **A real `.min` would settle it in one more run**,
+and `pmbench` does not yet accept one — that is a small addition, not an unknown.
+
+### Cost, measured rather than estimated
+
+`libpokemini.a` is 14,564 bytes of `.bss` and 63,692 bytes of flash (58,556 text
++ 5,136 rodata), against a scoping estimate of 114,708 text and 14,984 bss. The
+app partition still has 284,848 bytes free, so the estimate's conclusion holds
+with more room than it claimed.
 
 ### The prepared binary cannot run on the watch as it is configured
 
-The obvious route — copy `for-escapement/pokemini_bench_target` to the watch and
-run it — **does not work, and the reason is not fixable by retrying.** That binary
-is a **Linux** ELF: built by Escapement's own crosstool-NG (GCC 14.1.0) against
-uClibc, with `_start` and `__libc_start_main` and no ESP-IDF runtime. The watch as
-it stands runs **ESP-IDF v5.3.1 with TinyDesk Shell**, which is not Linux and has
-no ELF loader — `tdsh` reports `command not found` and has no `chmod` or `exec`.
+Kept because it cost a cycle and would otherwise be retried. The obvious route —
+copy `for-escapement/pokemini_bench_target` to the watch and run it — **does not
+work, and the reason is not fixable by retrying.** That binary is a **Linux** ELF:
+built by Escapement's own crosstool-NG (GCC 14.1.0) against uClibc, with `_start`
+and `__libc_start_main` and no ESP-IDF runtime. The watch runs **ESP-IDF v5.3.1
+with TinyDesk Shell**, which is not Linux and has no ELF loader — `tdsh` reports
+`command not found` and has no `chmod` or `exec`.
 
 Attempted on 2026-11-13: WiFi on, `ssh start`, SFTP to `/sd` (392,204 bytes at
 18.1 KiB/s, md5 matching), `chmod` absent, execution refused. File removed, radio
 off again. The `for-escapement/` directory name was literal — it was built for
 the Linux watch, not for this firmware.
 
-So the measurement needs one of two routes, and they are not equivalent:
-
-**A. Flash the Escapement Linux image and run it there.** This is what the binary
-was built for and it needs no new code. It also replaces the TinyDesk firmware,
-which is the platform the NES and GBC work lives on. Reversible: a verified 16 MiB
-backup of the current firmware exists (`working-2026-11-13-0019.bin`). The number
-this produces is the frame rate of Pokémon Mini **on Linux**, which is a different
-question from the one the NES and GBC scopes answered.
-
-**B. Build the core into TinyDesk as a `pmbench` command.** This costs real work —
-vendoring `core/pokemini/` as a component and writing a shell command — but it
-measures the platform the other emulator work actually targets, and it is step 1
-of that port rather than a detour around it. Sizing is comfortable: 114,708 bytes
-of text against 347 KB free in the app partition, and 14,984 bytes of bss against
-143 KB of free internal DRAM.
-
-**Recommend B**, because NES and GBC are both TinyDesk ports. A Pokémon Mini that
-runs on a different operating system would be a third parallel platform, and the
-recommendation would then depend on which OS the next session happens to have
-flashed.
-
-**Do not estimate this by scaling the host figure.** `POKEMINI-CORE.md` says so
-directly — "the host figure cannot be scaled to the target by a ratio — any such
-ratio would be invented". An attempt while writing this document produced
-anything from 0.3 to 1.3 Mips depending on which anchor was chosen, which is the
-same non-answer in three costumes.
+**Do not estimate the target figure by scaling the host one.** `POKEMINI-CORE.md`
+says so directly — "the host figure cannot be scaled to the target by a ratio —
+any such ratio would be invented". An attempt while writing this document
+produced anything from 0.3 to 1.3 Mips depending on which anchor was chosen,
+which is the same non-answer in three costumes.
 
 ## 7. Recommendation
 
-**Run the prepared benchmark before deciding anything else.** It is one file
-copy and one command, and it converts the last unknown into a number.
-
-If it clears ~0.4 Mips, the platform is straightforward:
+**The benchmark has been run and it clears the requirement.** What follows is
+therefore a build plan rather than a conditional. The one reservation is the
+instruction-count caveat in section 6: the margin is thin against heavy
+cartridges, so the first hardware run of a real cartridge decides whether the
+interpreter needs work before the port is worth finishing.
 
 1. **Vendor `core/pokemini/` into the fork** as `components/pokemini`, GPL-3.0
    with attribution. 114 KB of text fits the app partition's 347 KB of free space

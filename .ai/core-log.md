@@ -1,3 +1,43 @@
+## 66 COMMIT Unreleased 2026-11-13T08:15:00-07:00
+
+#### Coming From:
+
+Unreleased e753e04
+
+#### Purpose:
+
+Measure Pokemon Mini interpreter throughput on the watch itself, the one open question that had left the platform undecided since it was scoped.
+
+#### Outcome:
+
+The platform clears its CPU requirement, and the watch said so rather than a ratio. The Route B work was done as planned: `components/pokemini` in the fork carries the core vendored verbatim from `~/GIT/tinytama/core/pokemini` (upstream PokeMini `8a64225e`, v0.61, GPL-3.0, one 2-line instruction counter recorded in `patches/0001-exec-counter.patch`), with provenance, licence and the dropped-disassembler rationale recorded beside it, and `main/pmbench.c` adds a shell command that runs a 32 KB synthetic cartridge of 55,555-cycle frames and reports instructions per second, per-frame cost and realtime. Four runs at 2,000 frames, radio off, core 0 at priority 5 and so comparable with the NES port, returned 382,982, 382,951, 383,075 and 383,102 instructions per second in 17.24 s each: a 0.04 percent spread, which is the first measurement on this board whose noise did not need explaining. That is 3,302 instructions per frame, 1.61x realtime, and 1.06x the heaviest requirement in the 0.22-0.36 MIPS band derived in entry 64. The internal-SRAM case was refused rather than measured -- the largest free internal block was 31,744 bytes against a 32,768-byte request, missing by exactly 1 KB with 117,475 bytes free in total -- which settles the design question the scoping document had left open, since a maximally sized cartridge cannot be internal and 383,000 is therefore the realistic figure rather than a pessimistic one with a better configuration available; the internal-versus-PSRAM penalty is not measurable at 32 KB and was left unmeasured rather than inferred from another workload. Two caveats belong in the entry because they bound the result: the synthetic cartridge executes 3,302 instructions per frame while the twelve retail cartridges measured in entry 64 need 3,091 to 5,053, so at 2.61 us per instruction a heavy cartridge costs 13.2 ms against a 13.9 ms frame, which is 1.05x realtime rather than 1.61x, and because random 12-bit words hit disproportionately many slow paths a real instruction should be cheaper, leaving the two effects opposing with neither magnitude known. The margin is therefore thin against heavy cartridges and thick against light ones, and a real `.min` would settle it in one more run. Two defects cost a build each and are recorded in the source: `MinxCPU.h` declares `static inline uint8_t SAR(...)` while Xtensa's `specreg.h` defines `SAR` as special register 3, which needed an explicit `#undef` because tdsh.h transitively includes FreeRTOS.h, and the first version of `pmbench` printed from its helper task, producing a run that returned to the prompt with the entire measurement absent; that version was replaced by measure-then-print with the mechanism left explicitly unestablished rather than guessed, since tdsh's stdout is one global newlib stream and not per task. Build PASS with `libpokemini.a` at 14,564 bytes of bss and 63,692 bytes of flash against a 114,708-and-14,984 estimate and 284,848 bytes still free in the app partition; deployment PASS with every written region hash-verified and the number re-taken on the exact source now on the device; a verified 16 MiB backup `working-2026-11-13-0749.bin` (sha256 `ed77df277072e58bd78a579dfc42776a0da05affbb78484d3f6f5c265197c0f3`) was taken first, with the board held in esptool's stub across read and compare. The core-syntax audit passed: 66 entries, 65 of 65 settled entries unchanged, one added entry conforming to the six-section template and the 100-entry cap.
+
+#### Next Steps:
+
+Make the cartridge playable, which is the port itself rather than a measurement: `pmbench` proves the bench sustains the frame rate but renders nothing, so the next cycle needs the 96x64 monochrome PRC output converted to RGB565 and pushed through the existing `display_picture_rows()` blit, the watch's margins and touch mapped to the Sega-style d-pad plus A, B and C, and a 72 Hz frame loop with real-time pacing rather than free-running cycles. Pokemon Pinball is the test cartridge, chosen because the operator cleared two levels of it on the tinytama desktop reference and so has a baseline for feel. The feel test is the point: 1.05x realtime on the heaviest cartridges is a margin that could read as laggy input, and if it does then the interpreter needs work before any UI or audio is worth building. The free BIOS cannot serve as the cartridge since it idles at `$0040`, and no commercial ROM is committed to either repository. Everything else is unchanged: the NES stays parked at 51 fps with battery-SRAM persistence and the skip-path test owed, GBC remains scoped with gnuboy recommended and its 28-45 fps projection unverified, the Tamagotchi still wants a Start menu entry, and the radio remains off with auto-connect off.
+
+#### Files Modified:
+
+- docs/pokemini-scoping.md
+- scripts/pmbench.sh
+- ports/twatchultra/components/pokemini/CMakeLists.txt
+- ports/twatchultra/components/pokemini/README.md
+- ports/twatchultra/components/pokemini/LICENSE-PokeMini
+- ports/twatchultra/components/pokemini/patches/
+- ports/twatchultra/components/pokemini/
+- ports/twatchultra/main/pmbench.c
+- ports/twatchultra/main/pmbench.h
+- ports/twatchultra/main/CMakeLists.txt
+- ports/twatchultra/main/link_twatch.c
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: N/A
+
+---
+
 ## 65 COMMIT Unreleased 2026-11-13T02:40:00-07:00
 
 #### Coming From:

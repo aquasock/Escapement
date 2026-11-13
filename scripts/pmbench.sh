@@ -5,7 +5,16 @@
 #   ./scripts/pmbench.sh build
 #   ./scripts/pmbench.sh run [rom.min|--synthetic] [frames]
 #   ./scripts/pmbench.sh compare DIR [frames]
-#   ./scripts/pmbench.sh target        # cross-compile the on-watch binary
+#   ./scripts/pmbench.sh target        # cross-compile a STANDALONE binary
+#
+# `target` DOES NOT PRODUCE SOMETHING THE WATCH CAN RUN. It links against this
+# project's crosstool-NG and uClibc, so the result is a Linux ELF, and the watch
+# runs ESP-IDF with TinyDesk Shell, which has no ELF loader. That was tried on
+# 2026-11-13 and refused at execution (core-log entry 65).
+#
+# The on-watch measurement is the `pmbench` shell command built from
+# `components/pokemini` in the tinydesk fork -- see docs/pokemini-scoping.md
+# section 6 for the figure it produced. `target` is kept only for the Linux image.
 #
 # WHY THIS EXISTS. Same standard as nesbench.sh and gbcbench.sh: a platform
 # decision is a measurement. This one has a second purpose, which is the whole
@@ -141,7 +150,8 @@ target() {
         tools/pmbench/bench_pokemini.c \
         $(find "$SRC" -maxdepth 1 -name '*.c') \
         -lm
-    echo "ok -- run it on the watch with --synthetic 2000"
+    echo "ok -- this is a Linux ELF; it runs on the Escapement Linux image,"
+    echo "     NOT on TinyDesk. The TinyDesk measurement is the pmbench command."
 }
 
 case "${1:-}" in
