@@ -1,3 +1,35 @@
+## 73 COMMIT Unreleased 2026-11-13T12:16:00-07:00
+
+#### Coming From:
+
+Unreleased b716b5d
+
+#### Purpose:
+
+Label the margin buttons for Pokemon Mini, and stand the right column on end so it reads as the mirror of the left.
+
+#### Outcome:
+
+All twelve margin buttons now carry Pokemon Mini meanings and the operator accepted them on the glass. The left column top to bottom is SS, Save, Load, Pause and Reset; the bottom strip left to right is Shake, A and B; the right column top to bottom is Hold, Sound, Speed, a deliberately blank slot, and C. The blank is the operator's choice and not an omission: four of the five right-hand slots are taken and leaving the fifth visibly empty keeps the occupied positions where they are when a control arrives for it. The labels were applied through the override mechanism rather than by editing the shared tables in `edges.h`, because those tables are the Tamagotchi's and `tests/test_tama_ui.c` walks them against `tama_ui.c`'s action table; adding a second app's names would either break that test or force it to know about two applications. The column overrides already existed and `display_margin_label()` was used as-is, but the bottom strip had no override path at all -- `btn_label_app()` in `edges.h` returns the same degree glyph for all three bars -- so this cycle added one: an `s_ovr_btn[BTN_N]` array and `display_margin_btn_label()` in `display.c` and `display.h`, mirroring the column setter, with the override consulted at the single point where `paint_buttons()` chooses a label. The strip is repainted whole rather than per bar because it is one window, one bus acquisition and one transfer, so painting one bar in isolation would cost the same as three and would break the single-window rule the painter depends on. `pm.c` sets all twelve labels after claiming the pixels and clears them on stop, which matters for the next app rather than this one: without the clear the Tamagotchi would inherit "Shake A B" on its strip. The right column was then changed from `LABEL_UPRIGHT` to `LABEL_CCW`, so its first character sits at the bottom and it reads upward, making it the 180-degree counterpart of the left column's `LABEL_CW`. Two call sites needed the change rather than one, because `display_margin_label()` repaints a single column independently of `paint_margins()`, and a missing second site would have flipped the labels back the first time a toggle relabelled anything. That change also rotates the desktop's right-hand key labels, which is deliberate rather than incidental -- an edge should read consistently whichever app owns the screen -- and is recorded because the operator asked for the rotation in an app context and would not otherwise know the desktop moved. The shared table went untouched and `test_tama_ui` was compiled and run to prove it: 206 checks, 0 failures. Pokemon Pinball Mini measured 71.6 fps with `missed=1` over 27.7 s after both changes, and 71.6 fps with `missed=0` before the rotation, so neither change touched the frame loop. Build PASS at 0x2bc6b0 bytes with 278,352 free; deployment PASS with every written region hash-verified; the operator confirmed both the labels and the rotation on the glass. A verified 16 MiB backup `working-2026-11-13-1204.bin`, sha256 `45b715ae3967bf0f5827d379166f074a043e05cf5e5354a0f57a86cf649b3e3e`, was taken after acceptance with the board held in esptool's stub across read and compare. The core-syntax audit passed: 73 entries, both control files unchanged apart from this entry, which conforms to the six-section template and the 100-entry cap.
+
+#### Next Steps:
+
+The labels currently claim jobs the buttons do not do, and that is the next cycle's whole purpose. `edges.h` exists partly to prevent a label from disagreeing with its duty -- its own words are that a button labelled Enter which sends no Enter is the disagreement the file was built to stop -- so the twelve labels are presently a statement of intent and the work owed is making them true. The order that follows from the layout is the three bottom bars first, since Shake, A and B are the controls a game is actually played with and the touch path has never been exercised; then Pause and Reset; then Save, Load and SS, which need a state format that does not exist yet; and last Hold, Sound and Speed, which are toggles rather than presses and are where `display_margin_label()` earns its place, Pause becoming Resume and Speed showing the rate it will select next. Sound has no dependency to inherit because the port has no audio at all, and SS is the one label whose meaning has not been confirmed with the operator -- it was read here as the screenshot or save-state slot and the reading is recorded in `pm.c` so a correction is cheap. Everything else is unchanged: Puzzle Collection remains at 0.94x to 0.98x with optimization parked behind a repeat-run-to-median harness, save states and EEPROM persistence are untouched, the NES stays parked at 51 fps with battery-SRAM persistence and the skip-path test owed, GBC remains scoped with gnuboy recommended, the Tamagotchi still wants a Start menu entry, and the radio is off with auto-connect off.
+
+#### Files Modified:
+
+- ports/twatchultra/main/display.c
+- ports/twatchultra/main/display.h
+- ports/twatchultra/main/pm.c
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: PASS
+
+---
+
 ## 72 COMMIT Unreleased 2026-11-13T11:35:00-07:00
 
 #### Coming From:
