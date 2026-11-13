@@ -1,3 +1,40 @@
+## 48 COMMIT Unreleased 2026-11-12T17:42:11-07:00
+
+#### Coming From:
+
+Unreleased 1a1b1f6
+
+#### Purpose:
+
+Stop the thirteen margin buttons from sending desktop keys while the Tamagotchi has the screen, and make their labels say so, restoring the desktop labels when the guest exits.
+
+#### Outcome:
+
+The margins now tell the truth about what they do. While `tama` has the screen, a press on any of the thirteen buttons is refused, and the two side columns are blank while the bottom strip carries a degree circle instead of Tab, Enter and Ctrl+Q; `tama stop` puts the desktop labels back. THE SUPPRESSION WAS NOT WHERE IT LOOKED. `touch.c` already refused the margins when an application owned the screen, but it asked `td_wm_app_owns_screen()`, which is the desktop's own notion of ownership and is false for anything that claims pixels without being a window manager window -- and the emulator is exactly that, since it calls `display_pixels_claim()` directly. So the gate was inert for the one app it was needed for and a press on Enter mid-game typed into the hidden shell, which is the fault the operator's request named. The gate is now `display_pixels_claimed()`, the port's own flag and the same one the painter already honours, so there is one definition of ownership rather than two that disagree. A refused press logs `e<n> i<n> off` and does not buzz, following the rule `edge_press()` already applies to the reserved slot: a buzz with no action claims something happened when nothing did. THE LABELS ARE A NEW MODE, NOT A NEW PAINT PATH. `display_margins_set(DISPLAY_MARGINS_APP | DISPLAY_MARGINS_DESKTOP)` repaints all five column buttons and all three strip bars from `edges.h`, which gained `blank_label()` and `btn_label_app()` beside the existing label tables so that a label and the duty it describes stay in one file. The three strip bars had to move to a single `paint_margins()` helper that both `display_init()` and the mode change call, because the labels now depend on state and two callers passing different arguments is the drift this file's own geometry comment warns about. THE SYNCHRONOUS CALL NEEDED AN ARGUMENT, and it is the reason it is not routed through the paint task like `display_repaint_all()`: the transition into APP mode happens WHILE the painter is suppressed, so a request left for the painter would be dropped exactly when it was wanted. Painting synchronously is safe only because claiming the pixels makes the caller the sole writer of `s_tx` and the SPI bus, which is DSP-005's rule holding rather than being broken; the stop path therefore restores the labels BEFORE releasing the claim, and the start path calls it after the claim and before the guest task exists, so ownership is true by construction in both. This is the third cycle in a row where the same one-writer rule decided a design, and the first where it was applied before rather than after a fault. THE DEGREE SIGN IS VERIFIED RATHER THAN ASSUMED. The label is a hand-written UTF-8 sequence, and a mistyped escape would decode to some other code point, find no glyph, and leave a blank button with nothing reporting an error -- invisible except on the glass. `tests/test_twatch_edges.c` gained `test_margin_labels`, which decodes it with its own UTF-8 decoder written from the definition rather than reusing display.c's, asserts U+00B0, and asks the real font table for the glyph and that it draws ink; 1,567 assertions, 0 failures, and proven able to fail at 3 failures on a wrong code point and 6 on an empty label. That test caught a fault in itself on the first run -- it asserted a non-empty label for every right-column slot, but slot 0 is the reserved blank -- and the test was corrected rather than the code. The build was clean with 0 warnings, binary `0x28b620`, and the host suite passed 41 of 41. The operator confirmed the result on the glass as perfect, after a reboot from a fresh build; the backup `working-2026-11-12-1737.bin` is 16 MiB, sha256 `64c58067d020b9e8aa77a6a5570748e62c79491bda30e0a8857200d4c5ca872d`, verify OK with the board held in the bootloader across read and compare, and its 2,667,808-byte app region is byte-identical to the build.
+
+#### Next Steps:
+
+Wiring the margins to the guest is the remaining half, and the degree circle is now on the glass as a placeholder for it: the columns plan to carry the pet's own controls and the strip the three V3 buttons, which is why APP mode blanks the columns rather than merely cutting their text -- there is nothing to restore, and the next cycle writes the labels it needs. Two things that cycle must answer are already visible here. The direction of the label is a decision, not a detail: the columns are rotated and the strip is not, so a column label is read from the right-hand edge and a strip label from the bottom, and the pet's controls should follow whichever the operator actually reads. And the press path currently refuses and stops; it should call `tmc_button()` instead, which already exists and is proven from the shell with `tama press 0..2`. Nothing else is blocked: `display_margins_set()` takes a mode, so a third one can be added without touching the painter. One loose end from this cycle: `tama stop` restores labels before releasing the claim, and if the guest task fails to stop within its one-second bound the function returns early and the margins are left in APP mode with the screen still claimed -- recoverable with `pattern off` and untested, because the task has never failed to stop.
+
+#### Files Modified:
+
+- ports/twatchultra/main/display.c
+- ports/twatchultra/main/display.h
+- ports/twatchultra/main/edges.h
+- ports/twatchultra/main/tama.c
+- ports/twatchultra/main/touch.c
+- ports/twatchultra/README.md
+- tests/test_twatch_edges.c
+- CMakeLists.txt
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: PASS
+
+---
+
 ## 47 COMMIT Unreleased 2026-11-12T17:27:36-07:00
 
 #### Coming From:

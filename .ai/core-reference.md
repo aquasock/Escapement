@@ -284,6 +284,7 @@ TCH-007: "LilyGo's own bring-up is reset, 0xD1=0x01 command mode, then attribute
 TCH-008: "In the 15-byte report block only event 0x06 is a press, byte 6 must be 0xAB or the block is invalid, the finger count is byte 5 bits 6:0 and more than 2 is invalid, and the part emits no release event at all -- a release must be inferred"
 TCH-009: "TP_INT is GPIO 12, active low, and the pull-up is part of the contract because the controller only pulls the line down and releases it; interrupt-driven touch cuts idle bus traffic about 8x"
 TCH-010: "The interrupt, not the poll, discovers a touch: with a 5 s idle poll, eight taps one second apart produced eight presses and eight releases and 255 interrupts on IRQ 33"
+TCH-011: "The margin buttons must be gated on display_pixels_claimed(), not on td_wm_app_owns_screen() -- the latter is false for an app that claims pixels without being a window manager window, so the Tamagotchi received the margins' desktop keys and pressing Enter mid-game typed into the hidden shell"
 PMU-001: "AXP2101 capacity is register 0xa4 bits 6:0 (0x64 = 100, above 100 = not settled); voltage is registers 0x34/0x35, 14 bits, already in mV, and the power_supply property is uV so multiply by 1000"
 PMU-002: "The AXP2101 has no mainline driver, so it lives in patches/kernel/axp2101/; a non-recursive patch glob plus '|| true' silently dropped the series and a rebuild produced a kernel with no PMU driver and no error"
 PMU-003: "CONFIG_AXP20X_POWER publishes /sys/class/power_supply/axp20x-usb and is off by default; its absence is silent because axp20x-battery still appears"
@@ -734,6 +735,21 @@ EMU-018: "Internal DRAM is scarce enough that 4,148 bytes of .bss starved the SS
     - "patches/kernel/touch/final/cst92xx.c: device_property_read_u32(dev, \"hynitron,idle-poll-ms\", ...) and the idle/active period selection in cst92xx_irq() and cst92xx_poll()"
     - "TCH-009 for the interrupt itself and KRN-008 for why it could not be mapped until the descriptor table was enlarged"
   verification: "Verified on hardware 2026-11-10: kernel reported idle 5000 ms and interrupt driven; a capture of /dev/input/event2 across eight taps contained 48 events decoding to 8 presses and 8 releases with coordinates clustering in one region of the glass (x 158..191, y 208..252), while /proc/interrupts advanced to 255 on IRQ 33."
+
+- record_id: TCH-011
+  kind: TOUCH
+  topic_id: TCH
+  status: VERIFIED
+  verified_date: 2026-11-12
+  title: "There are two notions of who owns the screen, and the margin gate asked the wrong one"
+  statement: "The TinyDesk port's touch driver refused the thirteen margin buttons when an application owned the screen, asking `td_wm_app_owns_screen()`. That predicate is the desktop's own idea of ownership: it is true for a window manager window that has gone full screen. It is FALSE for an application that calls `display_pixels_claim()` directly without being a window manager window, which is what the Tamagotchi emulator does -- so the gate was inert for the one app that needed it, and a press on the bottom strip's Enter while the guest had the screen sent Enter to the shell underneath. The gate is now `display_pixels_claimed()`, the port's own flag, which is the same one the framebuffer painter honours."
+  consequence: "Two ownership flags existed and only one of them described the glass. The painter's flag is the honest one, because it is the condition under which nothing else may write pixels; the window manager's flag describes a window's state and merely correlates with that. When two predicates both answer a question that sounds the same, the one that GATES THE WRITES is the one the rest of the system must agree with, and anything else is a second definition waiting to disagree. The observable failure was quiet in a characteristic way: the margins worked normally on the desktop and worked normally in a full-screen window, and failed only for an app that had learned the port's own API instead of the desktop's -- so every test that used the desktop's path passed. A refused press now logs `e<n> i<n> off` and does not buzz, so the suppression is visible rather than inferred from the absence of a key."
+  sources:
+    - "tinydesk-twatch ports/twatchultra/main/touch.c: the gate in the press path, display_pixels_claimed() replacing td_wm_app_owns_screen()"
+    - "tinydesk-twatch ports/twatchultra/main/display.c: display_pixels_claim(), display_pixels_claimed() and the paint task's use of the same flag"
+    - "tinydesk-twatch ports/twatchultra/main/tama.c: display_pixels_claim(true) and the absence of any window manager involvement"
+    - "DSP-001 for the ownership contract itself, and DSP-005 for the one-writer rule this gate protects"
+  verification: "Verified on hardware 2026-11-12 by the operator, who asked for the margins to stop controlling the desktop and confirmed the result as perfect after a reboot from a fresh build; the guest ran and stopped cleanly across that cycle. The specific pre-fix fault -- Enter reaching the hidden shell -- was reasoned from the two predicates and their callers rather than caught in a log, and the fix is therefore verified by the requirement it was written for rather than by observing the bad state first."
 
 - record_id: LCD-008
   kind: DISPLAY
