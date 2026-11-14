@@ -1,3 +1,35 @@
+## 90 COMMIT Unreleased 2026-11-14T09:01:00-07:00
+
+#### Coming From:
+
+Unreleased f0ef879
+
+#### Purpose:
+
+Draw the Pokemon Mini's d-pad and two action buttons below the NES picture, and give the side columns the Pokemon Mini's three-slot arrangement, so the NES has the same furniture as the other emulator without a second rasteriser.
+
+#### Outcome:
+
+All three render correctly on the glass and the operator called it really good, with only positions left to tweak, and this image was taken as the new baseline. The shapes were lifted out of `pm.c` into a new `gamepad.c` and `gamepad.h` rather than copied, because a second copy is the fault this port has paid for twice already -- `scripts/tamacore-sync.sh` exists to police one vendored duplicate and the margin labels have a whole override mechanism because two apps must not edit one shared table. The module owns the cross with its rounded tips and sharp inner corners, the Chebyshev erosion that gives the outline the margin buttons' own 2 px weight, the four arrows sampled from the desktop's own glyphs at double size, the two circles and their letters, and the 16.16 fixed-point inverse rotation that lets the arms and arrows rotate together from one transform; each app supplies a `gamepad_t` describing where its controls sit and what colours they take. NES passes a 168 px d-pad at framebuffer x 32, centred in the 217-row band below the picture, and two 84 px circles at x 224 with the Pokemon Mini's 32 px gap, none of which needed shrinking: the rotated d-pad spans fb rows 267..429 and columns 35..197, and the circles span rows 248..447 and columns 224..308, so every pixel is inside the 320x416 framebuffer and no chamfer is involved. Colours are read from `display_margin_colours()` at draw time rather than written as constants, so the cluster cannot drift from the twelve margin buttons it sits beside. The paint is two bands at different origins for the reason entry 77 records: above the side columns' last button the only safe width is the framebuffer's, and below it the whole glass is free. The columns moved to three slots through `display_margin_column_slots()`, which the Pokemon Mini already used, and the seven legends that duplicated the drawn controls were blanked -- the bottom strip entirely, and the right column's direction words. Those were blanked with a single space and not NULL, because `display_margin_label()` reads NULL as clear-the-override-and-fall-back-to-the-shared-table, which is how entry 77's spare slots once kept the desktop's words and the operator read one as "Supe". Three limits are recorded rather than hidden. The drawn controls are INERT: nothing on the glass responds, because `touch_frame_t` carries only a region and an index and `edges_hit()` classifies the margins alone, so a framebuffer point returns `EDGE_NONE`; `gamepad_hit()` exists and is the same predicate the painter uses, but nothing calls it yet. `pad_from_frame()` was deliberately not rewired, so the right column's three slots now map index 1 to LEFT and index 2 to RIGHT, which means Select drives Left and the blank slot drives Right until the input cycle fixes it. And `pm.c` still holds its own copy of the same rasteriser: the module was written rather than a third copy, but porting the Pokemon Mini to it was not attempted in the same commit, so the duplication is real and named and deserves its own cycle with its own verification. Build PASS at 0x2bdba0 bytes with 9 percent of the app partition free and no warnings; deployment PASS by app-only flash to 0x10000 with `Hash of data verified` and the image read back off the chip and compared byte-identical (sha256 1acd9dee85b36f9f); the game ran at 61 fps with `dropped=0` and `skipped=0` throughout. The board was then rebooted to a clean desktop and a full 16 MiB backup taken with the board held in the bootloader across read and verify: `working-2026-11-14-0856.bin`, 16,777,216 bytes, sha256 `c1bbf49fd399ea2ed8240e1c3f3dbb6cb94e4f5ab27970ffff34785f26165d6a`, `verify OK (digest matched)`, and `ota_0` inside it compared byte-identical to the build.
+
+#### Next Steps:
+
+Positions are the only thing left on the visual side and the operator will specify them next; every one of them is a constant in the `s_gp` layout in `nes.c`, so a tweak is one number and no shape code. The next real cycle is the input path, and it is the first thing that makes these controls mean anything: `touch_frame_t` must carry the raw panel coordinate for each point, which `touch.c` already decodes and then discards, and `nes_app_touch()` must then call `gamepad_hit()` with the point converted to framebuffer coordinates by subtracting `DISPLAY_ORIGIN_X` and `DISPLAY_ORIGIN_Y`. `pad_from_frame()` should be rewritten in the same cycle so the right column's three slots stop driving the d-pad's directions, since Select currently drives Left and the blank slot drives Right. Two debts are recorded and neither is urgent: `pm.c` should be ported onto `gamepad.c` so one rasteriser serves both emulators, and the audio dropout remains parked with entry 88 as its state.
+
+#### Files Modified:
+
+- ports/twatchultra/main/gamepad.c
+- ports/twatchultra/main/gamepad.h
+- ports/twatchultra/main/nes.c
+- ports/twatchultra/main/CMakeLists.txt
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: PASS
+
+---
 ## 89 COMMIT Unreleased 2026-11-14T08:46:00-07:00
 
 #### Coming From:
