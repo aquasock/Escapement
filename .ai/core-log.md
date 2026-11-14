@@ -1,3 +1,32 @@
+## 96 COMMIT Unreleased 2026-11-14T13:35:00-07:00
+
+#### Coming From:
+
+Unreleased 7cb64a1
+
+#### Purpose:
+
+Archive the first image that renders AccuracyCoin, so the NES accuracy baseline from entry 95 has a verified restore point before the next stretch of work moves elsewhere.
+
+#### Outcome:
+
+The image carrying the `ppu.vaddr_inc` fix is now archived. The board was rebooted to a clean desktop and a full 16 MiB backup taken with it held in the bootloader across read and verify: `working-2026-11-14-1331.bin`, 16,777,216 bytes, sha256 `2645ce4a0aa0a34b9ec430e40490ec5af2fd7c354e1866be5e965ed5b32d7d31`, `verify OK (digest matched)`. `ota_0` inside the archive was then compared against `build/tinydesk.bin` and is byte-identical, so the image under test is the image in the archive and not merely one of the same vintage. This closes a gap that had been open for two cycles: the previous archive, `working-2026-11-14-1214.bin`, predated entry 94 entirely, which meant the only image on disk was one that could not render a nametable-filling cartridge. Nothing was built and nothing was deployed in this cycle; the source tree was already clean at `ae231d7`, so the archived firmware is exactly what entry 94 shipped and entry 95 measured. The NES work is being parked here at the operator's direction rather than at any natural stopping point, and the state it is parked in is worth stating plainly: the emulator renders correctly, plays Zelda and AccuracyCoin, takes input from both the glass and a BLE controller with diagonals, and fails 35 of the 103 accuracy tests that were reachable before the suite crashed on page 15. The five overlapping items that remain are all recorded and none is urgent -- the page 15 crash, the absent DMA model, the `$4016` strobe and clocking deviations, the APU groups that measure a deliberate design decision, and the parked audio dropout at entry 88 whose most plausible link is now the missing DMA model.
+
+#### Next Steps:
+
+Work moves off the NES, so the next cycle starts from the backlog rather than from this thread. The items carried forward, in the order this log has ranked them: Pause, Reset and Save send nothing while an app owns the screen, which is three inert buttons on the emulator's own left column and needs `nes_app_touch()` to handle them; the BLE controller needs reconnecting after every reboot because a saved bond does not come back at boot, which costs a manual step on every reset; the Pokemon Mini draws a d-pad and two circles but nothing hit-tests them, and `gamepad_hit()` is ready for it with the layout already expressed as a `gamepad_t`; and `pm.c` still duplicates the rasteriser that `gamepad.c` now owns, which is a consolidation owed rather than a fault. Nothing about this cycle constrains which of those is taken first.
+
+#### Files Modified:
+
+None.
+
+#### Status:
+
+- Build: N/A
+- Deployment: N/A
+- User Test: N/A
+
+---
 ## 95 COMMIT Unreleased 2026-11-14T13:25:00-07:00
 
 #### Coming From:
