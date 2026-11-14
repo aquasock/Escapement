@@ -1,3 +1,33 @@
+## 82 COMMIT Unreleased 2026-11-13T18:52:00-07:00
+
+#### Coming From:
+
+Unreleased 6e4ccce
+
+#### Purpose:
+
+Find the headroom the NES needs before audio can be added to it.
+
+#### Outcome:
+
+Both levers turned out to be configuration rather than code, and together they took the frame from about 16,000 us into 12,100. The finding that unlocked it was the size of the interpreter against the size of the cache: `nes6502_execute` is 21,175 bytes of code and lives at `0x42112754`, which is IROM, so it runs in place from flash. `CONFIG_ESP32S3_INSTRUCTION_CACHE_16KB` cannot hold it, so the hottest function in the emulator evicted itself on every pass and the whole inner loop ran at flash speed. Raising the instruction cache to 32 KB took the interpreter-only figure from 14,420 to 12,389 us per frame, a 14.1 percent gain, and it also made the blit cheaper at 9,774 to 8,069 us because the row callback's own code is in flash too. That second effect is worth naming: this cycle had spent its first half optimising that callback's memory traffic while the larger cost sat in the instruction path of the emulator itself. Switching the flash from DIO to QIO then took the interpreter to 12,122 us. The board's flash is a Winbond W25Q128JV, JEDEC `EF 40 18`, which is a quad part, so this was checked rather than hoped for, and the change itself cost no RAM. Its effect was larger in situ than in isolation: at DIO the blit cost the interpreter about 1.2 ms of contention, and at QIO the two barely interfere, so the frame with the blitter running came down to 12,100 us. SO WITH THE BLITTER RUNNING THE FRAME IS 12,100 US AND THE HEADROOM IS 4,567 US against a 16,667 us budget, up from roughly 700, and dropped frames fell from 21 in 12,152 frames (0.17 percent) to 2 in 8,765 (0.023 percent). WHAT AUDIO WILL ACTUALLY COST WAS MEASURED RATHER THAN ASSUMED. `nes abench` times `apu_process()`, which synthesises all five APU channels per sample and which nothing in this port calls, at 0.444 ms per frame for 734 stereo samples. That is the whole of what audio adds, because `nes_init` already passes 44100 and stereo so the APU's register side is inside the interpreter figure that has been measured all along. With an I2S write it is about 0.5 ms against 4,567 us, so audio fits with roughly nine times the margin it needs. THE DATA CACHE WAS THE OBVIOUS THIRD LEVER AND WAS REJECTED ON A NUMBER. 32 KB to 64 KB would have helped the cartridge streaming, but free internal RAM is now 90,503 bytes after the instruction cache took 16,384, and the data cache would take another 32,768, landing at about 58 KB against the 65,536 that tdsh's SSH server refuses to start below. That constraint is recorded in this log from earlier cycles and is why the change was not made. A CORRECTION IS OWED TO THE PREVIOUS ENTRY'S REASONING. Entry 81's next steps proposed moving the cartridge from PSRAM to flash on the grounds that flash was a separate path; that is wrong twice over. Flash and PSRAM share the same SPI peripherals and the same cache subsystem on this part, so moving data between them relocates contention rather than removing it. And the premise that flash is narrower does not hold at runtime: the flasher's DIO setting is not the mode the chip runs in, because the bootloader upgrades itself to quad, which is exactly what the QIO change above exercises. The honest statement is that the cartridge in flash would have been about the same speed on the same contended bus, not faster, and the idea was dropped before any code was written on it. TWO MEASUREMENT FAULTS, AGAIN THE SAME KIND. `nes status` wraps at forty columns and several readings in this cycle were taken from a partially repainted screen, producing a frame delta of 809 over seventy seconds on a machine running at 60 fps and a drop count that appeared to fall; the whole screen has to be read, not the first fragment that matches. And a first attempt to enable QIO appeared to have no effect because `CONFIG_ESPTOOLPY_FLASHMODE` still read "dio" -- which is expected, since ESP-IDF flashes in DIO and the bootloader upgrades at init -- so the check is whether `bootloader.bin` changes, not what the string says. Both settings are in `sdkconfig.defaults` rather than only `sdkconfig`, and were verified by deleting `sdkconfig`, rebuilding from defaults alone, and comparing: the bootloader came back byte-identical and the app identical but for 68 bytes in the app descriptor's own timestamp. Build PASS; deployment PASS with the bootloader, partition table and app all reflashed and the image hash verified. The core-syntax audit passed: 82 entries, `core.md` and `core-reference.md` unchanged.
+
+#### Next Steps:
+
+Audio is now the next piece of real work and it is unblocked: the APU is already running, `apu_process()` is measured at 0.444 ms, the headroom is 4,567 us, and the I2S sink with a non-blocking `sound_stream_*` already exists from entry 80, so what remains is the same shape as the Pokemon Mini work -- call the process function per frame, carry the fractional sample count, and write without blocking. The two things the NES still owes from before are unchanged and were not touched: battery SRAM persistence, so a Zelda save survives a reset, and the skip-path test, since `skipped=0` every run proves the buffer pool never ran dry and not that the skip works. Beyond that the largest remaining cost in the emulator is the PPU writing its 61,440-byte index buffer to PSRAM every frame, which the data cache cannot help with for the RAM reason above; anything that reduces that traffic is the next real lever, and it is a code change rather than a setting. Pokemon Mini is parked with its own 4.3 ms of headroom and audio, and will have gained from these settings too since they are build-wide, but it was not re-measured. `-O2` still has WiFi, SSH and SFTP untested under it, and touch is still unimplemented on both emulators. The radio is off and the twelve cartridges and BIOS dump remain on `/sd` and in neither repository.
+
+#### Files Modified:
+
+- ports/twatchultra/sdkconfig.defaults
+- ports/twatchultra/main/nes.c
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: N/A
+
+---
 ## 81 COMMIT Unreleased 2026-11-13T18:35:00-07:00
 
 #### Coming From:
