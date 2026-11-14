@@ -1,3 +1,34 @@
+## 81 COMMIT Unreleased 2026-11-13T18:35:00-07:00
+
+#### Coming From:
+
+Unreleased e3c8aca
+
+#### Purpose:
+
+Cut the NES blit cost so the interpreter stops being starved of memory bandwidth, which was the first of three levers identified for holding 60 fps.
+
+#### Outcome:
+
+The lever was investigated, measured, and found to be nearly exhausted, and the finding is worth more than the optimisation would have been. The blit is 9,774 us a frame and had been described as source of wasted time; its breakdown is conversion 5,621 us and push 3,930 us, and the push is 1.28x its 3,072 us arithmetic floor at 80 MHz QIO, so the transfer has almost nothing left in it. That left conversion, which is a 256-entry table lookup per pixel from a PSRAM source, and the question was whether it was doing too many instructions or waiting on memory. The answer came from running the same row callback twice: in situ it costs 21.7 cycles per pixel, and over a cache-resident copy of the same data it costs 5.7. A 3.81x penalty that is entirely memory, so the loop is already near-optimal and further micro-optimisation cannot help it. THE FIRST ATTEMPT WAS A PREFETCH AND IT MADE THINGS WORSE. A software-pipelined rewrite that loaded the next 32-byte line before converting the current one measured 6,897 us against the 5,826 it replaced, and was reverted rather than tuned. That result is the useful part: if issuing loads a line ahead buys nothing, the stalls are not serially waiting on one access, and the memory system is saturated rather than latent -- which is consistent with the other measurement, that running the interpreter with no blitter at all takes the frame from about 16,000 us to 14,420 us. So the blit costs the interpreter 1.3 to 2.4 ms of shared PSRAM bandwidth while never sharing a core with it, and the recoverable total is the difference between 9,774 and the 4,532 us the blit would cost if the source were cache-resident. That 5,118 us is unreachable with the current arrangement because the source is 61,440 bytes and there are three buffers, against about 115 KB of internal RAM free and a 65,536-byte floor the SSH server needs before it will start; the earlier internal-DRAM experiment recorded in the source cost 65,800 bytes for 3 fps and pushed SSH below that floor. THREE INSTRUMENTS WERE BUILT AND ARE KEPT, because the reasoning they replace had already been wrong once. `nes start <rom> noblit` runs the interpreter with no blitter and reported 14,420, 14,420, 14,420 and 14,415 us over four readings, which is a far tighter measurement than the with-blit case and is what makes the 1.3 to 2.4 ms contention figure trustworthy. `display_convert_us()` times the row callback in place, fifteen timer pairs a frame, and agreed with the subtraction it replaces (5,558 against 5,748 us), so an assumption that had been load-bearing turned out to be correct -- but it is now checked. `nes convbench` runs the identical conversion from PSRAM and from an internal-RAM copy; it sizes the internal buffer to whatever will actually allocate, because 106,895 bytes were reported free and a 65,280-byte request still failed, which is fragmentation rather than shortage and would have been misread as the latter. TWO FURTHER MEASUREMENT FAULTS WERE FOUND AND CORRECTED. `convbench` is noisy -- 0.676 and 0.439 ms for identical work in consecutive runs -- so it is used only for the ratio between its two arms and not for absolute times. And the `dropped=` counter in `nes status` wraps at forty columns, so a value of 19 arrives as `dropped=` and `19` on separate lines; reading only the first fragment produced a drop count that appeared to go down between samples. Read whole, the NES holds 60 fps with 21 drops in 12,152 frames, which is 0.17 per cent, about one single-frame hitch every ten seconds. Build PASS; deployment PASS by app-only flash with the image hash verified by esptool. The core-syntax audit passed: 81 entries, `core.md` and `core-reference.md` unchanged.
+
+#### Next Steps:
+
+Option one having been measured out, the two remaining levers stand unchanged and the choice between them is the operator's. Skipping identical frames removes work rather than making it cheaper, and the buffer pool already carries three buffers and a compare path that the Pokemon Mini side uses; the obstacle is that the comparison itself reads all 61,440 bytes from the same contended PSRAM, so it trades conversion for comparison and only wins on frames the game does not redraw. Reducing the interpreter's own PSRAM traffic is the other, and the largest single item there is the cartridge, which is read from PSRAM as the core executes; placing it in flash instead would take it off the shared bus entirely, and is a real change rather than a tuning one. Neither was begun. Separately, 0.17 per cent is worth putting to the operator as a question rather than an engineering problem: at one hitch every ten seconds it may already be what he would call full speed, in which case the honest move is to stop optimising and go back to the persistence and skip-path work the NES still owes. The rest of the backlog is unchanged: Pokemon Mini is parked at 60 with 4.3 ms of headroom and audio, `-O2` is pinned but WiFi, SSH and SFTP remain untested under it, touch is still unimplemented on both emulators, and the radio is off.
+
+#### Files Modified:
+
+- ports/twatchultra/main/nes.c
+- ports/twatchultra/main/display.c
+- ports/twatchultra/main/display.h
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: N/A
+
+---
 ## 80 COMMIT Unreleased 2026-11-13T17:52:00-07:00
 
 #### Coming From:
