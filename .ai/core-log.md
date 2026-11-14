@@ -1,3 +1,34 @@
+## 84 COMMIT Unreleased 2026-11-13T20:15:00-07:00
+
+#### Coming From:
+
+Unreleased f2d94f8
+
+#### Purpose:
+
+Recover the internal RAM the 32 KB instruction cache needs, by finding what actually holds it rather than by shaving at the margins.
+
+#### Outcome:
+
+Three changes, each measured, and together they took the NES frame from about 13,400 us into 11,691 and let the instruction cache come back. THE ACCOUNTING CAME FIRST AND CORRECTED TWO OF THE AGENT'S OWN ASSERTIONS. Internal DRAM is 341,760 bytes; static data and bss are 101,408, free at boot was 76,595, so runtime allocations account for 163,757 -- and of that, WiFi's buffers are about 64,000 bytes which cannot move because the ESP32-S3's WiFi driver takes DMA buffers from internal RAM at `esp_wifi_init()` and, per entry 57, never returns them on disconnect or stop. The agent initially reported that the big app statics were the problem and then reported that the big tdsh buffers were, both of which were wrong: `s_vt` at 36,316, `s_session` at 19,100, `s_pool` at 18,944 and `s_glyphs` at 3,438 are all already in flash-DROM, located by address rather than trusted from `nm`'s letter, which had mislabelled several. The apps' own statics in internal RAM are 12,288 bytes, 3.6 percent of DRAM. WHAT WAS ACTUALLY RECLAIMABLE WAS THE AGENT'S OWN DIAGNOSTICS, 14,336 bytes: `pm pattern`'s dot buffer at 6,144 and `nes convbench`'s band at 8,192, both function-local statics holding internal DRAM for the entire uptime on behalf of commands run a handful of times in a firmware's life. Measured 75,759 to 90,935 free, 15,176 recovered including alignment. The two were treated differently and the difference is the point: the dot buffer went to PSRAM because it is filled once, handed to the blit and never re-read, while the band stayed internal and became heap because it stands in for the real transmit band, which is internal since SPI DMA reads it every frame -- putting it in PSRAM would have made the benchmark measure different memory than the production path uses and its number would have stopped describing the thing it exists to describe. SECOND, PSRAM FROM 80 TO 120 MHZ, with flash raised to match. The board has QUAD PSRAM and ESP-IDF's own Kconfig says of that case that quad PSRAM at 120 MHz is stable, the temperature-drift warning applying to octal only. Flash could not be left behind: `esp32s3/mspi_timing_tuning_configs.h` asserts the two module clocks agree, so PSRAM at 120 with flash at 80 does not build at all, and the flash is a Winbond W25Q128JV, JEDEC EF 40 18, rated to 133 MHz. The interpreter-only figure went 13,374 to 12,138 us per frame, and the blit also improved from 7,816 to 6,814 as its source reads got faster. THIRD, THE 32 KB INSTRUCTION CACHE, WHICH HAD BEEN REVERTED IN ENTRY 83 AND IS NOW PAID FOR RATHER THAN CONCEDED. It took the interpreter to 11,311 us and the blit to 6,557. THE TWO OPTIMISATIONS OVERLAP AND THE SECOND MEASUREMENT IS THE HONEST ONE: the cache was worth 2,031 us against 80 MHz flash and is worth 827 against 120, because the cache exists to avoid fetching code from flash and a 50 percent faster flash makes every miss cheaper to avoid. Both numbers are true of their configurations; only the second applies to this one, and an earlier cycle that had stopped after the cache would have recorded 2,031 as the cache's value. THE RAM CONSTRAINT WAS NOT LOWERED, IT WAS SATISFIED. With the cache at 32 KB free internal is 69,611 against the 65,536 tdsh's SSH server requires, the server starts, and a full ECDSA key exchange completes against it -- which also closes the gap flagged in three earlier entries, that `-O2` had left wolfSSL's crypto paths untested. One caveat is recorded rather than buried: with the SSH server running free internal reads 49,487, below the floor, and entry 57 measured a further 29,060 bytes for an attached client, so the margin under load is thin rather than comfortable. THE PSRAM CLOCK CHANGE ALSO RETIRED A BAD MEASUREMENT FROM ENTRY 82. That entry reported the NES palette conversion as 21.7 cycles per pixel in situ against 5.7 cache-resident and called it a 3.81x memory penalty. Larry Bank's published ESP32-S3 figures put PSRAM between 7 and 25 percent behind internal RAM rather than multiples behind it, and this cycle's 11.2 percent gain from 50 percent more PSRAM bandwidth agrees with him and not with the 3.81x. The `convbench` tool's absolute numbers had already been caught being unstable -- 27,053 against 17,573 us for identical work, and later two arms converging to within 1.5 percent -- so its ratio is not evidence and should not be quoted again without repair. Build PASS; deployment PASS with the bootloader, partition table and app all reflashed and hashes verified, and the board verified to boot at the new clocks before anything else was trusted. Backup `working-2026-11-13-2009.bin`, 16,777,216 bytes, verify OK against the chip, sha256 `2dca5b2bb1552af961dd14c2a1f699ddee7c8374923dcfc44bbf30d2be0f7fc2`, taken after a reboot. WiFi still auto-connects and SSH is reachable from the development machine. The core-syntax audit passed: 84 entries, `core.md` and `core-reference.md` unchanged.
+
+#### Next Steps:
+
+The 49,487 free with SSH up is the next real constraint and it is smaller than it looks, because entry 57 measured an attached session at a further 29,060 bytes and the admission check only runs at start. The obvious candidates are the two 10,240-byte transmit bands in display.c, which are internal because SPI DMA reads them, and the task stacks, which are not touched by DMA at all and which `CONFIG_SPIRAM_ALLOW_STACK_EXTERNAL_MEMORY` is already enabled for. Neither has been tried. On the emulator side the NES now has 4,976 us of headroom against a 16,667 us budget, which is more than enough for the 0.444 ms of APU synthesis measured in entry 82, so audio is the natural next piece of work and the blocker is no longer performance. The backlog is otherwise unchanged: battery SRAM persistence and the skip-path test are still owed on the NES, Pokemon Mini is parked with its own audio, touch is unimplemented on both, and the headset question remains hardware-limited -- no Classic Bluetooth on this chip for A2DP, and no USB Audio Class host driver in ESP-IDF 5.3 -- with the USB host route now testable because SSH exists as a fallback console.
+
+#### Files Modified:
+
+- ports/twatchultra/main/pm.c
+- ports/twatchultra/main/nes.c
+- ports/twatchultra/sdkconfig.defaults
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: PASS
+
+---
 ## 83 COMMIT Unreleased 2026-11-13T19:24:00-07:00
 
 #### Coming From:
