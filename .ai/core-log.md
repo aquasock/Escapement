@@ -1,3 +1,35 @@
+## 2 COMMIT Unreleased 2026-11-14T16:19:00-07:00
+
+#### Coming From:
+
+Unreleased b33ea1f
+
+#### Purpose:
+
+Fix the leftover pixels the Tamagotchi V3 emulator left behind a moving pet, which the operator reported as thin horizontal trails across the glass.
+
+#### Outcome:
+
+The fix is eight rows of padding on each side of every dirty band, and it was found by measurement after five instruments, two of which were built wrong. THE FRAME BUFFER WAS NEVER THE PROBLEM, and establishing that took a tool that could see the difference: `draw_rows()` regenerates the whole band it is given, from the guest's DPRAM, immediately before each push, so what reaches the panel always agrees with a fresh render and the frame buffer can never be blamed from outside. The first marker drawn for this purpose proved the point by being invisible -- four 1 px red rules, which this project's own LCD-002 records as a degenerate window the CO5300 does not honour and reports success for anyway. At 3 px the boxes appeared, and the operator could then see that the leftovers sit just outside the pushed bands, at the pet's bottom and at the inner edges of both icon rows. A band log confirmed only rows 196 to 243 were ever pushed while a pet animated, and the dirty-row tables were checked against the real `segmap.c` data and found complete, with no byte collisions between the 960 matrix cells and the ten icon bits. A full repaint cleared everything and the trails reappeared as the pet moved, which isolated the fault to the incremental path rather than to the guest's state or the renderer. THE FIX WORKS BY REDUNDANCY, NOT BY CORRECTING AN ADDRESS. Band heights are 35, 41 and 47, and `flush_rect()` caps a transaction at 17 rows across this width, so a 47-row band is three separate transfers; a row lost at one of those boundaries is never rewritten by the band it belonged to. Widening the band means the next band that touches the area rewrites it. 8 is a dot row plus its gap, one full cell of slack each side, which is the smallest value with a physical meaning here rather than a number tuned until the symptom stopped. The operator confirmed 0 reproduces and 8 is clean, and 8 is now `TAMA_PAD_DEFAULT` rather than a runtime setting, because a fix that only applies when someone types `tama pad 8` is not shipped. The cost is transfer time only and it is small: a 47-row band becomes 63 of a 308-row frame, pushed at the guest's own 16 Hz rather than per frame. TWO INSTRUMENTS WERE BUILT THAT COULD NOT FAIL, AND BOTH ARE RECORDED BECAUSE THAT IS THE CYCLE'S REAL COST. The first drew its red boxes as 1 px rules, so every call returned success and nothing appeared -- LCD-002 already said so. The second, `tmc_stale()`, rendered the whole frame from DPRAM into a scratch buffer and compared it against `s_frame`, which sounds exactly like a stale-pixel detector and is not: because `draw_rows()` rewrites the entire pushed band from the same truth, `s_frame == truth` is an invariant, so it reported zero over 45 seconds of a visibly broken screen. It has been removed rather than left in the tree looking useful. The general lesson is the one this stretch keeps re-teaching: an instrument has to be able to disagree with you, and checking that it can is cheaper than the round trip that discovers it cannot. WHAT IS KEPT is what earned its place: `tama pad N` to A/B the fix on the glass without a flash, `tama redraw` to force a full regeneration and push, `tama mark on|off` for the 3 px band boxes, and `tama bands on|off` which logs every pushed band's row range to `/sd/tamaband.txt`. Build PASS at 0x2bea40 bytes with 9 percent of the app partition free; deployment PASS by app-only flash to 0x10000 with `Hash of data verified` and the image read back off the chip and compared byte-identical (sha256 9ecf6d80c0088876); the operator confirmed no leftover pixels behind a moving pet. The board was then rebooted to a clean desktop and a full 16 MiB backup taken with it held in the bootloader across read and verify: `working-2026-11-14-1614.bin`, 16,777,216 bytes, sha256 `b8eadc87813b9f50fc3800c28433682d778c624089d363cc9b0e33cc0eed87b0`, `verify OK (digest matched)`, `ota_0` inside it compared byte-identical to the build.
+
+#### Next Steps:
+
+The padding is a redundancy fix rather than a diagnosis and that distinction is worth carrying: nothing here establishes WHY a row is lost at a transfer boundary, only that repeating the rows recovers it. If the loss ever becomes visible elsewhere -- in a full-screen app blit, or in the NES path which pushes differently -- the boundary behaviour of `flush_rect()` and the 17-row transaction cap are what to examine, and `tama pad 0` is the reproduction. The Tamagotchi has no sample-based audio, using the older `sound_beep()` event path where the NES and Pokemon Mini use the shared `sound_stream_*` sink, so unifying it is available work. The emulator also has no drawn controls on the framebuffer, relying on the margin buttons and their hold-to-arm interlock, where the NES now draws its own d-pad and circles -- `gamepad.c` exists and could serve it. Three items carried from the rollover handoff remain unchanged: Pause, Reset and Save send nothing while an app owns the screen, the BLE controller needs reconnecting after every reboot, and `pm.c` still duplicates the rasteriser `gamepad.c` owns. The NES is parked with `docs/nes-accuracy.md` as its baseline, and its page 15 crash is the first thing to chase whenever that thread resumes.
+
+#### Files Modified:
+
+- ports/twatchultra/main/tama.c
+- ports/twatchultra/components/tamacore/tmc_core.c
+- ports/twatchultra/components/tamacore/include/tmc_core.h
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: PASS
+
+---
+
 ## 1 COMMIT Unreleased 2026-11-14T13:40:00-07:00
 
 #### Coming From:
