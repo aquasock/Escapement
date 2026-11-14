@@ -1,3 +1,40 @@
+## 92 COMMIT Unreleased 2026-11-14T11:45:00-07:00
+
+#### Coming From:
+
+Unreleased f792a51
+
+#### Purpose:
+
+Make the NES's drawn d-pad and A and B respond to touch, which entry 90 drew and entry 91 positioned but left inert.
+
+#### Outcome:
+
+All eight buttons work on the glass and the operator can now play Zelda far enough to reach the first cave. The work was done in six flashes as each measurement exposed the next, and the sequence matters because four of them were faults in the instrumentation or in assumptions rather than in the controls. THE FRAME HAD NO COORDINATES. `touch_frame_t` carried a region and an index, which describe the margins and nothing else -- `edges_hit()` returns `EDGE_NONE` with index -1 for anything inside the framebuffer -- so the driver was decoding the panel coordinates out of bytes 1..3 and 8..10 and discarding them. `touch_point_t` gained `x` and `y` in PANEL coordinates, the conversion to framebuffer being the consumer's job because only the consumer knows which space it drew in. THE FIRST PLAYABLE BUILD WAS TOO SLOW TO AIM and all three reported symptoms were one fault: `s_pad` is a HELD state, so a 120 ms tap stayed set for `RELEASE_MS`. At 250 ms every tap was silently a third of a second, which moved Zelda's name-entry cursor twice, merged two fast A presses into one continuous press so the second was never a press, and made the d-pad feel laggy. `RELEASE_MS` went to 100 and `IDLE_MS` from 250 to 50, the latter because the loop sleeps 50 ms after every release and a fast second tap could be read only after a quarter second. THIRTY FRAMES OF OVERSHOOT REMAINED AND THE CAUSE WAS A BLOCK TYPE, not a duration. The controller reports idle as fifteen 0xFF bytes -- a FACT that nothing is touching -- while a block whose byte 0 is 0xAB only means it had no new report; a held finger produces those. The driver treated both as "not a press" and waited the timeout, so lifting a thumb kept the direction held for up to 100 ms, which at 60 fps is six frames of travel and exactly the overshoot that made a cave door impossible to line up. `release_if_idle()` now takes a flag computed from the block: a confirmed-idle block releases on the next 20 ms poll, and only the ambiguous 0xAB block waits the bridge that exists for the controller's ~66 ms report interval. THE PHANTOM BUZZ WAS IN A BRANCH I HAD NOT READ. `display_margin_chrome(false)` removed the boxes and `display_margin_slot_live()` made the slots inert, which was correct but irrelevant: while an app owns the framebuffer the driver takes an earlier branch that fires `haptic_tap()` on EVERY press edge without asking what was pressed, and it `continue`s past `edge_press()` entirely. So blank glass, a hidden slot and the padding between two circles all felt identical, which made the pad impossible to test. Fixed by making the answer come from the app that drew the controls: `touch_app_touch_fn` now returns `bool`, `deliver_app_touch()` returns whether any consumer consumed the frame, and the buzz follows `edge && used`. THE PAD HAD FOUR DEAD WEDGES. The hit test used the drawn cross, and measuring the real rasteriser showed the arms paint about 72 percent of the disc that bounds them, so a thumb sliding between two arms fell into a gap and the direction dropped. `gamepad_hit()` is now a disc of radius `size / 2 + 4`, which covers the farthest painted pixel at 86.5 and adds four of tolerance, split into four quadrants with an 8 px dead centre on the pivot. The DRAWING is unchanged. WHICH AXIS WINS HAD A ROUNDING BUG AND A RARE-TIE BUG. The first version compared the shifted `u` and `v` the painter uses; arithmetic right shift floors toward minus infinity, so +50 and -50 gave 35 and 36, the tie broke asymmetrically, and a thumb due east of centre -- a plain right-press -- returned UP. The comparison is now on `|dx + dy|` against `|dy - dx|`, which is the same test with no division and no rounding. That also showed ties are not rare at all: they occur whenever `dx * dy == 0`, i.e. on every press sharing the centre's x or y, and the tie-break reads the geometry -- a tie on `dx == 0` wants a vertical direction and one on `dy == 0` a horizontal one -- which puts the seams where the arms are widest. Simulation over the full disc gives 5,485 points per direction, exactly balanced. THE CIRCLES' TARGETS ARE 1.5x THE DRAWN SIZE, at the operator's request, so 84 px becomes a 126 px touch diameter; `pad_hit_d` is separate from `pad_d` so drawing and response can differ. That created two overlaps. A's radius reaches fb 341, which is 22 px past the framebuffer wall and 13 px above the column's last slot, and the operator accepted that knowingly -- so `pad_from_frame()` asks the drawn controls FIRST and falls back to a margin only when no control was hit, per point rather than per frame. And the two circles' discs now intersect by 14.4 px, so nearest-centre decides: testing A first would have given that lens to A and made the top of B fire A. Build PASS at 0x2bded0 bytes with 9 percent of the app partition free, six app-only flashes each with `Hash of data verified` and the image read back off the chip and compared byte-identical, the game at 60 fps with `dropped=0` throughout. The board was then rebooted and a full 16 MiB backup taken with the board held in the bootloader across read and verify: `working-2026-11-14-1140.bin`, 16,777,216 bytes, sha256 `a99f005024483dc96320e9cbfd6052b7c3800f78b6c891a9eb95f97ce2d21af9`, `verify OK (digest matched)`, `ota_0` inside it compared byte-identical to the build. A mid-cycle USB disconnect blocked the backup for a few minutes and was the operator re-seating the cable, not a fault.
+
+#### Next Steps:
+
+Two gaps are known and neither was touched. The left column -- Pause, Reset, Save -- sends no keys at all while an app owns the screen, because that branch `continue`s past `edge_press()`; those are the app's own controls so they belong in `nes_app_touch()` rather than being sent to a hidden shell, and Pause and Reset are each a few lines while Save needs the SRAM persistence still owed. The Pokemon Mini draws a d-pad and circles of its own but nothing hit-tests them, so it plays only from its margins; `gamepad_hit()` is ready for it and the layout is a `gamepad_t`. Precision can go further if the operator wants it: the pad refreshes on press blocks, which the controller emits about every 66 ms, and one point yields one direction so there are no diagonals -- neither was needed for Zelda's doors. The audio dropout remains parked at entry 88, `pm.c` still holds a duplicate of the rasteriser `gamepad.c` owns, and the NES still owes battery-SRAM persistence and the skip-path test.
+
+#### Files Modified:
+
+- ports/twatchultra/main/touch.h
+- ports/twatchultra/main/touch.c
+- ports/twatchultra/main/gamepad.c
+- ports/twatchultra/main/gamepad.h
+- ports/twatchultra/main/display.c
+- ports/twatchultra/main/display.h
+- ports/twatchultra/main/nes.c
+- ports/twatchultra/main/pm.c
+- ports/twatchultra/main/tama.c
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: PASS
+
+---
 ## 91 COMMIT Unreleased 2026-11-14T09:36:00-07:00
 
 #### Coming From:
