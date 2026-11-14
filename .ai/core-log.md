@@ -1,3 +1,32 @@
+## 87 COMMIT Unreleased 2026-11-14T00:26:00-07:00
+
+#### Coming From:
+
+Unreleased 5c14e7c
+
+#### Purpose:
+
+Record the state of the project at the end of a session that closed the headphone question and gave the NES sound, so the next cycle starts from measurement rather than from rediscovery.
+
+#### Outcome:
+
+The watch was reset and a full 16 MiB image taken and verified: `working-2026-11-14-0018.bin`, 16,777,216 bytes, digest `cd4c2ef4dad8c83c9ffc2c6f8ee3e0ad481f621bd25a21c6f163de32e44ef80a`, read back from the chip with the board held in the bootloader until the verify passed. Both working trees are clean and pushed: the fork at `cb43805` on `t-watch-ultra`, this repository at `5c14e7c` on `main`. THE SHIPPED CONFIGURATION IS THE THING TO KNOW FIRST, because four of the five settings were found this session and none of them is obvious. `CONFIG_COMPILER_OPTIMIZATION_PERF` instead of the `-Og` default, which took the NES from 81.6 to 117.9 fps unpaced. `CONFIG_ESP32S3_INSTRUCTION_CACHE_32KB` because the 6502 interpreter is 21,175 bytes of IROM and could not fit a 16 KB cache. `CONFIG_SPIRAM_SPEED_120M` with the flash raised to match, because `mspi_timing_tuning_configs.h` asserts the two module clocks agree and the AXP2101 board's flash is a W25Q128JV rated to 133 MHz. And Wi-Fi buffers at 4 plus 4 with the cache pool at 16, which is the floor that lets the SSH server start: at 8 plus 8 free internal reads 63,299 and `ssh start` refuses. All of them live in `sdkconfig.defaults` rather than only `sdkconfig`, and each was verified by deleting `sdkconfig` and rebuilding from defaults alone. THE NES IS A COMPLETE HANDHELD except for input. 61 fps with 0 audio drops over 7,135 frames and 3 dropped video frames in the same span. Sound comes from `nes_getptr()->apu->buffer`, which `apu_emulate()` fills once per frame -- the port had been synthesising since its first boot and never collected it -- and the declared rate is 44,172 Hz because 735 samples times 60.0988 frames is that, not 44,100. A 100 ms settle after `sound_stream_open()` is what removed the startup underruns. POKEMON MINI IS PARKED AND WORKING: 60 fps, 4.3 ms of headroom, its own audio through the same `sound_stream_*` sink. It has not been re-measured since the cache and clock changes, which are build-wide, so its figures are probably better than recorded. HEADPHONES ARE CLOSED ON THIS HARDWARE and should not be reopened without a different board. Three independent grounds, all measured or read from primary sources in entry 85: the USB-C port cannot source power (480 samples over 120 seconds, one transition, never returning, matching LilyGo's own "no external power output"), the ESP32-S3 has no Classic Bluetooth and ESP-IDF 5.3 no LE Audio so no headphone protocol is reachable, and the official schematic contains no audio connector or footprint for one. The speaker is the only audio output. A CORRECTION IS OWED ON THE PORT'S OWN INSTRUMENTS: `vbus` and `ssh.autostart` are in the tree, working, and both currently unused -- the radio is off, no Wi-Fi networks are saved, autoconnect is off and `ssh.autostart` is 0. WiFi was turned off deliberately after it proved to starve the SSH server of internal RAM: the server starts, accepts a TCP connection, and then fails the handshake for want of about 20 KB. That is a config trade rather than a fault, and dropping the instruction cache back to 16 KB would buy back the 16,384 bytes it needs.
+
+#### Next Steps:
+
+TOUCH IS THE LARGEST REMAINING GAP AND THE ONE THAT MATTERS MOST. The d-pad and the A and B circles are drawn on the glass and respond to nothing; the app-mode sink has never fired on this port. Entry 81 records the two pieces of geometry that must be shared with a hit test rather than duplicated: the d-pad's inverse rotation, and the band split, since a point's allowable x depends on which band its row falls in. The clean shape is one function mapping a framebuffer point to the owning control, used by the painter and the hit test both. TWO SMALLER ITEMS ARE OWED AND UNCHANGED. Battery SRAM persistence, so a Zelda save survives a reset -- noFrendo keeps the cartridge's SRAM in RAM only. And the skip-path test, since `skipped=0` on every run proves the buffer pool never ran dry and does not prove the skip logic works. NEITHER HAS EVER BEEN TOUCHED. ONE THING TO LISTEN FOR NOW THAT AUDIO IS LIVE: a single synthesis call per frame means a register write late in a frame is heard a few milliseconds early relative to when it happened, which is the price of not patching the vendored core. If the music ever sounds smeared, slicing the frame is the fix and Pokemon Mini's sixteen slices are the model. THE HARDWARE THIS BOARD HAS AND THIS PORT HAS NEVER USED is worth recording because it is now documented in the schematic rather than guessed at: a T3902 PDM microphone with no driver and no plausible use on an emulator, a BHI260AP at I2C 0x28 answering and undriven, a LoRa radio needing ALDO3 and XL9555 P05, an ST25R3916 NFC reader that reads one tag as a printf, and a GNSS receiver that tracks satellites and has never had a fix for want of sky. The only external electrical access the sealed case offers is the TP1 to TP14 test points on the PCB and the USB-C port, which is sink-only. The radio is off, no networks are saved, and the twelve cartridges and the BIOS dump remain on `/sd` and in neither repository.
+
+#### Files Modified:
+
+None.
+
+#### Status:
+
+- Build: N/A
+- Deployment: N/A
+- User Test: PASS
+
+---
 ## 86 COMMIT Unreleased 2026-11-14T00:20:00-07:00
 
 #### Coming From:
