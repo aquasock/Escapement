@@ -1,3 +1,61 @@
+## 89 COMMIT Unreleased 2026-11-14T08:46:00-07:00
+
+#### Coming From:
+
+Unreleased f0ef879
+
+#### Purpose:
+
+Move the NES picture to the top of the framebuffer so its layout matches the Pokemon Mini's and the rows beneath it become one contiguous space for on-glass controls.
+
+#### Outcome:
+
+The picture now sits flush against row 0 and the operator passed it on the glass. The change is one constant, `NES_OY` in `nes.h` from `(416 - 240) / 2`, which is 88, to 0, and it had exactly one call site -- the `display_picture_rows()` blit in `nes.c` -- so nothing else needed to move with it. `NES_OX` is untouched at 32, so the picture stays centred horizontally with symmetric margins and a row copy stays aligned to the 4-byte SPI boundary. Three consequences were checked rather than assumed. The 176 rows that opened below the picture cannot hold stale console text, because `nes start` already calls `display_fill(0x0000)` before the first blit, which is the DSP-006 trap and does not bite here. The glass's 45-degree chamfers cannot clip the top edge, because framebuffer row 0 is panel row 45 (`DISPLAY_ORIGIN_Y`) and well inside the cut. And nothing about the vertical move disturbs the arithmetic that makes the placement cheap, since `(320 - 256) / 2` fixes the horizontal inset only. Build PASS at 0x2bd630 bytes with 9 percent of the app partition free; deployment PASS by app-only flash to 0x10000 with `Hash of data verified`, the image read back off the chip and compared byte-identical to the local build (sha256 3a16a1d4ec220409), the board reset, and the game restarted at 61 fps with `dropped=0` and `skipped=0`. The operator confirmed the placement on the glass. The point of the move is not cosmetic: the 176 rows below the picture are now one block rather than two 88-row bands, which is the space a d-pad and action buttons need before they can be drawn, and it is the same shape `pm.h` records for the Pokemon Mini's 224 rows. The uncommitted audio prefill described in entry 88 was reverted in this cycle so that no dead code remained in `sound.c`.
+
+#### Next Steps:
+
+Buttons are the next cycle and the space is ready for them: the framebuffer is 320x416 with the picture occupying rows 0 through 239 and rows 240 through 415 free, so a d-pad and a pair of circles fit below the picture as they do on the Pokemon Mini. The work is not the drawing but the input path, and the constraint is recorded here so it is not rediscovered: `touch_frame_t` carries only a region and an index, and `edges_hit()` classifies the margins alone, so a point inside the framebuffer returns `EDGE_NONE` with index -1 and never reaches an app. The drawn controls therefore have to be hit-tested from raw panel coordinates, and the geometry that must be shared with that test rather than duplicated is the d-pad's inverse rotation and the band split. The NES also has no drawn d-pad yet -- only the margins, which work -- so the next cycle adds the paint and the hit test together. Audio is parked rather than solved, and entry 88 records exactly where it stands.
+
+#### Files Modified:
+
+- ports/twatchultra/main/nes.h
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: PASS
+
+---
+## 88 COMMIT Unreleased 2026-11-14T08:44:00-07:00
+
+#### Coming From:
+
+Unreleased f0ef879
+
+#### Purpose:
+
+Diagnose the intermittent audio dropout the operator hears on the NES, which every existing counter reports as healthy.
+
+#### Outcome:
+
+The cause was not found and the operator parked the work, but the cycle established what the fault is not and why four earlier readings could not see it. Three instrument faults came first and all three were the agent's own. Console queries sent while the game ran cost a measured 183 ms stall, because the USB-Serial-JTAG console runs on core 0, which is the core `nes_task` is pinned to, so the first logged stall was the instrument's own interference. The log was then written from inside the frame loop, and an SD write on core 0 delays the next frame, which produces the next event, which writes again: 144 gap lines and 56 late lines came back as exactly the 200-line cap and the run returned to 60 fps the moment those writes stopped, so the sustained 45 ms iteration period was a positive feedback loop and not a board fault. And `dropped` increments only when an iteration overruns by more than a frame, about 33 ms, while the log fired at 50 ms, so the whole 33-to-50 ms band was counted and never recorded. The instrument was rebuilt to do no filesystem I/O in the loop, holding events in a 128-entry RAM ring answered by a new `nes stalls` command, logging every overrun with its duration and recording the emulator's own time beside each gap. The first clean run then gave a result: events arrive every 180 frames, which is 3.0 s, and emulation time goes from a normal 11,400 us to 21,400 and occasionally 34,700, near-exact multiples of one frame. The blitter was excluded by the control the port already had, since `nes start /sd/zelda.nes noblit` runs with no blit task at all, and with `blits=0` and `push=0` the stutter was unchanged and 43 stalls accrued over 7,803 frames -- so the display path, PSRAM contention and the core-1 overlap are all cleared, and the periodic cost is the game's own work. Two further facts bound the remaining space. The ring was never once full in 9,000 writes, `drops=0` and `aud0=0` throughout, which is not health but an empty ring, because a ring with any cushion occasionally refuses a write. And a 2,205-sample silence prefill, 50 ms against a measured worst gap of 34.7 ms, was built, reported itself as `cushion 2205/2205` and was heard as no change at all, because production is 44,172.6 Hz against a declared 44,172 and the surplus of 0.62 samples per second repays that cushion in about 59 minutes, which makes a one-time prefill structurally incapable of surviving the first slow frame; it was reverted rather than left in the tree looking like a fix. Build PASS and deployment PASS for every image in the cycle, each app-only to 0x10000 with the hash verified by esptool and the image read back off the chip and compared byte-identical; the retained instrumentation is in `ports/twatchultra/main/nes.c`. The operator confirmed by ear that the dropout persisted through all three builds, which is the test that mattered.
+
+#### Next Steps:
+
+Audio is parked by operator decision and should not be resumed by guessing at a fifth hypothesis; the four already tried -- PSRAM DMA contention, blitter contention, slow-frame starvation and a rate mismatch -- are each disproved by measurement, and the rate question is disproved twice. The measurement never taken is the ring's fill level, which IDF does not expose: `drops` reports only a full ring and nothing reports an empty one, which is why every counter read healthy through an audible fault. The cheap route is a software model in the frame loop, because the samples accepted and the elapsed microseconds are both already in hand -- draw down by the DMA rate, clamp at zero as an underrun, add what was accepted -- which yields underrun events, underrun sample counts and a fill trace without any I/O. That would separate a genuine starvation from a belief that the samples themselves are wrong, and the two want opposite work. The instrumentation that produced the clean result is retained and is the tool for it: the RAM ring, the per-event `emu_us` field, and `nes stalls`. Separately, the periodic two-to-three-times frame cost every 180 frames is real, unexplained and now hidden by nothing; it is worth naming whenever the interpreter is next examined.
+
+#### Files Modified:
+
+- ports/twatchultra/main/nes.c
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: FAIL
+
+---
 ## 87 COMMIT Unreleased 2026-11-14T00:26:00-07:00
 
 #### Coming From:
