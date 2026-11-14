@@ -1,3 +1,33 @@
+## 85 COMMIT Unreleased 2026-11-13T23:56:00-07:00
+
+#### Coming From:
+
+Unreleased 2a107c5
+
+#### Purpose:
+
+Establish whether the watch can drive headphones, by measurement rather than by reading specifications, before any work is spent on audio routing.
+
+#### Outcome:
+
+It cannot, on three independent grounds, and all three are hardware. THE USB PORT CANNOT SOURCE POWER, AND THAT WAS MEASURED RATHER THAN INFERRED. A `vbus` command was added that samples the AXP2101's status registers every 250 ms into `/sd/vbus.log` and prints as it goes; the file exists because the operator unplugs the watch from the PC partway through the test, so anything on the console is lost. The operator unplugged at 34.5 s and inserted a USB-C DAC at about 40 s. Over 480 samples in 120 seconds there was exactly one transition: `st0` went from `0x28` to `0x18` at t=34.5 s and never returned, so bit 3 (VBUS present) cleared on unplug and stayed clear with the DAC in place for the remaining 80 seconds. The battery fell 4179 to 4158 mV across the run, consistent with a device running on its own cell. LilyGo's own published specification says the same thing in words: "USB 1 x USB-C for charging and programming; no external power output." The AXP2101's datasheet has no boost converter at all -- every output is a buck at 0.5 to 1.54 V or an LDO at 0.5 to 3.5 V -- so there is no register that could enable a 5 V source, and the OTG experiment contemplated before this measurement was checked against the datasheet first and dropped as impossible rather than attempted. THE BLUETOOTH RADIO CANNOT SPEAK TO HEADPHONES. `soc_caps.h` for the ESP32-S3 defines `SOC_BT_CLASSIC_SUPPORTED` not at all, where the original ESP32 defines it as 1, and the datasheet describes the silicon as "a Bluetooth LE baseband" with a "Bluetooth LE Link Controller" -- A2DP needs a BR/EDR baseband that is not in the part. The modern replacement needs BLE 5.2 with isochronous channels and the S3 is BLE 5.0, with no ISO support anywhere in ESP-IDF 5.3 either. Across every ESP32 variant in IDF 5.3, exactly one has Classic Bluetooth and it is the original ESP32; every chip released since dropped it. So a custom BLE GATT audio stream is possible in principle, and was the one route considered seriously, but it needs a receiver the watch itself would have to be, since no headset speaks it. THERE IS NO AUDIO CONNECTOR AND NO UNPOPULATED FOOTPRINT FOR ONE. LilyGo's schematic, `T-Watch Ultra V1.0 SCH 25-07-24.pdf`, five pages from their own repository, contains no jack, no headphone amplifier and no spare audio output; the only audio path is MAX98357A to the speaker, and the shipped pin map confirms it with BCLK 9, WCLK 10 and DOUT 11 going nowhere else. A FAILING AGENT CLAIM IS RECORDED BECAUSE IT COST REAL TIME. The agent asserted that the AXP2101 has an OTG boost mode and offered to enable it, having read that absence from one library rather than the datasheet; the datasheet shows the idea was never possible. It also asserted that a quote about a "$10,000 serial port" came from an embedded engineer, which was invented and was retracted when challenged. Both are the same fault -- dressing an inference or a paraphrase as a sourced fact -- and both belong in this log because the project's standing rule is that the files are the fact and a claim is not. WHAT THE WATCH CAN POWER WAS ENUMERATED, because the question underneath the headphone work is broader than headphones. ALDO1 SD card, ALDO2 display, ALDO3 LoRa, ALDO4 sensor, BLDO1 GNSS, BLDO2 speaker, DLDO1 NFC -- all 3.3 V, all terminating on soldered loads inside a sealed case, with no connector and no pad brought out except the TP1 to TP14 test points on the PCB. Powering a second board from this watch is therefore a soldering job through the case, not a software feature. TWO INSTRUMENTS ARE KEPT. `vbus` is what proved the port is sink-only and is the tool for the same question on any future board. `ssh.autostart` starts the SSH server once the network is online, and could not be a startup script: `~/.tdshrc.tdsh` runs from `tdsh_espidf_init()` before the Wi-Fi driver exists, so `wificonnect` has no driver and `ssh start` has no interface, both measured. Neither is in use now -- the radio is off and autostart is 0. Build PASS; deployment PASS with app-only flashes and hash verification throughout. The core-syntax audit passed: 85 entries, `core.md` and `core-reference.md` unchanged.
+
+#### Next Steps:
+
+Headphones are closed on this hardware and should not be reopened without a different board. Speaker audio is the route, and the NES is the next thing to finish: `apu_process()` is measured at 0.444 ms per frame against 4,567 us of headroom, the non-blocking `sound_stream_*` sink was built and proven in entry 80, and entry 82's `nes abench` exists to have priced it before it was written -- so the remaining work is to call the process function per frame with a fractional sample carry and write without blocking, which is the same shape as the Pokemon Mini work. Two things the NES still owes are unchanged: battery SRAM persistence, since a Zelda save does not survive a reset, and the skip-path test, since `skipped=0` every run proves the pool never ran dry and not that the skip works. On the hardware side the schematic is now in hand and records several things this project has never used: a T3902 PDM microphone with no driver and no plausible use on an emulator, a BHI260AP at 0x28 answering and undriven, a LoRa radio needing ALDO3 and XL9555 P05, and TP1 to TP14 test points that are the only electrical access the sealed case offers. The radio is off, WiFi autoconnect is off, no networks are saved, and the twelve cartridges and BIOS dump remain on `/sd` and in neither repository.
+
+#### Files Modified:
+
+- ports/twatchultra/main/link_twatch.c
+- ports/esp_idf/app/main.c
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: N/A
+
+---
 ## 84 COMMIT Unreleased 2026-11-13T20:15:00-07:00
 
 #### Coming From:
