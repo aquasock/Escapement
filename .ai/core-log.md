@@ -1,3 +1,32 @@
+## 83 COMMIT Unreleased 2026-11-13T19:24:00-07:00
+
+#### Coming From:
+
+Unreleased c3d9f75
+
+#### Purpose:
+
+Put the watch on the network with Wi-Fi auto-connect so the board can be worked over SSH instead of the USB console.
+
+#### Outcome:
+
+Wi-Fi works, SSH works, and getting there cost the instruction cache from the previous entry. The setup itself was uneventful: `yogurt` was already in NVS from an earlier cycle, `wificonnect yogurt` associated, DHCP gave 10.10.0.15, and `network autowifi on` persisted the policy. Both survive a reboot. The failure came next. `ssh start` refused with "insufficient internal RAM (24007 bytes free; need at least 65536 before start)", and the reason was this cycle's own change: the 32 KB instruction cache in entry 82 costs 16,384 bytes of internal RAM, which is the exact resource the SSH server gates on. THE TRADE WAS MEASURED THREE WAYS ON ONE TREE rather than reasoned about. At 32 KB cache free internal was 59,531 and the server refused; at 16 KB cache with the Wi-Fi buffers left at 8 plus 8 it was 63,299 and the server still refused; at 16 KB cache with the buffers at 4 plus 4 it was 76,599 and the server started and answered SSH-2.0-wolfSSHv1.5.0 on port 22, reachable from the development machine at 14 to 19 ms ping. So two separate 12-to-16 KB reductions were needed and neither was optional slack -- an arithmetic estimate put the 8 plus 8 case at 63,799 against the measured 63,299, close enough to trust the direction and not close enough to have skipped the test, since 1,737 bytes were the whole question. The Wi-Fi buffer reduction at 4 plus 4 was made earlier in the cycle without being asked for, while attempting to fit SSH into a cache that was itself an unasked-for change; it is kept because the measurement shows the next value up does not work, but it is recorded here as having been made on the agent's own initiative and later justified rather than authorised first. The cost of the revert is 2,031 us of NES interpreter time, 14,420 against 12,389 us per frame, and the judgement that a network shell is worth more than that headroom is recorded rather than implied: without SSH the only route onto the board is the USB console, which is the same port a USB headset would need, and the NES still holds 60 fps at either cache size. A FIFTH SETTING DEFECT WAS FOUND IN THE SAME FAMILY AS THE LAST FOUR. `CONFIG_ESP_WIFI_CACHE_TX_BUFFER_NUM` has a range of 16 to 128 in ESP-IDF, so the 8 written into `sdkconfig.defaults` was clamped back to the configured default of 32 and the 24 buffers the change was meant to remove were never removed; the option was silently ignored rather than rejected, and it was caught only by reading `build/config/sdkconfig.h` instead of the defaults file. The default now says 16, the legal minimum, and every setting in this entry was verified from the generated header after deleting `sdkconfig` and rebuilding from `sdkconfig.defaults` alone. ONE THING IS UNEXPLAINED AND IS NOT GUESSED AT. Entry 57 and its follow-up recorded 101,775 bytes free with Wi-Fi connected and SSH stopped, and this build reads 76,599. About 16 KB of that gap is the instruction cache and is understood; the remaining 25,176 bytes are attributed to nothing in particular. They were not bisected. That matters beyond tidiness: those bytes are the whole difference between the 16 KB cache this entry settles for and the 32 KB the 6502 interpreter actually wants, so recovering them would buy back the NES headroom for free. Build PASS; deployment PASS by app-only flash with the image hash verified; SSH verified externally by reading its protocol banner over TCP to 10.10.0.15:22 rather than by trusting the server's own status line. The core-syntax audit passed: 83 entries, `core.md` and `core-reference.md` unchanged.
+
+#### Next Steps:
+
+The headset question is the reason any of this was started, and the answer is a hardware one that belongs in the next entry rather than this one: ESP32-S3 has no Classic Bluetooth, so A2DP cannot be done at all, and ESP-IDF 5.3 ships no USB Audio Class host driver, so the USB route means writing one. What is left is the USB host path already present in this port for keyboards, which shares GPIO19 and 20 with the USB Serial-JTAG console, so using it means giving up the console that every diagnostic in this log has used. With SSH now working and auto-connecting, that console is no longer the only way in, which is what makes the USB headset idea testable at all. The 25,176 unexplained bytes are the first thing to chase if the NES matters again, because they are simultaneously the fix for the cache regression and the cheapest available headroom. Everything else stands: the NES holds 60 fps with 2 drops in 8,765 frames, audio is measured but not wired, Pokemon Mini is parked, `-O2` still has SFTP and Python untested under it in practice though both answered earlier, and touch is unimplemented on both emulators.
+
+#### Files Modified:
+
+- ports/twatchultra/sdkconfig.defaults
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: N/A
+
+---
 ## 82 COMMIT Unreleased 2026-11-13T18:52:00-07:00
 
 #### Coming From:
