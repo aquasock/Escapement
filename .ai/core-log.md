@@ -1,3 +1,32 @@
+## 95 COMMIT Unreleased 2026-11-14T13:25:00-07:00
+
+#### Coming From:
+
+Unreleased 5ce47f5
+
+#### Purpose:
+
+Record what AccuracyCoin actually reports on this port, now that entry 94 made it render, so later work has a measured baseline of NES accuracy rather than an assumption.
+
+#### Outcome:
+
+The suite ran 14 of its 22 pages and then crashed on page 15. 68 tests pass and 35 fail, out of 103 executed, and the full per-test breakdown is recorded in `docs/nes-accuracy.md` because a list of 103 results is evidence to consult rather than a paragraph to read. The shape of the outcome is more useful than the count: EVERY PASSING GROUP IS AN OPCODE IMPLEMENTATION AND EVERY FAILING GROUP IS A TIMING OR BUS-ACCURACY BEHAVIOUR. The undocumented instruction set is implemented correctly and comprehensively -- 52 of 52 across pages 3 to 9, covering SLO, RLA, SRE, RRA, the SAX/LAX family, DCP and ISC in every addressing mode -- which is a stronger result than this port had any right to expect and should not be second-guessed later. Page 1's CPU Behavior also passes ROM-not-writable, RAM mirroring, PC wraparound, the decimal flag and the B flag. WHAT FAILS IS WHAT NOFRENDO DOES NOT MODEL. Page 1 fails dummy read cycles, dummy write cycles, open bus and all NOP instructions, which are the same missing capability wearing four names. Page 2 fails Indirect,X and Indirect,Y wraparound, the classic page-crossing behaviour of the 6502's indirect addressing. Page 12 fails all three interrupt tests: interrupt flag latency, NMI overlapping BRK, and NMI overlapping IRQ, all of which ask for sub-instruction interrupt precision that a scanline-stepped emulator cannot give. Page 10 fails five of six unstable stores -- SHA, SHS, SHY, SHX -- where the ROM itself reports `SHA BEHAVIOR 3` and `SHS BEHAVIOR 3`, meaning it detected the degenerate variant of an opcode family that ANDs the address high byte into the value and is genuinely undefined across cartridge revisions; LAE passes. Page 11 fails both ANC immediates and passes ASR, ARR, ANE, LXA, AXS and SBC, with the ROM flagging ANE and LXA as accepted on a magic constant. Pages 13 and 14 fail completely -- all ten APU registers and DMA tests, and all nine APU tests -- which is the port's own explicit decision showing up in a test, since it disables the APU frame IRQ outright with a source note saying nesdev calls for zero but it "seems to work better disabled". TWO FAILURES ARE WORTH MORE THAN THE OTHERS. Controller Strobing and Controller Clocking both fail on page 14: those test `$4016` strobe and shift-register behaviour, which is exactly the interface the on-glass controls and the BLE gamepad read through. Input works in Zelda, so the deviation is in exact timing rather than in the basic path, but it is the first measurement of that interface against a reference and it is not clean. And the DMA failures across pages 1 and 13 are the most plausible connection to the audio dropout parked at entry 88, because a sound path with no DMA model has no way to account for CPU-versus-DAC scheduling. THE PAGE 15 CRASH IS A SEPARATE FAULT AND WAS NOT INVESTIGATED. It is not an accuracy deviation but a failure to survive, it blocks the remaining 8 pages from being measured at all, and it wants its own cycle rather than being folded into an accuracy discussion. Reference behaviour was confirmed on `fceux 2.6.5` on the development machine before the watch was measured, which is the technique entry 69 established for the inverted-picture bug and it held here: the ROM boots on a desktop emulator and does not on this port, so the difference is ours. No build and no deployment in this cycle -- the image under test is the one entry 94 deployed -- and no backup was taken, by operator instruction, since the point was to read the results before freezing anything.
+
+#### Next Steps:
+
+The page 15 crash is the first thing to chase, because it costs 8 unmeasured pages and is a distinct fault from any accuracy result. It should be reproducible from `nes start /sd/AccuracyCoin.nes` and advanced through the suite with the d-pad, and the instrumentation entry 94 left behind -- `nes status` with the CPU registers, the jam flag and the vectors, and `nes ppudump` -- is what to reach for when it happens. After that the accuracy work splits cleanly into three groups that should not be attempted together. DMA and dummy-cycle modelling is the largest, and it is the one with a second reason to exist: the parked audio dropout. Indirect addressing wraparound on page 2 is small, self-contained and likely a few lines. Interrupt latency on page 12 is the hardest and the least valuable, since it needs the interpreter to stop stepping by scanline. The APU groups should not be attempted until the audio question at entry 88 is reopened, because the port currently disables the frame IRQ deliberately and page 14 is measuring that decision rather than a bug. A full 16 MiB backup is still owed and the last verified archive remains `working-2026-11-14-1214.bin`, which predates the entry 94 fix entirely.
+
+#### Files Modified:
+
+- docs/nes-accuracy.md
+
+#### Status:
+
+- Build: N/A
+- Deployment: N/A
+- User Test: FAIL
+
+---
 ## 94 COMMIT Unreleased 2026-11-14T13:10:00-07:00
 
 #### Coming From:
