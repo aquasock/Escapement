@@ -1,3 +1,32 @@
+## 86 COMMIT Unreleased 2026-11-14T00:20:00-07:00
+
+#### Coming From:
+
+Unreleased 3931255
+
+#### Purpose:
+
+Give the NES sound, which the hardware has supported all along and the port had never collected.
+
+#### Outcome:
+
+Zelda plays with audio and the operator passed it by ear, after two wrong diagnoses that the log settled and a third that the operator settled first. THE APU WAS ALWAYS SYNTHESISING. `nes_emulate()` ends with `apu_emulate()`, which calls `apu_process()` on the APU's own buffer once per frame, and that has been true since the port first booted; what was missing was only the step that hands those samples to a DAC. THE FIRST IMPLEMENTATION WAS WRONG AND THE OPERATOR HEARD IT BEFORE ANY COUNTER DID. It called `apu_process()` again per frame, on the theory that the function merely copies. It does not: it advances volume decay, length counters, envelope phase and sweep for all five channels, so calling it twice ran the entire sound engine at double rate against a buffer nobody read. The report was "pretty scratchy and tiny" against a status line that showed 60 fps, a clean blit and no dropped samples -- a fault with no counter behind it, found by ear. The fix is to take the samples from `nes_getptr()->apu->buffer`, one channel of it because `sound_stream_write()` duplicates mono into both slots. `apu_getcontext()` would have been the obvious accessor and is a stub that prints "Not implemented", so the machine struct is the route; neither needs an edit to the vendored core. TWO FURTHER EXPLANATIONS FOR THE REMAINING DROPS WERE OFFERED AND BOTH WERE DISPROVEN BY MEASUREMENT. The first blamed a rate mismatch: nofrendo produces `sample_rate / refresh_rate` with refresh_rate as the integer 60, giving 735 samples a frame, while the port paces frames at 60.0988 Hz, so the true rate is 44,172.6 Hz and declaring 44,100 over-produced by 0.165 percent. That was a real discrepancy and it was written up in the source as the cause -- and then the count read 1,341 drops at 44,100 and 1,341 again at 44,172, identical, which disproved it. The second explanation is the one that held: a log of every refused write with its frame number showed 735 samples dropped at frame 0 and 159 at frame 3 and nothing afterwards, so the DMA ring was simply not accepting at the instant the channel opened. A 100 ms delay after `sound_stream_open()` before the loop starts takes it to zero. That also explains the operator's own observation, made before any of this was measured -- "I hear the same underruns in the same place as before" -- because the same place was the beginning of every run. THE DECLARED RATE STAYS AT 44,172 EVEN THOUGH IT FIXED NOTHING AUDIBLE. It is the correct pitch: the NES really does run at 60.0988 Hz, so playing its 735 samples at 44.1 kHz put the music 2.8 cents sharp, and matching the declared rate to production means no drift accumulates over a long session. A SOURCE COMMENT WAS CORRECTED RATHER THAN LEFT. The block claiming the rate mismatch caused the drops was rewritten to record that the hypothesis was tested and failed, because a comment that states a disproven cause with confidence is worse than no comment: the next reader would have believed it and looked in the wrong place. MEASURED AFTER THE FIX: 0 audio drops over 7,135 frames, 61 fps, 3 dropped video frames in 7,135 (0.04 per cent, the pacing path and unrelated to audio). `/sd/nes_audio.log` records every refused write with its frame number and is truncated on each start, because a total in `nes status` cannot distinguish a startup transient from a recurring stall and the two want opposite fixes. Build PASS; deployment PASS with app-only flash and hash verification. The core-syntax audit passed: 86 entries, `core.md` and `core-reference.md` unchanged.
+
+#### Next Steps:
+
+The NES is now a complete handheld insofar as this port can make one: 60 fps, sound, and a controller on the glass that still does nothing. Touch is therefore the largest remaining gap and the one that stands between this and playable without a keyboard -- the app-mode sink has never fired on this port, and the geometry that must be shared rather than duplicated is the d-pad's inverse rotation and the band split, exactly as recorded in entry 81. Two smaller things are owed and unchanged: battery SRAM persistence, since a Zelda save still does not survive a reset, and the skip-path test, since `skipped=0` proves the pool never ran dry and not that the skip works. One thing to listen for now that audio is live: a single synthesis call per frame means a register write late in a frame is heard a few milliseconds early relative to when it happened, which is the cost of not patching the vendored core; if the music ever sounds smeared, slicing the frame is the fix and the Pokemon Mini's sixteen slices are the model. Speaker audio is the only output this hardware has -- headphones were closed in entry 85 on three independent hardware grounds -- so nothing further is planned there.
+
+#### Files Modified:
+
+- ports/twatchultra/main/nes.c
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: PASS
+
+---
 ## 85 COMMIT Unreleased 2026-11-13T23:56:00-07:00
 
 #### Coming From:
