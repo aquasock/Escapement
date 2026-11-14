@@ -1,3 +1,34 @@
+## 94 COMMIT Unreleased 2026-11-14T13:10:00-07:00
+
+#### Coming From:
+
+Unreleased 29c3ce7
+
+#### Purpose:
+
+Find out why AccuracyCoin rendered as a field of repeated tiles on the watch while it ran correctly on a desktop emulator, and fix it.
+
+#### Outcome:
+
+One line fixed it: `ppu.vaddr_inc` is now set to 1 in `ppu_reset()`. `ppu_init()` memsets the whole `ppu_t`, and the ONLY assignment to `vaddr_inc` in the entire PPU lives inside the `$2000` write handler, so the field began at zero and stayed there until a cartridge happened to write `$2000`. On real hardware `$2000` resets to 0 with bit 2 (ADDRINC) clear, which means the increment is ONE from power-on. With it at zero, `ppu.vaddr += ppu.vaddr_inc` never moved, and any cartridge that fills VRAM before touching `$2000` wrote every byte to one address. AccuracyCoin does exactly that: 4459 writes aimed at the nametable, 4096 of them landing on `$2000` itself, leaving the nametable all zeros except its first entry, so tile 0 -- a small ring glyph -- appeared in every one of the 960 cells on a `$A6` backdrop. That is the picture the operator photographed and reported as pink tiled squares. REACHING IT COST SIX INSTRUMENTS AND ONE WRONG THEORY, and the record of what was ruled out is worth more than the fix. The CPU was cleared first: `jam=0`, executing normally, parked at `JMP $80DD`, which is the file's only reference to that address and is an intentional wait loop at the end of a linear test list rather than a crash. Then the NMI: 179 to 189 delivered per run with its handler correctly installed at `$0700` pointing at `$F774`, so the ROM was alive and pumping. Then the write path: 4459 attempts and ZERO refused, which disproved the `vram_accessible` guard as the cause. Then the addresses themselves, which is what named the fault -- a log of the first and last writes showed `2000 2000 2000` where a nametable fill should have walked, with exactly 4096 of 4459 landing on one byte. A THEORY WAS BUILT AND DISCARDED ALONG THE WAY AND SHOULD NOT BE REVIVED: the NMI handler at `$F77A` tests `$19 & $20`, `$19` is produced at `$F9C8` from the controller shift register as newly-pressed bits, and bit 5 of that word is Down -- so it looked as though the ROM were waiting for a button press and declining to draw. It was wrong. The ROM was drawing continuously; the writes were simply going nowhere. The lesson is the same one entry 93 records in a different costume: an absence in one instrument is not evidence about the mechanism. THE SCOPE IS LARGER THAN THIS ROM. Zelda never tripped the bug because MMC1 writes `$2000` as part of its reset sequence, which sets the increment before any VRAM fill. Anything that fills the nametable before setting the PPU control register -- NROM titles, homebrew, a good deal of early software -- would have shown the same corruption, so this is a fix for a class of cartridges rather than for one test ROM. Two diagnostics were kept and the rest were stripped deliberately: a nametable write counter and an address log both ran on every `$2007` write, which is the PPU's hottest path, and that cost has no place in a shipped build, whereas `nes ppudump` writes the palette, all four nametables, the attribute table and the CHR pages on demand and `nes status` gained the CPU registers, the NMI and IRQ vectors and what sits at them. The core also gained a one-increment-per-frame NMI counter, because a program counter sitting in a wait loop looks identical whether interrupts are arriving or not. Build PASS at 0x2be510 bytes with 9 percent of the app partition free; deployment PASS by app-only flash to 0x10000 with `Hash of data verified` and the image read back off the chip and compared byte-identical (sha256 2e71a9fdd86878d3). After the fix the nametable dump shows both tables filled with `0x24`, the blank tile used to clear the screen, where before it held a single non-zero byte at index 0. The operator confirmed the ROM now boots and asked to run its tests before this image is archived, so NO BACKUP WAS TAKEN in this cycle by their instruction and the last verified archive remains `working-2026-11-14-1214.bin`.
+
+#### Next Steps:
+
+The operator is running AccuracyCoin's suite to see which tests this port passes, and that result decides what comes next rather than any plan made here. A cluster of failures is expected and is not evidence the fix is wrong: nofrendo disables the APU frame IRQ outright (`apu_write(APU_FRAME_IRQ, 0x80)` with a comment saying nesdev calls for 0 but it "seems to work better disabled"), and the odd-frame cycle skip is the other behaviour it conventionally omits, so APU timing and PPU timing groups are the likeliest casualties. Whatever the suite reports should be captured before the next change, because a baseline of what fails is worth more than a count of what passes. A full 16 MiB backup is owed as soon as the tests are read, since this image is the first that renders a nametable-filling cartridge correctly and is therefore a better baseline than the one archived before the fix. Everything else stands unchanged: Pause, Reset and Save still send nothing while an app owns the screen, the BLE controller still needs reconnecting after every reboot, the audio dropout is parked at entry 88, `pm.c` still duplicates the rasteriser `gamepad.c` owns, and the NES still owes battery-SRAM persistence and the skip-path test.
+
+#### Files Modified:
+
+- ports/twatchultra/components/nofrendo/nes/ppu.c
+- ports/twatchultra/components/nofrendo/nes/nes.c
+- ports/twatchultra/main/nes.c
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: PASS
+
+---
 ## 93 COMMIT Unreleased 2026-11-14T12:18:00-07:00
 
 #### Coming From:
