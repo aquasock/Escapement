@@ -1,3 +1,32 @@
+## 91 COMMIT Unreleased 2026-11-14T09:36:00-07:00
+
+#### Coming From:
+
+Unreleased 578ea08
+
+#### Purpose:
+
+Position the NES d-pad, A and B on the glass, which entry 90 drew but did not place.
+
+#### Outcome:
+
+All three were accepted on the operator's eyes and this image became the baseline. THE D-PAD TOOK THREE ATTEMPTS AND THE FIRST TWO WERE BOTH WRONG QUESTIONS. It was placed with `NES_OX`, the picture's 32 px inset, on the reasoning that it should line up with the left edge of the game above it. That rule is pm.h's and works there by coincidence, because the Pokemon Mini's picture is 288 wide in a 320 framebuffer so its inset is 16 and its control margin is 16 as well, and the two numbers were never distinguishable. The second attempt used the 16 px control margin, which is still an answer to the wrong question: a margin says where a shape starts and the operator asked where a specific edge lands. The third derives from the target itself -- the left column's own `LEFT_X1`, which is framebuffer -1 and is derived from edges.h rather than written down -- and it exposed the fault behind both misses: the rotated bounding half-extent is 81, but the arms are only a third of the frame wide so the box's corners are empty, and the rasterised shape's leftmost pixel is at fb 8 when its top-left is 0, not the -3 the box implies. So the position is `NES_COL_EDGE - NES_DPAD_TIP_INSET` = -9, and the painted tip lands exactly on the column's axis at fb -1. Rasterising the real shape in a script rather than reasoning from the bounding box is what produced the right number. THE CIRCLES THEN MOVED THREE TIMES. A went one cell right and B two cells left; then B one cell right and A half a cell down; then A four pixels left and B two cells left. The final positions are A at fb 236..319 by 256..339 and B at 208..291 by 364..447. Two mechanisms were added rather than fudged: per-circle cell offsets from a shared base column, so either can move without dragging the other, and a pixel and half-cell channel beside the cell count, because a cell count cannot express half a cell or a third of one and re-basing the grid on 4 or 8 px would have turned every number in these comments into a lie -- the same `dx` escape hatch pm.c already uses. A SIDE EFFECT RETIRED THE ONLY VISUAL COMPROMISE the cluster had: A's upper-band clip, which pm.c had measured at 4 px and accepted when the same circle took the same offset, is 0.2 px at fb 236, because the circle's widest row above the band split now reaches 319.2 against a wall at 319. That was a dividend of the placement and not its purpose, and it is recorded because the 4 px cut is otherwise the kind of thing a later reader tries to fix. B never had the problem: it starts at fb 364, below the band split, so it draws in the lower band where the full glass width is available. The d-pad is likewise entirely below the side columns' last slot at fb 248, so all of it lands in that band too and x = -1 clips nothing. Build PASS at 0x2bdba0 bytes with 9 percent of the app partition free, every iteration of the layout flashed app-only to 0x10000 with `Hash of data verified` and the image read back off the chip and compared byte-identical, the game running at 60 to 61 fps with `dropped=0` throughout. The board was then rebooted to a clean desktop and a full 16 MiB backup taken with the board held in the bootloader across read and verify: `working-2026-11-14-0932.bin`, 16,777,216 bytes, sha256 `dfe7b713375ad6c62e76936cb3978963fa9260d77fe578a3091a8efb4aa521c7`, `verify OK (digest matched)`, and `ota_0` inside it compared byte-identical to the build.
+
+#### Next Steps:
+
+The layout is settled and the controls are still inert, so the input path is the whole of the next cycle: `touch_frame_t` must carry the raw panel coordinate for each point, which `touch.c` already decodes and then discards, and `nes_app_touch()` must call `gamepad_hit()` on the point converted to framebuffer coordinates by subtracting `DISPLAY_ORIGIN_X` and `DISPLAY_ORIGIN_Y`. `pad_from_frame()` should be rewritten in the same cycle, because with three column slots it currently maps index 1 to LEFT and index 2 to RIGHT, so Select drives Left and the blank slot drives Right. Three debts remain recorded and none is urgent: `pm.c` still holds its own copy of the rasteriser that `gamepad.c` now owns, so one of the two should go; the audio dropout is parked at entry 88 with the ring-fill model named as the measurement never taken; and the NES still owes battery-SRAM persistence and the skip-path test, neither of which has ever been touched.
+
+#### Files Modified:
+
+- ports/twatchultra/main/nes.c
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: PASS
+
+---
 ## 90 COMMIT Unreleased 2026-11-14T09:01:00-07:00
 
 #### Coming From:
