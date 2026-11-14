@@ -1,3 +1,34 @@
+## 93 COMMIT Unreleased 2026-11-14T12:18:00-07:00
+
+#### Coming From:
+
+Unreleased 603520c
+
+#### Purpose:
+
+Make the BLE Xbox controller drive the NES, which had a decode path for it that had never been measured against the emulator.
+
+#### Outcome:
+
+The controller works and the operator passed it as perfect, and the cycle's real content is that the face buttons were never broken and the diagonals were. The input path already existed: `bt_hid.c` decodes reports through `hid_gamepad_report()`, `nes.c` maps the mask in `pad_from_gamepad()`, and `input_update()` prefers the gamepad over touch whenever any bit is set. The first capture showed the d-pad cycling correctly (`NES=0x10` up, `0x80` right, `0x20` down, `0x40` left against hat 0, 2, 4, 6) while `gamepad=0x0000` throughout, and this session drew the wrong conclusion from it and said so to the operator: that no face button decoded at all. That was an inference from absence and it was false, because the operator had mashed AFTER the thirty-second window closed and the file simply held no button events. The second capture, with the parsed layout written into the file first, showed `gamepad=0x001b` with `NES=0x03` -- bits 0, 1, 3 and 4 are A, B, X and Y, and they had been reaching the emulator correctly the whole time. THE ACTUAL FAULT WAS THE HAT. `pad_from_gamepad()` mapped only 0, 2, 4 and 6, justified in its own comment by "a 4-bit hat switch cannot report one, so every other value is either a cardinal direction or centred". The capture falsified that premise by recording `hat=1` mid-thumb-roll, and it produced `NES=0x00` -- a dropped direction. The controller reports 1..8 clockwise from up and `hid_gamepad_report()` converts that to 0..7, so the odd values are the four diagonals, and the NES pad expresses one as two bits exactly as the console's own cross-switch D-pad does when a corner is pressed: 1 is UP|RIGHT, 3 DOWN|RIGHT, 5 DOWN|LEFT, 7 UP|LEFT. Without them diagonal walking does not exist, which in Zelda is how a room is crossed without staircasing, and that is what the operator had been working around. X and Y remain deliberately unmapped rather than aliased onto A and B, because the NES has two face buttons and a reflex press of the wrong one should not fire. THE INSTRUMENT WAS REBUILT AROUND THE FAILURE, which is the durable part of this cycle: `nes pad` now writes the parsed layout and the raw report bytes into `/sd/nespad.txt` before sampling -- report ID, button count, both field bit offsets, the report length, and sixteen bytes verbatim -- and again at the end, so a press made late in the window still lands in the file. That header is what separated a short report from a descriptor that declared no buttons from a field-id mismatch, three faults with three different fixes that the previous file could not tell apart. It records a `hid_gamepad_last_t` snapshot taken inside `hid_gamepad_report()` before any early return, so a report rejected by the decoder also appears. The host suite was run rather than assumed: `tests/test_gamepad.c` reports 27 checks and 0 failures both before and after the diagnostic was added, which is what cleared the descriptor and the decode logic and pointed the cycle at the hat. Build PASS at 0x2be0d0 bytes with 9 percent of the app partition free, two app-only flashes each with `Hash of data verified` and the image read back off the chip and compared byte-identical. The board was rebooted and a full 16 MiB backup taken with the board held in the bootloader across read and verify: `working-2026-11-14-1214.bin`, 16,777,216 bytes, sha256 `021c5d60e3f707403d58dda1e1534ceb9f817011a19fc359e794bdfddc59314f`, `verify OK (digest matched)`, `ota_0` inside it compared byte-identical to the build.
+
+#### Next Steps:
+
+The controller needs reconnecting after every reboot, because a saved BLE bond does not come back at boot -- BLE-006 records the bond being saved and never returning, and this cycle hit it twice. That is the next thing worth fixing for this path, since it makes every reset a manual step. The on-glass controls and the controller now coexist: `input_update()` takes the gamepad whenever any of its bits is set and falls back to touch, so a controller left connected will shadow the glass, which is the right default but has never been tested by pressing both at once. The left column -- Pause, Reset and Save -- still sends nothing while an app owns the screen, the Pokemon Mini still has no hit test for its drawn controls, the audio dropout is parked at entry 88, `pm.c` still duplicates the rasteriser `gamepad.c` owns, and the NES still owes battery-SRAM persistence and the skip-path test.
+
+#### Files Modified:
+
+- ports/esp_idf/app/hid_gamepad.c
+- ports/esp_idf/app/hid_input.h
+- ports/twatchultra/main/nes.c
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: PASS
+
+---
 ## 92 COMMIT Unreleased 2026-11-14T11:45:00-07:00
 
 #### Coming From:
