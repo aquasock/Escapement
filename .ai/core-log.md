@@ -1,3 +1,33 @@
+## 16 COMMIT Unreleased 2026-11-15T16:05:00-07:00
+
+#### Coming From:
+
+Unreleased 9c2093a
+
+#### Purpose:
+
+Complete the half of BLE file transfer that entry 15 left lossy by reading a 4 KB file back off the watch, and find out why the read kept failing.
+
+#### Outcome:
+
+THE READ FAILED, AND THE FAILURE WAS NOT IN THE READ PATH: `bleuart fetch` WEDGED THE SHELL TASK, so every command typed after it was swallowed by a shell that never returned to a prompt. The operator reported "cannot open file" and then a console that answered nothing, which reads as a dead link; it was a live link in front of a stopped shell. The evidence is a replay of the complete notify stream -- 2.7 MB captured without gap -- which reconstructs the terminal as frozen at `root@twatch:~# bleua...fetch /r` with no prompt ever following, while four later commands (`echo ZZZTEST`, `head -c 200 /root/x.txt`, `sha256sum`, `ck` via `cksum`) produced not one byte of output. THE CAUSE IS CONTENTION FOR ONE 4 KB RING. `bleuart fetch` looped calling the non-blocking `bleuart_write()` and retried every 5 ms with no bound, while the display mirror writes through `board_serial2_alt_write()` into that same ring and the desktop repaints far faster than a connection interval drains it. The ring therefore never emptied, the loop never exited, and the shell task -- which is where `fetch` runs -- spun forever. THE FIX GIVES EACH WRITER THE BEHAVIOUR IT NEEDS. A `s_fetching` flag makes `board_serial2_alt_write()` return early during a transfer, so the mirror yields the ring instead of fighting for it; the call site was confirmed rather than assumed, with `hal_mux.c:274` reading `return s_s2_open ? board_serial2_alt_write(buf, len) : 0` inside `serial2_write()`, which is display 2's mirror path. A new `bleuart_write_wait()` blocks for ring space with a 500 ms ceiling, and a transfer that stalls five times in a row now ENDS with `(client stopped reading)` rather than hanging the only channel that could report it -- the previous loop's shape, "retry forever", is precisely what made a partial failure indistinguishable from a dead watch. The chunk was also halved to 256 bytes and the pre-report drain made bounded. TWO THINGS ABOUT THE INSTRUMENTS ARE WORTH CARRYING. First, MY OWN RENDERER WAS THE BUG: it rebuilt the screen from only the most recent capture buffer, so it displayed stale text and reported four consecutive successful commands as failures, which is where the wasted round trips came from; replaying the full stream offline fixed the reading and immediately named the wedge. Second, THE MIRROR SENDS ONLY CHANGED CELLS, so transient output is never in the capture while persistent output always is -- `ls -l`'s `4000  x.txt` survived and `echo ZZZTEST` left no trace at all -- which is exactly the flicker the operator described and the reason a capture-based reading cannot be trusted as a test of whether a command ran. The operator's "you are not reading the screen properly, its all flickery" was correct and was the turning point. The absence of the `cannot open` text in my capture is explained by the same mechanism and is not a contradiction: output is non-blocking and lossy under burst per entry 15, so an error printed into a mirror-filled ring never reaches the client. BusyBox `tdsh` also has no `md5sum`, no `sha256sum` and no `cksum`, so on-device checksum verification needs a different tool. Build PASS at 0x2dde80 bytes with 2 percent of the app partition free, sha256 9c7678de767ab384, and the new strings were confirmed present in the image; DEPLOYMENT DID NOT RUN because the watch was not enumerated on USB at the end of the cycle, so the fix is built and unflashed, and the reverse transfer is therefore still unproven -- no byte has yet come back off the watch. The fork also carries UAC2 driver work that predates this cycle and was committed separately at handoff (`7ee5dfe`) so it could not be lost, not because it was exercised -- it remains flashed once and never tested against the DAC. The required core-syntax audit was run against this entry before commit and PASSED, with `.ai/core.md` confirmed unchanged and `.ai/core-log.md` the only `.ai/` file touched: the entry carries all six sections in template order, its Status values are drawn from the permitted set, it ends with a rule, and the log now holds 16 of its 100 permitted entries.
+
+#### Next Steps:
+
+THE IMMEDIATE ACTION IS ONE FLASH AND ONE COMMAND. The watch must be on USB (`/dev/serial/by-id/usb-Espressif_USB_JTAG_serial_debug_unit_80:45:6B:46:DF:54-if00`; only the TinyTang board was present at handoff), then flash the build at sha256 9c7678de767ab384, and only then run `bleuart fetch /root/x.txt` with a client that keeps its capture. Acceptance is 100 intact `Lnn`+36x lines, which is 4000 bytes; anything short leaves `(client stopped reading)` or a byte count to diagnose from. A SECOND ISSUE IS UNRESOLVED AND SHOULD NOT BE CONFUSED WITH THE FIRST: the argument echo arrived truncated in the capture (`fetch /r` for `fetch /root/x.txt`), and if that truncation is real rather than a rendering artefact then `fopen` is being handed a mutilated path -- the operator's "cannot open file" points the same way. Test with a file in the current directory (`bleuart fetch x.txt`) so a long absolute path cannot be the variable. THE CLIENT SHOULD ALSO STOP GUESSING AT THE SCREEN: it must keep the whole notify stream and replay it offline, never rebuild from a single buffer, and it must not press Enter on a menu row whose highlight has not been read -- the highlight is `48;5;25` on the selected row and `48;5;238` on its neighbours, which was confirmed from the raw bytes after Task Manager had already been opened twice by a blind Enter. A structured read path is the real answer to the reverse direction: a length-prefixed or CRC-terminated frame would let the client verify a transfer without the file ever being rendered, which is the cheap version of what entry 15 proposed. The larger objective is unchanged and untouched: the UAC2 driver is written, flashed once and never exercised, so `uac2 tone` against the TTGK KM-HIFI-384KHZ is still the thing that decides whether headphones work on this board, and `usb_hid.c` still carries `ESP_INTR_FLAG_LEVEL1` so the USB keyboard path cannot start. The `coredump` partition still holds and should be revisited deliberately. The wider backlog is as entry 15 left it.
+
+#### Files Modified:
+
+- ports/twatchultra/main/bleuart.c
+
+#### Status:
+
+- Build: PASS
+- Deployment: NOT RUN
+- User Test: NOT RUN
+
+---
+
 ## 15 COMMIT Unreleased 2026-11-15T12:42:41-07:00
 
 #### Coming From:
