@@ -1,9 +1,10 @@
-# Handoff — Escapement / TinyDesk on T-Watch Ultra, 2026-11-15T09:20
+# Handoff — Escapement / TinyDesk on T-Watch Ultra, 2026-11-15T09:35
 
 Orientation, not authority. **Verify before acting on it.**
 
-Session ended here: operator's verdict on the GPS app was "works great! ui looks good. pass.",
-watch still connected with the app open. Log entry 12 is committed and pushed.
+Session ended here: the GPS app gained a `Set clock` button, the operator pressed it and it
+reported success, and the strip read 9:27 against the receiver's 16:27 — seven hours apart at
+MST7. Log entry 13 is committed and pushed. The watch is connected.
 
 ## One line
 
@@ -14,11 +15,11 @@ satellites USED is zero both without a fix and without an antenna.**
 
 ## Repositories
 
-- **Fork** `/run/media/vash/GIT/tinydesk-twatch`, branch `t-watch-ultra`, HEAD **`7dce0b6`**
+- **Fork** `/run/media/vash/GIT/tinydesk-twatch`, branch `t-watch-ultra`, HEAD **`203f687`**
   — clean, pushed. `fork` = `aquasock/tinydesk` (push here). `origin` = upstream
   `tinydesk-project/tinydesk` — **never push**.
-- **Escapement** `/run/media/vash/GIT/Escapement`, branch `main`, HEAD **`055a1c8`** — clean,
-  pushed. Log entry 12 is current; 12 of 100 entries used.
+- **Escapement** `/run/media/vash/GIT/Escapement`, branch `main`, HEAD **`4452e61`** — clean,
+  pushed. Log entry 13 is current; 13 of 100 entries used.
 
 **The handoff's old `~/GIT/...` paths are wrong** — `HOME=/home/vash` has no `GIT`
 directory; both checkouts live under `/run/media/vash/GIT/`.
@@ -37,16 +38,16 @@ directory; both checkouts live under `/run/media/vash/GIT/`.
 
 ## Current firmware
 
-`sha256 1a1ade9b2fd84f63`, `0x2cc090` bytes, 7% partition free, **console OFF**
+`sha256 e7b5b43983ebc6d8`, `0x2cc240` bytes, 7% partition free, **console OFF**
 (`CONFIG_ESP_CONSOLE_NONE=y`).
 
-Archived as `~/twatch-backup/working-2026-11-15-0912.bin`, 16,777,216 bytes,
-sha256 `910ccd311147b7f37750e5fce3350e60a266de4481aaf2ce179234786dd2b534`,
+Archived as `~/twatch-backup/working-2026-11-15-0927.bin`, 16,777,216 bytes,
+sha256 `df41e30db7a68d52c0030e31da266c9c1743c3cae1ec0006a78ec122e443df6d`,
 `verify OK (digest matched)`, `ota_0` byte-identical to the build.
 
-Older images are retained and are safe rollback targets: `working-2026-11-15-0808.bin`
-(the status strip with the date) and `working-2026-11-15-0759.bin` (the strip as tested
-before a comment fix; differs in 70 bytes, none of them code).
+Older images are retained and are safe rollback targets: `working-2026-11-15-0912.bin` (the
+GPS app without the clock button), `working-2026-11-15-0808.bin` (the strip with the date)
+and `working-2026-11-15-0759.bin`.
 
 ## TWO THINGS TO KNOW BEFORE CHASING A VISUAL BUG
 
@@ -111,8 +112,11 @@ every layout question this session in one run and cost no flashes.
   each refuses while the other holds it.
 - **Position crosses the seam as `int32` in 1e-7 degrees**, not a double. `td_sysinfo.h` has
   no floating point anywhere and this keeps it that way.
-- **Offered next:** a `gps time` button. The path exists and is proven to survive a hard
-  reset through the RTC (GPS-005); it is only unwired to the UI.
+- **`Set clock` button, bottom row.** Sets the watch's clock from the receiver through
+  `board_time_apply()` — settimeofday **plus** the PCF85063A write, which is the step that
+  makes it survive a reboot (GPS-005). Reports as a word; the common early failure is
+  `No time from the receiver yet.` Optional on the ops type, so a board without a clock
+  shows no button.
 
 ## The status strip (`ports/twatchultra/main/statusbar.c`)
 
@@ -157,9 +161,11 @@ that does not depend on `td_session_home()` being populated — not a retry.
 
 ## Owed / next
 
-- **A `gps time` button on the GPS app.** The path exists, is proven, and survives a hard
-  reset through the RTC (GPS-005); it is only unwired to the UI. Small, and it would give the
-  watch a clock source that needs no network.
+- **A reboot is the measurement the clock button owes and did not take.** The watch's clock
+  was already correct before the press, so there was no before-and-after delta. `hctosys`
+  seeds the system clock FROM the PCF85063A before init, so a reboot with no network and no
+  receiver shows whether `board_time_set_post()` actually landed. Cheap; take it before
+  trusting the button further.
 - **The receiver's own configuration is untouched.** GPS-003: this unit answers NMEA but not
   the UBX poll, so constellation set, sentence rates and power modes are factory default and
   cannot be changed from the watch. Anything wanting those has to establish the UBX side
