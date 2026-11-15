@@ -1,3 +1,42 @@
+## 4 COMMIT Unreleased 2026-11-14T20:31:00-07:00
+
+#### Coming From:
+
+Unreleased de50078
+
+#### Purpose:
+
+Make the Pokemon Mini's drawn controls respond to touch, and reorganise the watch's SD card into the layout the TinyTang release cards use.
+
+#### Outcome:
+
+Both landed and the operator accepted them, and the control work cost three rounds because two of the faults were in mapping written from memory rather than read from the table beside it. THE CONTROL WORK USED THE NES METHOD: PM's existing drawn geometry is expressed as a `gamepad_t` -- its nudge-left d-pad position, its `PM_ROT_K` rotation, its own `pad_cx()` and `pad_cy()` rather than re-derived literals -- and `gamepad_hit()` answers from it, so the painter and the hit test read one set of numbers. The touchable area is a DISC OF FOUR QUADRANTS and not the drawn cross, for the reason measured on the NES: the arms paint about 72 percent of the disc that bounds them, so a thumb sliding between two arms falls into a dead wedge. It matters more here, because this d-pad is nudged 20 px left and its disc reaches framebuffer -8, overlapping the left column -- which is why the precedence rule is per point and drawn controls win. THREE BUGS, ALL FOUND ON A TEST CARTRIDGE THAT COUNTS PRESSES, which is what `refurb.min` exists for. FIRST, C WAS MAPPED TO THE WRONG PLACE: it went to the bottom strip's third bar, which is bare glass with no box and no label, while the drawn C in the right column's third slot buzzed and did nothing. The labels in `pm.c` say `PM_RIGHT = { "Hold", "Sound", "C", ... }` and `PM_BOTTOM` is blank in all three; the mapping was written from a recollection of the old layout instead of read from the table beside it. SECOND, AND WORSE, THE MAPPING NEVER CHECKED LIVENESS: `pad_from_frame()` read margin slots without asking `display_margin_slot_live()`, so a slot that is not drawn could still fire. That predicate exists precisely to stop this and the NES path uses it, so the omission was a missing line rather than a missing idea. THIRD, THE DRAWN CONTROLS WERE MISSING FROM THE HAPTIC REPORT: `pm_app_touch()` reported consumption only for margin slots, so a press on the d-pad or a circle moved the pet in silence while C buzzed. The stale comment above that loop made the fault look intentional -- it said nothing hit-tested the framebuffer yet, which was true when written and stopped being true one cycle later. One predicate now answers for both the pad state and the feedback, so a control cannot respond without also being felt. THE CARD WAS REORGANISED INTO THE TINYTANG LAYOUT: media by console with homebrew and diagnostics separated, bios, saves by console, states, shots and diag in their own directories, and the 159 diagnostic text files and 12 synthetic benchmark carts deleted. 205 entries became 31. The Pokemon Mini set was replaced with the named cartridges extracted from the MiSTer card, after verifying that `c01` to `c12` and `pinball.min` were byte-identical duplicates of them, so nothing was lost in the swap; `boot.rom` there was byte-identical to `bios.rom` so no second BIOS was taken. Three zero-byte `smbpart` files from a failed split test and an empty `TinyDesk` directory were found and removed. THE FIRMWARE HALF WAS NOT OPTIONAL, because every ROM path was a compile-time constant. `sdpaths.c` adds `sd_media()`, which tries the organised path and falls back to the flat one so an older card still boots, and `sd_out()`, which routes diagnostics to `/sd/diag` and screenshots to `/sd/shots` and creates the directory on demand -- the absence of which is how the card's root became 205 entries. While wiring it, `snprintf(path, 32, sd_out(...), n)` was found to be using a PATH as a printf FORMAT, working only because the `%lu` happened to ride along inside the filename; any card path containing a percent would have broken it, and it is now two explicit calls. ONE THING IS LEFT OWED AND VISIBLE: PM's left column reads Exit, Save and Load, and nothing handles them -- `pm_app_touch()` only reports haptics there. Those labels describe duties the buttons do not perform, which is the exact disagreement `edges.h` was built to prevent, and it is the same shape as the Tamagotchi's Exit. Build PASS at 0x2bf370 bytes with 8 percent of the app partition free; deployment PASS by app-only flash to 0x10000 with `Hash of data verified` and the image read back off the chip and compared byte-identical (sha256 cfd1bdaa10c9395d); the card was restructured on the development machine and mounted by the watch at `/sd` with the new tree listing correctly, and `/root/Apps/pm.py` in flash was rewritten because it still named `/sd/pinball.min`. The board was rebooted and a full 16 MiB backup taken with it held in the bootloader across read and verify: `working-2026-11-14-2027.bin`, 16,777,216 bytes, sha256 `99328d8ea91d6c733d29daa4966d870fc784249d202f45d76ab3ee44175a328e`, `verify OK (digest matched)`, `ota_0` inside it compared byte-identical to the build. The image archive holds the firmware but NOT the card: the card is device state and its layout is described in the README written at its root.
+
+#### Next Steps:
+
+PM's left column needs its three duties implemented, and Exit is the one that matters: Save and Load need a state format the core does not have, where Exit is a few lines and matches what the Tamagotchi already does. That should be its own cycle rather than folded into control work. The card layout should be captured by a script under `scripts/` that rebuilds it, since it is currently described only by a README on the card and by this entry -- and the same script should write the `/root/Apps` launchers for the Pokemon Mini and the Tamagotchi, which live in flash and survive an app flash but not a full erase. The d-pad's C is at its drawn size; nothing has been tuned by thumb, and `pad_hit_d` is one field if the circles want the NES's 1.5x. The wider backlog is unchanged: Pause, Reset and Save send nothing while an app owns the screen on the NES, the BLE controller needs reconnecting after every reboot, `pm.c` still duplicates the rasteriser `gamepad.c` owns, and the NES owes battery-SRAM persistence, the skip-path test and its page 15 crash.
+
+#### Files Modified:
+
+- ports/twatchultra/main/CMakeLists.txt
+- ports/twatchultra/main/link_twatch.c
+- ports/twatchultra/main/nes.c
+- ports/twatchultra/main/nes.h
+- ports/twatchultra/main/pm.c
+- ports/twatchultra/main/pm.h
+- ports/twatchultra/main/sdpaths.c
+- ports/twatchultra/main/sdpaths.h
+- ports/twatchultra/main/tama.c
+- ports/twatchultra/main/tama.h
+- ports/twatchultra/main/touch.c
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: PASS
+
+---
 ## 3 COMMIT Unreleased 2026-11-14T18:49:00-07:00
 
 #### Coming From:
