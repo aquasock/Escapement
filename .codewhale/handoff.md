@@ -1,9 +1,9 @@
-# Handoff — Escapement / TinyDesk on T-Watch Ultra, 2026-11-15T11:55
+# Handoff — Escapement / TinyDesk on T-Watch Ultra, 2026-11-15T12:45
 
 Orientation, not authority. **Verify before acting on it.**
 
-Session ended here: the watch has a **Bluetooth LE serial console**, verified from the PC. Log
-entry 14 is committed and pushed. The USB audio DAC work is scoped but unstarted.
+Session ended here: the BLE console now carries **file transfer byte-exactly**. Log entry 15 is
+committed and pushed. The USB audio DAC work is still scoped and unstarted.
 
 ## One line
 
@@ -28,6 +28,16 @@ which had been rebooting the watch.**
   (the last renders the VT100 into a 40×26 grid).
 - **Limits**: one connection; drops output rather than blocking when a ring fills; display 2
   is then unavailable for a UART.
+- **FILE TRANSFER IS SOLID ONE WAY.** Writing is byte-exact: 1000/1000 and 4000/4000 bytes
+  into littlefs and onto the SD card, verified with `ls -l` read back over the console.
+  Reading a file back (`cat`) is **lossy** — roughly 3.4 KB of 4 KB — because the notify
+  path is throttled by connection interval. Write is proven; read is best-effort.
+- **A CLIENT MUST HONOUR FLOW CONTROL.** A full ring returns ATT `0x11`
+  (`INSUFFICIENT_RESOURCE`) and XON/XOFF (`0x11`/`0x13`) arrive on the notify characteristic.
+  A client that ignores both can still lose data. `/tmp/blesend.py` shows the handling.
+- **A STALE CONNECTION STOPS ADVERTISING.** If a client dies without disconnecting, the watch
+  keeps the link until supervision timeout (~20 s) and advertises nothing meanwhile — which
+  looks like a dead console. Wait, or power-cycle.
 - **AN IDLE MIRROR SENDS NOTHING, AND THAT IS NOT A FAULT.** The desktop transmits only
   changed cells, so a first read after boot returns zero bytes and looks like a dead console.
   It is alive; send a keystroke to force a repaint and the screen arrives. Confirmed
@@ -64,11 +74,11 @@ guesses on bug 1. **Decide deliberately whether this partition stays.**
 
 ## Repositories
 
-- **Fork** `/run/media/vash/GIT/tinydesk-twatch`, branch `t-watch-ultra`, HEAD **`d10ce14`**
+- **Fork** `/run/media/vash/GIT/tinydesk-twatch`, branch `t-watch-ultra`, HEAD **`7dba2ae`**
   — clean, pushed. `fork` = `aquasock/tinydesk` (push here). `origin` = upstream
   `tinydesk-project/tinydesk` — **never push**.
-- **Escapement** `/run/media/vash/GIT/Escapement`, branch `main`, HEAD **`9a2391b`** — clean,
-  pushed. Log entry 14 is current; 14 of 100 entries used.
+- **Escapement** `/run/media/vash/GIT/Escapement`, branch `main`, HEAD **`4990a3c`** — clean,
+  pushed. Log entry 15 is current; 15 of 100 entries used.
 
 **The handoff's old `~/GIT/...` paths are wrong** — `HOME=/home/vash` has no `GIT`
 directory; both checkouts live under `/run/media/vash/GIT/`.
@@ -87,13 +97,13 @@ directory; both checkouts live under `/run/media/vash/GIT/`.
 
 ## Current firmware
 
-`sha256 521d33ac0b989049`, `0x2db4f0` bytes, 3% partition free, **console OFF**
+`sha256 28aed4e0e70944d9`, `0x2db650` bytes, 3% partition free, **console OFF**
 (`CONFIG_ESP_CONSOLE_NONE=y`).
 
-Archived as `~/twatch-backup/working-2026-11-15-1146.bin`, 16,777,216 bytes,
-sha256 `b9dd507c1a8a01b43193641e941ea3ad8e583b70feb674f2d2409f048960cd46`,
+Archived as `~/twatch-backup/working-2026-11-15-1238.bin`, 16,777,216 bytes,
+sha256 `526e48a9ecb9cb8f51a404c86f8d08af9cea593448f88e423265612e9b37f133`,
 `verify OK (digest matched)`, `ota_0` byte-identical to the build. **This is the image with the
-BLE console and the changed partition table.**
+BLE console, file transfer and the changed partition table.**
 
 Older images are retained, and `working-2026-11-15-1138.bin` is the one to use if the
 **partition table** must go back (it has the old `ota_1` at 0x300000 and no `coredump`).
