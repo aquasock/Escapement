@@ -1,25 +1,68 @@
-# Handoff — Escapement / TinyDesk on T-Watch Ultra, 2026-11-15T09:35
+# Handoff — Escapement / TinyDesk on T-Watch Ultra, 2026-11-15T11:55
 
 Orientation, not authority. **Verify before acting on it.**
 
-Session ended here: the GPS app gained a `Set clock` button, the operator pressed it and it
-reported success, and the strip read 9:27 against the receiver's 16:27 — seven hours apart at
-MST7. Log entry 13 is committed and pushed. The watch is connected.
+Session ended here: the watch has a **Bluetooth LE serial console**, verified from the PC. Log
+entry 14 is committed and pushed. The USB audio DAC work is scoped but unstarted.
 
 ## One line
 
-**There is a GPS app: fix state, position, satellite counts, HDOP, altitude and UTC, with
-the receiver powered only while its window is open. It runs at a real fix — 18 in view, 12
-used, HDOP 0.95 — and the number that makes it useful is satellites IN VIEW, because
-satellites USED is zero both without a fix and without an antenna.**
+**The watch now has a serial console over Bluetooth LE — scan finds `TinyDesk`, connect,
+type a command, read the answer. It exists because the USB port cannot be console and host
+at once and WiFi does not fit in 41 KB of RAM. Getting there found three real bugs, one of
+which had been rebooting the watch.**
+
+## THE CONSOLE, AND WHY IT WAS NECESSARY
+
+- **Service**: Nordic UART (`6E400001-…`), write in / notify out. Ordinary BLE serial
+  clients work — no custom app. Advertises as **`TinyDesk`**, MAC `80:45:6B:46:DF:56`.
+- **Selected by** `display2.transport = ble` in `/etc/board.conf`, then **Settings →
+  Displays → display 2 → "Serial 2: Bluetooth LE"**. Both are needed: the key picks the
+  transport, the setting starts the mirror.
+- **Requires** `bt.enable = 1` — it rides the radio `bt_hid.c` starts.
+- **`bleuart` command** reports `started`, connection handle, TX value handle and both ring
+  levels; `bleuart adv` restarts advertising.
+- **Client recipe that works** (bleak, in `/tmp/usbvenv`):
+  connect → find `6e400002` (write) and `6e400003` (notify) → `start_notify` → write
+  `bytes + b"\r"`. Scripts: `/tmp/blecon.py`, `/tmp/blekey.py`, `/tmp/blescreen.py`
+  (the last renders the VT100 into a 40×26 grid).
+- **Limits**: one connection; drops output rather than blocking when a ring fills; display 2
+  is then unavailable for a UART.
+
+## THE THREE BUGS
+
+**1. `spi_device_release_bus` assert — a live panic in shared display code.** `display.c`
+called `spi_device_acquire_bus()` and ignored the result. It returns `ESP_ERR_INVALID_STATE`
+when a polling transaction is in flight, and `paint_task` and the statusbar task both push
+through `push_pixels_raw_buf()` on one device handle. The following `spi_device_release_bus()`
+then asserts, which is a panic, which with the console off is a reboot in zero seconds.
+Fixed by checking the return; `s_bus_misses` counts the skips. **This predates all USB work.**
+
+**2. `ESP_INTR_FLAG_LEVEL1` made USB host impossible.** WiFi and BLE hold the level-1 slots,
+so `usb_host_install()` returned `ESP_ERR_NOT_FOUND` — which `esp_intr_alloc()` returns when
+no slot matches. `LEVEL3` works. **`usb_hid.c` still has LEVEL1**, so the USB keyboard/mouse
+path has never run on this watch; that is a two-line fix still owed.
+
+**3. NimBLE GATT registration ordering.** `ble_svc_gap_init()` asserts
+`SYSINIT_ASSERT_ACTIVE()`, so it must run between `nimble_port_init()` and
+`nimble_port_freertos_init()` — never in the sync callback. Only advertising goes after the
+sync. And the name must be in `struct ble_hs_adv_fields`; `ble_svc_gap_device_name_set()`
+only sets a characteristic readable *after* connecting.
+
+## THE INSTRUMENT THAT FOUND THEM
+
+**Coredump.** `partitions.csv` now has a 64 KB `coredump` at `0x600000`, carved from `ota_1`
+(shrunk to `0x2F0000`), with `CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH` and ELF format. Read it
+with `idf.py coredump-info`. It named bugs 1 and 3 in one run each, after three wrong
+guesses on bug 1. **Decide deliberately whether this partition stays.**
 
 ## Repositories
 
-- **Fork** `/run/media/vash/GIT/tinydesk-twatch`, branch `t-watch-ultra`, HEAD **`203f687`**
+- **Fork** `/run/media/vash/GIT/tinydesk-twatch`, branch `t-watch-ultra`, HEAD **`d10ce14`**
   — clean, pushed. `fork` = `aquasock/tinydesk` (push here). `origin` = upstream
   `tinydesk-project/tinydesk` — **never push**.
-- **Escapement** `/run/media/vash/GIT/Escapement`, branch `main`, HEAD **`4452e61`** — clean,
-  pushed. Log entry 13 is current; 13 of 100 entries used.
+- **Escapement** `/run/media/vash/GIT/Escapement`, branch `main`, HEAD **`9a2391b`** — clean,
+  pushed. Log entry 14 is current; 14 of 100 entries used.
 
 **The handoff's old `~/GIT/...` paths are wrong** — `HOME=/home/vash` has no `GIT`
 directory; both checkouts live under `/run/media/vash/GIT/`.
@@ -38,27 +81,33 @@ directory; both checkouts live under `/run/media/vash/GIT/`.
 
 ## Current firmware
 
-`sha256 e7b5b43983ebc6d8`, `0x2cc240` bytes, 7% partition free, **console OFF**
+`sha256 521d33ac0b989049`, `0x2db4f0` bytes, 3% partition free, **console OFF**
 (`CONFIG_ESP_CONSOLE_NONE=y`).
 
-Archived as `~/twatch-backup/working-2026-11-15-0927.bin`, 16,777,216 bytes,
-sha256 `df41e30db7a68d52c0030e31da266c9c1743c3cae1ec0006a78ec122e443df6d`,
-`verify OK (digest matched)`, `ota_0` byte-identical to the build.
+Archived as `~/twatch-backup/working-2026-11-15-1146.bin`, 16,777,216 bytes,
+sha256 `b9dd507c1a8a01b43193641e941ea3ad8e583b70feb674f2d2409f048960cd46`,
+`verify OK (digest matched)`, `ota_0` byte-identical to the build. **This is the image with the
+BLE console and the changed partition table.**
 
-Older images are retained and are safe rollback targets: `working-2026-11-15-0912.bin` (the
-GPS app without the clock button), `working-2026-11-15-0808.bin` (the strip with the date)
-and `working-2026-11-15-0759.bin`.
+Older images are retained, and `working-2026-11-15-1138.bin` is the one to use if the
+**partition table** must go back (it has the old `ota_1` at 0x300000 and no `coredump`).
 
-## TWO THINGS TO KNOW BEFORE CHASING A VISUAL BUG
+## THREE WAYS IN, AND WHICH TO USE
 
-**1. A panic with the console off is indistinguishable from a display fault.** This firmware
+- **BLE console** (new) — survives everything, works while USB is a host. Use it first.
+- **USB-Serial-JTAG** (`/dev/ttyACM1`, `tools/watch-screen.py`) — the desktop mirror. Dies
+  the moment USB host installs, and needs a power cycle to come back.
+- **SD card** — `cat` the log from the console, or pull the card.
+
+**A panic with the console off is indistinguishable from a display fault.** This firmware
 builds with `CONFIG_ESP_CONSOLE_NONE=y` and `CONFIG_ESP_SYSTEM_PANIC_PRINT_REBOOT=y`, so a
 panic prints nowhere and reboots in zero seconds. A crash looks like a flash. To see one:
 set `CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y`, unset `CONFIG_ESP_CONSOLE_NONE`, rebuild,
 flash, read the port. Four words ("stack overflow in task statusbar") ended a two-hour hunt
-in the previous session. **Restore both afterwards.**
+in the previous session. **Restore both afterwards.** Now that the coredump partition exists,
+`idf.py coredump-info` is the faster route to the same answer.
 
-**2. The bezel is invisible over USB.** The strip is drawn outside the framebuffer, so
+**The bezel is invisible over USB.** The strip is drawn outside the framebuffer, so
 `tools/watch-screen.py` will never show it and the USB mirror cannot prove anything about
 it. **The `statusbar` shell command is the only instrument** — it has now caught two
 defects the build and the flash both passed. Do not conclude the strip works because
@@ -161,6 +210,17 @@ that does not depend on `td_session_home()` being populated — not a retry.
 
 ## Owed / next
 
+- **THE USB AUDIO WORK IS UNSTARTED AND NOW TESTABLE.** `usbdiag` is built and flashed:
+  `usbdiag 45` installs USB host, logs whatever attaches to `/sd/diag/usbdiag.log`, and
+  records the reset reason so a run that ends early still says why. The device is TTGK
+  KM-HIFI-384KHZ `3302:3366`, **UAC 2.0**, bcdADC 2.00, 422-byte config descriptor,
+  isochronous **synchronous** OUT endpoint, 8k–384k. Two questions remain: does it enumerate
+  at all, and at what speed — **the S3's OTG port is full speed only**, and a high-speed-only
+  device cannot come up on it. Watch the run over BLE.
+- **`usb_hid.c` still uses `ESP_INTR_FLAG_LEVEL1`.** Two-line fix; until then the USB
+  keyboard and mouse feature still cannot start.
+- **Decide whether the `coredump` partition stays.** It earned its place but it is a
+  diagnostic configuration, and `ota_1` is shrunk to make room.
 - **A reboot is the measurement the clock button owes and did not take.** The watch's clock
   was already correct before the press, so there was no before-and-after delta. `hctosys`
   seeds the system clock FROM the PCF85063A before init, so a reboot with no network and no
