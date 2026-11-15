@@ -1,3 +1,44 @@
+## 14 COMMIT Unreleased 2026-11-15T11:50:33-07:00
+
+#### Coming From:
+
+Unreleased 6c37673
+
+#### Purpose:
+
+Give the watch a console that works while its USB port is a host, because every existing way in collides with the work it is meant to observe.
+
+#### Outcome:
+
+The watch now offers a serial console over Bluetooth LE, verified end to end from the development machine: `bluetoothctl` scans it as `TinyDesk`, a client connects, and `uptime` typed over BLE returns `0 days 00:01:05`. THE REASON IS THAT EVERY OTHER PATH FAILS IN A SPECIFIC MEASURED WAY. USB is the console and the OTG host at once and cannot be both: the USB-Serial-JTAG peripheral resets the chip when a device talks on the lines the host controller is driving, which `esp_reset_reason()` reports as `usb (code 11)` -- a reset with no panic and therefore no coredump, which is why three earlier runs ended with an empty log and no explanation. WiFi is not a substitute because it does not fit: with the USB host stack linked in, internal RAM measured 41 KB free against the 65,536 the SSH server refuses to start below. The BLE radio is on core 0, on its own pins, and already running for the keyboard, so it is the one channel that touches nothing else. The service is Nordic's UART shape -- 6E400001 with a write characteristic in and a notify out -- so ordinary BLE serial clients work without a custom app, and it plugs in as the port's ALTERNATE serial-2 transport, which is why the shared display layer learned nothing: `hal_mux.c` gained three weak board hooks and the key `display2.transport = ble`. THE SESSION'S REAL PRODUCT IS THREE BUGS, AND NONE WAS FOUND BY READING CODE. The first was in shared display code and predates this work entirely: `spi_device_acquire_bus()` was called unchecked in `push_pixels_raw_buf()`, and the subsequent `spi_device_release_bus()` asserts when the bus was never held, so the paint task and the status strip's task contending for one SPI device handle was a live panic -- a reboot in zero seconds with the console compiled out, which the operator saw as a flash. It was named by a coredump after three wrong guesses: `assert failed: spi_device_release_bus spi_master.c:1330`, with frames `push_pixels_raw_buf -> push_pixels_raw -> push_pixels`. The second made USB host impossible on this board: the host was installed with `ESP_INTR_FLAG_LEVEL1`, the level-1 slots are taken by WiFi and BLE, and `usb_host_install()` therefore returned `ESP_ERR_NOT_FOUND` -- which is not a return value anywhere in its own path, but is exactly what `esp_intr_alloc()` returns when no slot matches. `LEVEL3` works, and the same flag in `usb_hid.c` means the USB keyboard and mouse feature documented for this port has never run here at all, because `usb.host` was never set. The third was mine and is recorded because it is a general NimBLE rule rather than a local slip: GATT services must be registered between `nimble_port_init()` and `nimble_port_freertos_init()`, because `ble_svc_gap_init()` opens with `SYSINIT_ASSERT_ACTIVE()` and panics otherwise; only advertising belongs after the sync callback, because the address is not known before it. A fourth, smaller one: `ble_svc_gap_device_name_set()` sets a characteristic a client can only read AFTER connecting, so the name has to be placed in the advertisement itself or a scan-by-name finds nothing while the service is running correctly -- observed as `started=1 tx_handle=18` beside a scan that saw no such device. THE METHOD IS THE PART TO CARRY: every one of those was found by an instrument, not by reasoning, and the two that mattered most came from the coredump partition the reference already documented (EMU-021) -- 64 KB carved from the unused `ota_1`, `CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH`, ELF format, decoded with `idf.py coredump-info`. A `usbdiag` command was also added for the USB host work this was in service of; it logs the reset reason at the start of each run so that a run ending without its `# done` line still says why, and it is how `ESP_RST_USB` was identified. Build PASS at 0x2db4f0 bytes with 3 percent of the app partition free, sha256 521d33ac0b989049; deployment PASS by app-only flash to 0x10000 with `Hash of data verified`; the board was rebooted to a clean desktop and a full 16 MiB image archived with it held in the bootloader across read and verify: `working-2026-11-15-1146.bin`, 16,777,216 bytes, sha256 `b9dd507c1a8a01b43193641e941ea3ad8e583b70feb674f2d2409f048960cd46`, `verify OK (digest matched)`, its sidecar re-checked from its own directory, and `ota_0` inside it compared byte-identical to the build. THE PARTITION TABLE CHANGED in this cycle and that is why the backup mattered: `ota_1` shrank from 0x300000 to 0x2F0000 to free 64 KB at 0x600000 for `coredump`, which is a layout change rather than an app change, and the previous image `working-2026-11-15-1138.bin` still restores the old one. The operator's test of the console was a PC-side client typing a shell command and reading the answer, not a counter. The required core-syntax audit was run against this entry before commit and passed, with `.ai/core.md` confirmed unchanged and `.ai/core-log.md` and `.ai/core-reference.md` the only `.ai/` files touched; BLE-008 was added to the reference with its index entry and routing row, and the file holds 130 records with no duplicate ids. AN HONEST NOTE ON SCOPE: the DAC this was all in service of has still not been tested. What this cycle bought is the ability to test it -- the USB port can now be a host while the console stays reachable, which no earlier attempt could do.
+
+#### Next Steps:
+
+THE USB AUDIO WORK IS UNSTARTED AND NOW POSSIBLE. `usbdiag` needs one run with the DAC attached through the splitter, watched over BLE, to answer the two questions the coredump work kept interrupting: whether the dongle (TTGK KM-HIFI-384KHZ, 3302:3366, UAC 2.0, bcdADC 2.00, 422-byte configuration descriptor, isochronous synchronous OUT endpoint) enumerates at all, and at what speed -- the ESP32-S3's OTG port is full speed only, IDF's host documentation says so, and a high-speed-only device cannot come up on it. If it does enumerate, the driver question is separate and already scoped: Espressif's `usb_host_uac` is UAC 1.0 only through 1.5.0, so a UAC2 device means either the community `usb_host_uac2` (which calls only public `usb` component API and whose `>=5.4` floor looks like convention rather than a requirement) or a purpose-built pump using the isochronous support that `hcd_dwc.c` has in 5.3.1. Either way a rate converter is unavoidable, because gnuboy emits 43,691 Hz and a DAC takes discrete rates. TWO THINGS SHOULD BE DECIDED BEFORE MORE USB WORK. The `coredump` partition and the shrunk `ota_1` are a diagnostic configuration, not a permanent one, and should either be kept deliberately with the cost stated or reverted in a cycle of their own. And `usb_hid.c` still carries `ESP_INTR_FLAG_LEVEL1`, so the USB keyboard and mouse path stays broken until that one flag is changed -- it is a two-line fix that makes a documented feature real, and it is unrelated to audio. THE BLE CONSOLE HAS KNOWN LIMITS: it is one connection, it drops output rather than blocking when the ring fills, it requires `bt.enable = 1` because it rides the radio `bt_hid.c` starts, and it is selected with `display2.transport = ble` which means display 2 is no longer available for a UART. The `bleuart` command reports `started`, the connection handle, the TX value handle and both ring levels, and can restart advertising; it exists because a console that cannot be seen is not a console. The wider backlog is unchanged: Pause, Reset and Save are labelled on all three emulators and send nothing, the Game Boy's right column has a third slot that is drawn furniture and could carry `gb save`, the BLE controller must be reconnected after every reboot, `pm.c` still duplicates the rasteriser `gamepad.c` owns, the NES owes battery-SRAM and its skip-path test and is parked with `docs/nes-accuracy.md` as its baseline, and the status strip still owes the battery and the year against entry 11's 446 ink pixel measurement.
+
+#### Files Modified:
+
+- ports/esp_idf/app/bt_hid.c
+- ports/esp_idf/app/hal_mux.c
+- ports/twatchultra/main/CMakeLists.txt
+- ports/twatchultra/main/bleuart.c
+- ports/twatchultra/main/bleuart.h
+- ports/twatchultra/main/display.c
+- ports/twatchultra/main/gps.c
+- ports/twatchultra/main/link_twatch.c
+- ports/twatchultra/main/usbdiag.c
+- ports/twatchultra/main/usbdiag.h
+- ports/twatchultra/partitions.csv
+- ports/twatchultra/sdkconfig.defaults
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: PASS
+
+---
+
 ## 13 COMMIT Unreleased 2026-11-15T09:32:01-07:00
 
 #### Coming From:

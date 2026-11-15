@@ -229,6 +229,7 @@ Topic IDs are the `record_id` prefix. An entry reserves a name; it does not clai
 | Why does a report-map read kill the link? | BLE | BLE-002 |
 | Boot protocol or report protocol? | BLE | BLE-003 |
 | Why does the board reset-loop when Bluetooth scans? | BLE | BLE-004 |
+| How can a PC reach the watch with no USB or WiFi? | BLE | BLE-008 |
 | Why does an unattended reboot miss the keyboard entirely? | BLE | BLE-004 |
 | Why does the keyboard connect but type nothing? | BLE | BLE-003 |
 | Why does a saved bond never come back at boot? | BLE | BLE-006 |
@@ -396,6 +397,7 @@ NES-002: "On the watch nofrendo runs at 21 fps, split 8,160us emulator and 6,166
 SOC-006: "tdsh's SSH server draws about 19,400 bytes of internal DRAM merely by running and another 29,100 while a session is connected, which is why its 65,536-byte admission floor was never the whole story -- the check happens before the server's own footprint exists"
 SOC-005: "The ESP32-S3 Wi-Fi driver takes its RX and TX buffers from INTERNAL DMA-capable RAM, never PSRAM, at esp_wifi_init() whether or not a network is ever joined -- each is 1600 bytes and the IDF default pair (16 static RX + 16 static TX) holds 51,200 bytes for the life of the firmware, which on this board was 30,160 bytes more than the desktop needed"
 BLE-007: "The operator's Xbox Wireless Controller is BLE HID, not Bluetooth Classic -- it connected to the ESP32-S3 on the first try -- and hid_mouse_parse() accepts its descriptor because a gamepad declares Generic Desktop X and Y for its left stick, which is why it moved the desktop cursor; the discriminator is the top-level collection usage (Game Pad 0x05, Joystick 0x04, Mouse 0x02, Keyboard 0x06) and the gamepad parser must be asked FIRST, or the mouse claims the device and the gamepad path is never reached"
+BLE-008: "NimBLE can run central and peripheral at once, so the watch keeps its BLE keyboard AND offers a Nordic-UART serial console for a PC; GATT services must be registered BEFORE nimble_port_freertos_init (ble_svc_gap_init asserts SYSINIT_ASSERT_ACTIVE) and only advertising after the sync, and the name must be in the advertisement itself or a scan-by-name finds nothing"
 ```
 
 ---
@@ -1869,6 +1871,22 @@ BLE-007: "The operator's Xbox Wireless Controller is BLE HID, not Bluetooth Clas
     - "on the watch 2026-11-12: emu=1036293us blit=783085us over 127 frames in one second"
     - "NES-001 for the host benchmark these figures must not be confused with"
   verification: "Verified on hardware 2026-11-12. The operator launched /sd/game.nes (Balloon Fight), the picture appeared correctly, and they played it with the margin buttons -- so display, input and emulation are all confirmed correct. Throughput was measured by `nes status` after six seconds of running. NOT verified: any improvement, since no optimisation has been attempted yet. The host benchmark is unchanged at 142x realtime on the same ROM, which is host load rather than a regression."
+
+- record_id: BLE-008
+  kind: BLE
+  topic_id: BLE
+  status: VERIFIED
+  verified_date: 2026-11-15
+  title: "NimBLE runs central and peripheral together; the console service must register before the host starts, and its name must be in the advertisement"
+  statement: "The ESP32-S3 under NimBLE supports the central and peripheral roles simultaneously, and this board uses both: as a CENTRAL it connects out to a BLE keyboard (bt_hid.c, BLE-003/BLE-007), and as a PERIPHERAL it now offers a serial console in the Nordic UART shape -- service 6E400001-B5A3-F393-E0A9-E50E24DCCA9E with a write characteristic (6E400002) in and a notify characteristic (6E400003) out, which is what off-the-shelf BLE serial clients already speak. THREE ORDERING FACTS MAKE OR BREAK IT, and each cost a boot on this board. NimBLE's service initialisers require sysinit to be active: ble_svc_gap_init() opens with SYSINIT_ASSERT_ACTIVE() and then SYSINIT_PANIC_ASSERT(rc == 0), so calling it from the host-sync callback panics with 'assert failed: ble_svc_gap_init ble_svc_gap.c:333'; registration belongs BETWEEN nimble_port_init() and nimble_port_freertos_init(), which is the only window that satisfies the assertion. Advertising, by contrast, cannot precede the sync, because the address is not known until then -- ble_hs_id_infer_auto() fails before it. And ble_svc_gap_device_name_set() sets the GAP characteristic's VALUE, which a client can read only AFTER connecting; it puts nothing in the advertising payload, so a scan filtered by name finds nothing at all. The name has to be set in struct ble_hs_adv_fields (name/name_len/name_is_complete) before ble_gap_adv_start()."
+  consequence: "This is the only console path on this board that does not collide with the work it is meant to observe, and that is why it exists. The USB port is the console AND the OTG host and cannot be both: the USB-Serial-JTAG peripheral resets the chip when a device talks on the lines the host controller is driving -- esp_reset_reason() reports ESP_RST_USB, which maps from RESET_REASON_CORE_USB_UART/CORE_USB_JTAG, and that is a reset with no panic and therefore no coredump. WiFi is not a substitute because it does not fit: with the USB host stack linked in, internal RAM measured 41 KB free against the 65,536 bytes the SSH server refuses to start below. The BLE radio runs on core 0, on its own pins, and is already up for the keyboard. The transport plugs in as the port's ALTERNATE serial-2 stream, so the shared display layer needed three weak board hooks and a board key (display2.transport = ble) and learned nothing about Bluetooth. BLE-002's mbuf lesson applies to the notify path: one notification is kept in flight at a time, released by BLE_GAP_EVENT_NOTIFY_TX, so an unbounded stream cannot exhaust the pool and drop the link with HCI 0x16."
+  sources:
+    - "tinydesk-twatch port: main/bleuart.c (service, registration/start split, tx pacing), ports/esp_idf/app/bt_hid.c (board_ble_uart_register/on_sync, weak defaults), ports/esp_idf/app/hal_mux.c (serial-2 alternate transport)"
+    - "ESP-IDF 5.3.1 examples/bluetooth/nimble/bleprph/main/gatt_svr.c: ble_svc_gap_init(), ble_svc_gatt_init(), ble_gatts_count_cfg(), ble_gatts_add_svcs() all called before nimble_port_freertos_init"
+    - "components/bt/host/nimble/nimble/nimble/host/services/gap/src/ble_svc_gap.c: SYSINIT_ASSERT_ACTIVE() at ble_svc_gap_init(), line 325"
+    - "on the watch: esp_reset_reason() reporting `usb (code 11)`, and heap_caps_get_free_size(MALLOC_CAP_INTERNAL) at 41 KB with the host stack linked"
+  verification: "Verified on hardware 2026-11-15, end to end and from the PC: bluetoothctl scanned the watch as `TinyDesk` at 80:45:6B:46:DF:56, a bleak client connected, found both characteristics, and the desktop's terminal stream arrived as notifications -- 2,945 bytes of the start menu with its colours and box-drawing characters -- and `uptime` typed over the write characteristic came back '0 days 00:01:05'. The two ordering failures were both caught by coredump rather than by reasoning: 'assert failed: ble_svc_gap_init ble_svc_gap.c:333' with frames pointing at bleuart_start from on_sync, and before that an advertisement that ran correctly (started=1, tx_handle=18) and was still invisible to every scan-by-name. Revised 2026-11-15 (core-log entry 14): new record."
+
 
 - record_id: SOC-006
   kind: SOC
