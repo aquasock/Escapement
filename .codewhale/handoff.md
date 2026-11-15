@@ -28,6 +28,12 @@ which had been rebooting the watch.**
   (the last renders the VT100 into a 40×26 grid).
 - **Limits**: one connection; drops output rather than blocking when a ring fills; display 2
   is then unavailable for a UART.
+- **AN IDLE MIRROR SENDS NOTHING, AND THAT IS NOT A FAULT.** The desktop transmits only
+  changed cells, so a first read after boot returns zero bytes and looks like a dead console.
+  It is alive; send a keystroke to force a repaint and the screen arrives. Confirmed
+  untethered 2026-11-15: with no USB at all, `echo hello from bluetooth` was typed over BLE
+  and answered on the glass. Do not diagnose an empty read as a broken service -- send `F10`
+  (`\x1b[21~`) and read again.
 
 ## THE THREE BUGS
 
