@@ -211,6 +211,7 @@ Topic IDs are the `record_id` prefix. An entry reserves a name; it does not clai
 | What NTC part is on the TS pin, and how do millivolts become degrees? | PMU | PMU-007 |
 | Why did the click disappear when the touch daemon was retired? | HAPTIC | HAP-001 |
 | Where does the RTC's time come from and go to? | RTC | RTC-001 |
+| How many satellites are in view, and why do two commands disagree? | GPS | GPS-006 |
 | Does the RTC interrupt actually work, or is it dead? | RTC | RTC-004 |
 | Why does `date` print UTC when the clock is right? | RTC | RTC-002 |
 | Why did the clock jump to last shutdown's time at boot? | RTC | RTC-003 |
@@ -367,6 +368,7 @@ GPS-002: "The receiver emits GGA, RMC, GSA, GSV, GLL and VTG at 1 Hz with 0 chec
 GPS-003: "The receiver answers NMEA on this unit but NOT the UBX-MON-VER poll, so it never confirms its own model string; NMEA is the working interface and the UBX side (and constellation configuration) is untouched factory default"
 GPS-004: "Indoors the receiver tracks 3 to 5 satellites with a real HDOP around 2.38 and no fix, because a 3D solution needs four; a fix needs sky view and is the one remaining question the bench cannot answer"
 GPS-005: "A GPS time needs no fix: the receiver reports valid UTC at 3 satellites, so `gps time` sets the clock indoors; the value goes through settimeofday AND board_time_set_post, so the PCF85063A holds it and it survives a hard reset, and a GPS time applied from a stale capture is a wrong clock however right the source"
+GPS-006: "GSV carries each constellation's own count of satellites IN VIEW, so a sky figure is the SUM across talkers (18-24 with four constellations) against GGA's count USED in the fix (0 without a fix); `gps raw` reports the MAX single constellation, so the shell and the app differ by design"
 SSH-001: "The SFTP server answers a 16 KiB write but never answers 24 KiB or 32 KiB (paramiko's put uses 32 KiB and hangs), and answers a 4 KiB read but not 16 KiB, so uploads chunk at 16 KiB and downloads at 4 KiB: measured 28.9 KiB/s up and 74.0 KiB/s down"
 SSH-002: "An abandoned SFTP session leaks its file descriptors unless WOLFSSH_STOREHANDLE is defined, because SFTP_FreeHandles() is compiled out and settings.h only sets that macro for WOLFSSH_FATFS, which is the other I/O path; with the macro on, 16 killed transfers leave the SD card writable where 5 used to exhaust its 5-slot VFS pool"
 SSH-003: "The SSH server takes one client at a time on the accept loop's own task, so a stalled session holds the only slot and later attempts complete the TCP handshake then get no protocol banner; only `ssh restart` or a reboot clears it"
@@ -2040,6 +2042,20 @@ BLE-007: "The operator's Xbox Wireless Controller is BLE HID, not Bluetooth Clas
     - "ports/esp_idf/app/main.c time_set(), the sequence this mirrors for SNTP"
     - "Epoch cross-checked outside the firmware: 1794515694 decodes to 2026-11-12T20:34:54Z in Python"
   verification: "Verified on hardware 2026-11-12, indoors, end to end: the system clock, the RTC write-through and survival across a reset were each observed separately rather than inferred from one. The epoch arithmetic has 12 host checks including the 2024 leap day and both century cases, and a mutant dropping the century term fails 2100-12-31 by a day."
+
+- record_id: GPS-006
+  kind: BOARD
+  topic_id: GPS
+  title: "GSV carries a per-constellation count of satellites in view, so a sky figure is a SUM and the shell's is a MAX"
+  status: VERIFIED
+  verified_date: 2026-11-15
+  statement: "GSV is `$<talker>GSV,<messages>,<this one>,<in view>,...` and repeats its constellation's count of satellites in view in every message of the series. A multi-GNSS receiver emits a separate series per constellation -- GP, GL, GA, GB on this unit -- so a receiver tracking four constellations can have eighteen or twenty-four satellites in view while no single one of them reports more than eight. Measured on the board outdoors with a fix: `sats_in_view` 18 to 24 against `sats_used` 12 and HDOP 0.95 to 1.07, and indoors with no fix 3 to 0 in view. THE COUNT IS ALSO NOT WHAT GGA CARRIES: GGA's satellite field is the number USED in a solution, which is zero whenever there is no fix however much sky the antenna can hear, and it is the reason a healthy indoor receiver reads as broken if that is the only number shown."
+  consequence: "Three things follow for anything that displays a satellite figure. A sky count must be summed across constellations and not taken from one series, or a good multi-GNSS receiver is reported as seeing a handful. The sum needs a staleness rule, because a constellation that stops being reported would otherwise contribute its last count for ever -- the port drops a talker not heard within 400 sentences, about half a minute at this receiver's 12 sentences per second. And the two instruments on this board now disagree by design rather than by fault: `gps raw` reports the MAXIMUM single-constellation count in its `sats visible` line because that is what a per-sentence counter naturally produces, while `nmea_state_t::sats_in_view` and the GPS app report the SUM. A future reader comparing 3 from the shell against 18 from the app should not conclude that one of them is wrong. The distinction worth keeping on a display is in view against used: a receiver with satellites in view and no fix is working and needs sky, and one with neither has an antenna or receiver fault."
+  sources:
+    - "tinydesk-twatch port: main/nmea.c do_gsv() and NMEA_GSV_TALKERS/NMEA_GSV_STALE, main/gps.c raw_sink() and its `sats visible` max"
+    - "NMEA 0183 GSV sentence layout: field 3 is the number of satellites in view, restated per message of the series"
+    - "GPS-002 for the antenna evidence that GSV counts were first used for, and GPS-004 for the indoor 3-to-5-satellite figure"
+  verification: "Read from the receiver on hardware 2026-11-15: `gps raw 6` on the board counted GGA 6, RMC 6, GSA 24, GSV 24, GLL 6, VTG 6 -- four GSV series per second, so four constellations -- while reporting 3 satellites visible indoors. The app then showed 18 in view and 12 used with a fix, and 24 in view minutes earlier, both accepted by the operator as normal for their sky. The sum, the staleness rule and the empty-field case have 12 host checks in test_nmea.c; the staleness test was confirmed able to fail by raising NMEA_GSV_STALE and watching it report 18 where 11 was right."
 
 - record_id: SSH-001
   kind: NETWORK

@@ -1,3 +1,47 @@
+## 12 COMMIT Unreleased 2026-11-15T09:16:58-07:00
+
+#### Coming From:
+
+Unreleased 69c8d55
+
+#### Purpose:
+
+Add a GPS application that shows the user the receiver's fix state, position and satellite counts, since the receiver is qualified but only reachable from the shell.
+
+#### Outcome:
+
+The GPS app is in the start menu, the operator ran it and accepted it, and the cycle's real work was a portable seam rather than a window. THE APP CANNOT INCLUDE THE DRIVER, and that constraint set the shape of the change. `apps/` is shared by every port, so the app may not reach into `ports/twatchultra/main/gps.h`; Network reaches its platform through `td_sysinfo()->net` and this now does the same through a new `td_gps_ops_t`. The interface is three calls -- `start`, `stop`, `status` -- and the pair is deliberate: THE RECEIVER IS POWERED ONLY WHILE THE WINDOW IS OPEN, by operator decision, so opening the window is what raises the rail and closing it is what drops it. A GNSS receiver draws tens of milliamps and a watch has none to spare for a window nobody is looking at. The cost is that the first reading after opening is empty and a cold fix takes minutes, which is why the window renders `Satellites: 0 in view` within a second rather than appearing blank. The position is carried as `int32` in 1e-7 degrees rather than as a double, which keeps the shared struct free of floating point and loses nothing: the receiver sends four decimal places of arc-minute, about 1.7e-6 degrees, so a seventh decimal place is already more resolution than the data has. THE LINE THAT MAKES THE APP WORTH HAVING IS `Satellites: N in view, M used`, and the difference is the whole design. GGA's satellite field is the number USED in a solution, which is zero whenever there is no fix however much sky the antenna can hear -- and zero is also what a disconnected antenna reads. A receiver indoors is working perfectly and cannot fix, so a display showing only the used count reports a healthy receiver as broken. In view separates the two, which is the distinction GPS-002 already needed for `gps raw`. Parsing it needed a new sentence: GSV was counted and ignored before, and it is now decoded for its satellite count only. THE COUNT IS A SUM AND NEEDS A STALENESS RULE, both recorded in GPS-006. GSV restates each constellation's own count in every message of its series, so a multi-GNSS receiver emits four series and a sky figure is their total -- 18 to 24 on this board against 12 used. A constellation that stops being reported would otherwise contribute its last count for ever, so a talker not heard within 400 sentences, about half a minute at this receiver's 12 sentences per second, is dropped from the sum. This also explains a disagreement that would otherwise read as a bug: `gps raw` reports the MAXIMUM single-constellation count because that is what a per-sentence counter naturally produces, so the shell said `sats visible 3` while the app showed 18, and neither is wrong. TWO PRE-EXISTING RED TESTS WERE FOUND AND ONE WAS FIXED. `api_stable` failed because the new types are public API, which is the test working: the snapshot was re-recorded and the diff is additive only -- three new declarations plus one field appended to `td_sysinfo_t`. `board_keys` was ALREADY failing at `HEAD` and is unrelated to this cycle: commit `45b761e` added the `ssh.autostart` board key without recording it, so the key was recorded and described in the README's board-setting list, which is what that tool asks for. The suite is now 43 of 43. A FIELD WAS RENAMED BECAUSE ITS NAME LIED: `nmea_state_t::hdop_x10` held hundredths, so 92 meant 0.92, and the new shared struct would have carried the same trap into a second place; it is `hdop_x100` at all six sites, with the reason written beside it. THE RECEIVER IS EXCLUSIVE, which is a state the driver did not previously have to consider: the shell command and the app would each parse half of one UART's sentences and both would look faulty, so each refuses while the other holds the port and says which. Build PASS at 0x2cc090 bytes with 7 percent of the app partition free, sha256 1a1ade9b2fd84f63; deployment PASS by app-only flash to 0x10000 with `Hash of data verified`; host suite PASS 43 of 43 with the new GSV checks at 12 and confirmed able to fail by raising the staleness bound and watching the stale case report 18 where 11 was right; the board was rebooted and a full 16 MiB image archived with it held in the bootloader across read and verify: `working-2026-11-15-0912.bin`, 16,777,216 bytes, sha256 `910ccd311147b7f37750e5fce3350e60a266de4481aaf2ce179234786dd2b534`, `verify OK (digest matched)`, `ota_0` inside it compared byte-identical to the build. The operator's acceptance was on the glass with a real fix: `Fix: GPS`, `33.29387 N 111.88092 W`, `18 in view, 12 used`, HDOP 0.95, 375 m, UTC ticking. The required core-syntax audit was run against this entry before commit and passed, with `.ai/core.md` confirmed unchanged and `.ai/core-log.md` and `.ai/core-reference.md` the only `.ai/` files touched; GPS-006 was added to the reference, its index and the routing table. A NOTE ON METHOD WORTH KEEPING: an attempt was made to open the app from the host by parsing the start menu's colours and pressing Down repeatedly, which cost three rewrites of a screen model and never worked, because the desktop sends only changed cells and the model drifted. The operator opened the app with a tap in one second. That instrument should not have been built.
+
+#### Next Steps:
+
+THE APP SHOWS THE RECEIVER, AND THE RECEIVER'S OWN CONFIGURATION IS UNTOUCHED: GPS-003 records that this unit answers NMEA but not the UBX identification poll, so the constellation set is factory default and there is no way to select or disable talkers from the watch. Anything wanting NMEA rate changes, constellation control or a power mode has to establish the UBX side first, which is the next real question about this part rather than a UI task. The app does not yet offer `gps time`, which sets the clock from the receiver and is proven to survive a hard reset through the RTC (GPS-005); a button for it is small and would give the watch a clock source that needs no network. The window's own limits are recorded rather than measured-good: it is 38 columns by 12 rows at a fixed position, it shows one coordinate format regardless of the Settings date and clock preferences, and the receiver is dropped on close but not on shutdown, where the rail state is whatever the PMU decides. The exclusivity rule means the shell command cannot be used while the window is open, which is correct but is also the only way to see raw sentences; a diagnostic view inside the app that dumped talker counts would remove the need to close it. The wider backlog is unchanged: Pause, Reset and Save are labelled on all three emulators and send nothing, the Game Boy's right column has a third slot that is drawn furniture and could carry `gb save`, the BLE controller must be reconnected after every reboot, `pm.c` still duplicates the rasteriser `gamepad.c` owns, the NES owes battery-SRAM and its skip-path test and is parked undecided with `docs/nes-accuracy.md` as its baseline and its page 15 crash as the first thing to chase, and no DMG cartridge has ever been launched so the `GB_HW_CGB` compatibility path remains unproven. THE STATUS STRIP STILL OWES THE BATTERY AND THE YEAR, and the 446 ink pixel measurement in entry 11 is what any attempt to restore them has to answer.
+
+#### Files Modified:
+
+- CMakeLists.txt
+- README.md
+- api/board_keys.txt
+- api/tinydesk.api
+- apps/apps.c
+- apps/gps.c
+- apps/td_apps.h
+- include/tinydesk/td_sysinfo.h
+- ports/esp_idf/app/main.c
+- ports/esp_idf/components/tinydesk/CMakeLists.txt
+- ports/twatchultra/main/gps.c
+- ports/twatchultra/main/gps.h
+- ports/twatchultra/main/nmea.c
+- ports/twatchultra/main/nmea.h
+- tests/test_nmea.c
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: PASS
+
+---
+
 ## 11 COMMIT Unreleased 2026-11-15T08:04:47-07:00
 
 #### Coming From:
