@@ -1,213 +1,156 @@
-# Handoff — Escapement / TinyDesk on T-Watch Ultra, 2026-11-13T02:45
+# Handoff — Escapement / TinyDesk on T-Watch Ultra, 2026-11-15T01:05
 
 Orientation, not authority. **Verify before acting on it.**
 
-Session ended here: operator signing off for the night. Everything is committed,
-pushed, and the radio is **off**.
+Session ended here: operator signing off for the night, **watch disconnected from USB**.
+The status strip is shipped and accepted; the operator said they will test it further tonight.
 
 ## One line
 
-**Three emulator platforms assessed in one session; one shipped and improved, two
-scoped. NES is parked at 51 fps because the screen is too small. GBC would fill
-the screen but run slower. Pokémon Mini has a week of work banked, a much better
-performance case, and an unknown that is now one build away.**
+**A permanent clock now lives in the 44 glass rows above the framebuffer, where no
+emulator can cover it. Getting it there exposed a stack overflow that had been rebooting
+the watch every 33 seconds while looking exactly like a display flash.**
 
 ## Repositories
 
-- **Fork** `~/GIT/tinydesk-twatch`, branch `t-watch-ultra`, HEAD **`64ccc7d`** —
-  clean, pushed. `fork` = `aquasock/tinydesk` (push here). `origin` = upstream
-  `tinydesk-project/tinydesk` — **never push**.
-- **Escapement** `~/GIT/Escapement`, branch `main`, HEAD **`fa82052`** — clean,
-  pushed. Log entry 65 is current.
-- **tinytama** `~/GIT/tinytama` — the PokeMini work lives here, not in Escapement.
+- **Fork** `~/GIT/tinydesk-twatch`, branch `t-watch-ultra`, HEAD **`11025d6`** — clean, pushed.
+  `fork` = `aquasock/tinydesk` (push here). `origin` = upstream `tinydesk-project/tinydesk`
+  — **never push**.
+- **Escapement** `~/GIT/Escapement`, branch `main`, HEAD **`b2f40ce`** — clean, pushed.
+  Log entry 10 is current; 10 of 100 entries used.
 
 ## Permissions and limits
 
 - Push only to `aquasock` repos. Never to `tinydesk-project/tinydesk`.
 - `.ai/core.md` is RESTRICTED: read it, never edit it.
-- **A `core-syntax.md` audit is owed after any `.ai/` change** — one was run at
-  handoff: 65 entries, 0 problems, 127 unique record ids.
-- `board.conf` is gitignored. Watch password at `~/Desktop/passwd.txt` — **do not
-  echo into transcripts or commits**.
+- **A `core-syntax.md` audit is owed after any `.ai/` change** — one ran at handoff: 10 entries, 0 problems.
+- `board.conf` is gitignored. Watch password at `~/Desktop/passwd.txt` — **do not echo**.
+- `archived_logs/*.tar.gz` not to be referenced without explicit approval.
+- No sub-agents, no goals (project law in `.ai/core.md`).
 
-## NES — shipped, parked at 51 fps
+## Current firmware
 
-`nes start /sd/zelda.nes`. Operator played it: **"looks good. no tearing... mostly
-full speed."**
+`sha256 a43a6a96d898ab17`, 0x2cad80 bytes, 7% partition free, **console OFF**
+(`CONFIG_ESP_CONSOLE_NONE=y` restored after the diagnostic build).
 
-Journey this session: **19 → 42 → 51 fps**, dropped 531/s → 36 in 11,055 frames.
+Archived as `~/twatch-backup/working-2026-11-15-0057.bin`, 16,777,216 bytes,
+sha256 `7399c009036422cd5d0e5126f6fc1be101212ec9614696bce0d521e8099a8c15`,
+`verify OK (digest matched)`, `ota_0` byte-identical to the build.
 
-- **19 → 42**: streamed the blit straight into the transmit band. It had been
-  making three passes over PSRAM to reach a 10 KB internal buffer.
-- **42 → 51**: blit on core 1, emulator on core 0, three-buffer pool, two queues.
-- Per-frame now: interpreter 15,242 + convert 4,266 + push 4,004 µs.
+## THE THING TO KNOW BEFORE CHASING A DISPLAY BUG
 
-**Two hard limits, both measured, do not re-litigate:**
+**A panic with the console off is indistinguishable from a display fault.** This
+firmware builds with `CONFIG_ESP_CONSOLE_NONE=y` and
+`CONFIG_ESP_SYSTEM_PANIC_PRINT_REBOOT=y`, so a panic prints nowhere and reboots in
+zero seconds. A crash looks like a flash. This cost most of a cycle.
 
-- **The push is NOT wasteful** — 3,360 µs transfer against a 3,072 µs arithmetic
-  floor at 80 MHz QIO, i.e. **1.10×**. An earlier claim of a "2.6× excess" was
-  blit-minus-estimated-conversion, an inference reported as a measurement. It
-  pointed at a DMA overlap with nothing to reclaim. **NES-003 revised.**
-- **60 fps is not reachable by tuning the blit.** Deleting the entire blit leaves
-  15,242 µs = 65.6 fps, so 60 needs concurrency plus the interpreter. See "Open".
+To see a panic: set `CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y` and unset
+`CONFIG_ESP_CONSOLE_NONE` in `ports/twatchultra/sdkconfig`, rebuild, flash, and read
+the port. Four words ("stack overflow in task statusbar") ended a two-hour hunt.
+**Restore both afterwards.**
 
-**Owed on NES:** battery SRAM persistence (a Zelda save does not survive a reset)
-and the skip-path test (`skipped=0` proves the pool never ran dry, not that the
-skip works).
+Count boot bursts to detect a reboot loop from the host: a boot emits ~1.2 KB at once
+and renders to nothing (raw boot log, not VT100). Sample `len(drain(...))` per second
+and flag anything over 400 bytes.
 
-## The three lessons this session cost the most
+## The status strip (`ports/twatchultra/main/statusbar.c`)
 
-**1. A display change is not verified until someone looks at the glass.**
-A build shipped reporting 53 fps, 0 skips, correct timings — **and pure black**.
-The CS assertion after window programming was consumed by a rewrite. Every counter
-said healthy. The operator found it. The margins stayed painted because their push
-sites kept their own CS line — the clue was on the screen and unread. **DSP-007.**
+- **Rows 1..43.** Row 0 is swallowed by the controller (LCD-004); row 44 belongs to
+  `paint_column()`, which uses it as a sacrificial row for the same reason.
+- **HH:MM at scale 2** — 32 rows of glyph centred in 43, 80 px wide against 410 of glass,
+  165 px margin each side. Total persistent cost: one 1,280-byte band buffer.
+- **Stack 8192.** 3072 overflowed. The push reaches the SPI driver's polling transmit.
+- **Pushes only when the minute index changes**, not when the string differs.
+- **Timezone cached in the task**: 5 s retry while unknown, 60 s once known. Shows
+  `--:--` rather than substituting UTC.
+- **`display_panel_push()`** in `display.c` is a new export that **ignores
+  `display_pixels_claim()`** — the first push path that does. Safe without a lock for
+  three existing reasons: `push_pixels_raw_buf()` holds the bus across window and pixels,
+  the caller brings its own buffer (no `s_tx_app` race with `gamepad_paint()`), and it
+  touches no framebuffer or cell record. **A second user of it deserves the same reasoning
+  written down.**
+- **`statusbar` shell command** reports `text`, `utc`, `tz`, `home`, the tz file path, its
+  push count and the driver's total. That command proved the timezone defect; keep it
+  until the strip's content is settled.
 
-**2. Do not type into the board while the operator is using it.** A heap re-check
-was run by sending keystrokes into a terminal in use; their input and ours
-interleaved, and a `pattern` test was still holding memory in the anomalous
-reading. Ask for the reading or wait. A board in use is not a bench.
+## `get_tz()` — the defect that was fixed, and the one that was reverted
 
-**3. A heap number is meaningless without the state it was measured in.**
-Three true figures for one board: **102,615** (no SSH), **82,379** (SSH running,
-no client), **53,319** (session attached). SSH costs 48,456 of the 65,536 it
-demands before starting. Quoting one as another is how a board appears to gain
-50 KB in a minute. **SOC-006.**
+In `ports/esp_idf/app/main.c`. It **used to return `true` while handing back `0`**, so
+"I could not find your time zone" and "your time zone is UTC" arrived as the same answer.
+It now reports a failed read as a failure, and still fills `*seconds` so callers that
+ignore the return value keep the last known offset.
 
-## Current machine state
+**Do not add an immediate retry on failure.** A version that did turned one failed file
+open into an open per tick forever, because the function sits on the taskbar's paint path.
+The 30-second window is deliberate.
 
-- **WiFi is OFF** — `network autowifi off` **and** `wifidisconnect`. Autoconnect
-  alone was not enough; disconnect alone re-associated within seconds. To restore:
-  `network autowifi on`, then `wificonnect`. **No SSH while it is off.**
-- Internal DRAM: **~143,275 free**, largest block 49,152.
-- **Backup `working-2026-11-13-0019.bin`**, 16 MiB, sha256 `d208bd93…`,
-  `verify OK (digest matched)` with the board held in the stub across read and
-  compare. App region byte-identical to the build (md5 `0ccae46a…`). Covers
-  `4f646f3` **plus the CS fix**, but **NOT** `d4e2798` (the conversion
-  optimization) or `64ccc7d` (core-1 blit) — **a fresh backup is owed.**
+## The three lessons this session cost most
 
-## Open, in order of value
+**1. Measure before editing shared code.** Three changes were made on a hypothesis and all
+three were wrong or unnecessary: `paint_column`'s chrome index (fixed a real bug but the
+first diagnosis was wrong), the `rot_k` comment, and `get_tz`'s retry. The two changes that
+went well were both measured first — the arrow orientation and the glyph size were
+confirmed by compiling the real font array and placement arithmetic on the host and
+printing pixels before any flash.
 
-1. **Pokémon Mini route B** — build `core/pokemini/` into TinyDesk as a `pmbench`
-   command and take the on-target CPU number. Details below.
-2. **NES 60 fps** — the interpreter. Every cheaper-blit avenue is exhausted.
-3. **NES SRAM persistence** — smallest change, largest effect on whether a file is
-   worth starting.
-4. **GBC port** (gnuboy) — if the operator wants the glass filled.
-5. Tamagotchi Start menu entry; a fresh backup.
+**2. Build the instrument that can see the result.** The arrow bug took two rounds because
+the first fix read `label[s].cp` before the call that fills it — uninitialized stack, build
+clean, identical picture. A host simulation settled it in one run. Do that first.
 
-## Pokémon Mini — the state of play
+**3. An absence in one instrument is not evidence.** A cross-emulator smoke test in this
+session filtered output without clearing the screen and matched a stale status line, so it
+printed identical figures for five different commands and verified nothing. Clear state
+before every probe.
 
-**Most of the work exists in `~/GIT/tinytama`, not here:** PokeMini vendored at
-`8a64225e` (GPL-3.0, 47 files, one 2-line patch), a desktop reference build the
-operator played across **twelve cartridges** including two levels of Pinball
-cleared, 114,708 bytes of Xtensa text, three scope documents.
+## Game Boy port — where it stands
 
-**Two corrections to that old work, both measured this session** (PM-001, PM-002):
+Runs Link's Awakening DX at **59.5 fps, 0.9969× real time, zero audio drops**. Battery
+saves work and survive `gb stop` / `gb start`. Drawn d-pad (upright, radius 94) and A/B
+circles. `gb` / `gb start [rom]` / `gb stop` / `gb save` / `gb rsave` / `gb status`.
 
-- **The requirement is 0.22–0.36 MIPS, not 1 MIPS.** 1 MIPS is the 4 MHz /
-  4-cycle *ceiling*. Twelve cartridges measure 3,091–5,053 instructions against a
-  13,889-per-frame budget.
-- **The display gate is 5.4× cheaper than when it was taken.** That gate used
-  64-byte chunks (357 ns/px); our path uses 16,384-pixel transactions
-  (66.5 ns/px). 288×192 costs 3,675 µs of a 13,889 µs budget, not 19,741 µs.
-  **The stated blocker is now the comfortable part.**
+**Unproven:** no DMG cartridge has ever been launched, so the `GB_HW_CGB` compatibility
+path is untested. A save has not survived a power cut — only `gb stop`/`gb start`.
 
-**The one unknown, and the trap around it.**
-`for-escapement/pokemini_bench_target` **cannot run on the watch.** It is a
-**Linux** ELF (crosstool-NG, uClibc, has `_start`/`__libc_start_main`); the watch
-is **ESP-IDF 5.3.1** with no ELF loader and no `chmod`. Attempted tonight: SFTP
-392,204 bytes at 18.1 KiB/s, md5 matching, then `command not found`. The binary is
-fine; it targets a different OS.
+## Owed / next
 
-**Two routes:**
+- **Extend the strip**: network state from `td_sysinfo()->net`, battery level. Each is a
+  text field in the same band; the layout is the work, not the plumbing.
+- **Pause, Reset and Save** are labelled on all three emulators and send nothing.
+- **The right column's third slot** is drawn furniture on the GB port; it could carry `gb save`.
+- **BLE controller** must be reconnected after every reboot.
+- **`pm.c`** still duplicates the rasteriser `gamepad.c` owns.
+- **NES**: parked undecided, owes battery-SRAM and a skip-path test,
+  `docs/nes-accuracy.md` is the baseline, page 15 crash is the first thing to chase.
 
-- **A** — flash the Linux image and run it there. Needs no code, but replaces
-  TinyDesk (where the NES/GBC work lives) and answers a different question.
-  Reversible via the 00:19 backup.
-- **B — recommended** — vendor `core/pokemini/` into the fork and add a `pmbench`
-  shell command. Real work, but it is **step one of the port**, and it measures
-  the platform the other emulators target. Sizing is comfortable: 114,708 text
-  against 347 KB free in the app partition; 14,984 bss against 143 KB internal.
+## Reference
 
-**Do not scale the host figure by a ratio.** `POKEMINI-CORE.md` says so directly;
-an attempt produced 0.3–1.3 MIPS depending on the anchor. Build it and run it.
+**Ports:** watch `/dev/ttyACM0`; a TinyTang board sits on `/dev/ttyACM1` — do not confuse them.
 
-**Against PM, plainly:** 96×64 is 3:2 *landscape* on a *portrait* panel. At max
-integer scale (3×) it is 288×192 = **41.5% of the framebuffer — smaller in area
-than the NES the operator just parked as too small**, with 112 rows of letterbox.
-
-## GBC — scoped, gnuboy recommended
-
-`docs/gbc-scoping.md`. Measured over four commercial ROMs, best of 3 (host noise
-7–12%): gnuboy 9,308–13,620 fps vs binjgb 5,684–8,848 — **1.54–1.79× faster**, and
-it emits `GB_PIXEL_565_BE` (the panel's byte order) so **no pixel conversion**.
-
-**The picture is the reason:** 160×144 at 2× = **320×288, full width, 69% of the
-framebuffer**, no side margins. NES reaches 46% and cannot improve — 256 × 1.25
-is not an integer.
-
-**The warning:** a GBC CPU is 2.34× the NES clock, so the projection is
-**28–45 fps, likely slower than the NES's 51**. Cheaper blit does not pay for
-dearer emulator. GBC is for the picture, not the speed.
-
-**Peanut-GB is DMG-only** — the fastest portable GB core is wrong for Color.
-Do not start there.
-
-## Build / flash / drive
-
+**Build and flash**
 ```sh
-cd ~/GIT/tinydesk-twatch/ports/twatchultra
+cd /run/media/vash/GIT/tinydesk-twatch/ports/twatchultra
 export IDF_PATH=$HOME/esp/esp-idf-5.3.1 IDF_TOOLS_PATH=$HOME/esp/idf-tools
 . $IDF_PATH/export.sh >/dev/null 2>&1
-idf.py build > /tmp/b.log 2>&1; echo "BUILD=$?"
-idf.py -p /dev/ttyACM0 -b 460800 flash
+idf.py build
+python -m esptool --chip esp32s3 -p /dev/ttyACM0 -b 460800 \
+  --before default_reset --after no_reset write_flash --flash_mode dio \
+  --flash_size 16MB --flash_freq 80m 0x10000 build/tinydesk.bin
+python -m esptool --chip esp32s3 -p /dev/ttyACM0 -b 460800 \
+  --before default_reset --after hard_reset read_mac
 ```
 
-**Driving the watch with the radio off — USB terminal only:**
+**Backup:** `./scripts/watch-backup.sh` from Escapement. One attempt in this session read to
+16% and failed with `Corrupt data` — the script correctly refused it and left no file. The
+retry after a reboot succeeded. **Check for competing access to `/dev/ttyACM0` if a read
+fails**, and reboot the watch before retrying.
 
-```sh
-python3 /tmp/wsend.py 'cmd' 4.0                 # type + Enter, raw reply
-python3 /tmp/wsend.py --raw '\x1b[21~\r' 3.0    # F10 -> Terminal
-python3 tools/watch-screen.py                   # parse into a 40x26 grid
-```
+**Key paths**
+- `/root/.tdsh_tz` holds the UTC offset in seconds (`-25200` = UTC-7). `/fs/root` is the
+  same place seen through the VFS root.
+- `/root` is littlefs in flash; `/sd` is the card.
+- `tdsh` has no `wc`, `sed`, `head`, `grep`. Terminal wraps at 40 columns — read the whole screen.
+- Start menu opens with `\x1b[21~` (F10); Terminal is first. **The selection persists across
+  opens**, so navigate deliberately rather than assuming the top item.
+- `/tmp/watch-screen.py` — the VT100 parser used for console interaction.
 
-`/tmp/wsend.py` and `/tmp/wrun.py` are **scratch and will be lost** — recreate if
-needed. `wrun.py` needs SSH, so it is unavailable while the radio is off.
-
-**Benchmarks:**
-
-```sh
-./scripts/nesbench.sh build && ./scripts/nesbench.sh run ROM 600
-./scripts/gbcbench.sh fetch && build && build-binjgb && compare DIR
-POKEMINI_SRC=/run/media/vash/GIT/tinytama/core/pokemini ./scripts/pmbench.sh build
-./scripts/pmbench.sh compare /tmp/pmini 8000
-```
-
-## Traps that cost builds
-
-- `CONFIG_ESP_CONSOLE_NONE=y` — `ESP_LOG` reaches nothing on USB.
-- The USB mirror goes **stale** once a bitmap owns the panel. Diagnostics to `/sd`.
-- `sdkconfig` is generated and gitignored; put changes in `sdkconfig.defaults`
-  **and delete `sdkconfig`**.
-- A pipeline through `grep`/`tail` reports **that command's** status.
-- Compare the **code region**, not the whole image, after a rebuild.
-- **SFTP: use `--chunk 4096`.** 8 KiB times out; a timeout leaves a **0-byte
-  file**, so check `ls -l` and never trust `EXIT=124`.
-- Only `paint_task` and now **the core-1 blit task** may touch the display. The
-  single-writer rule is lifted but **only by all three parts together** — DSP-008.
-  Invert the blit callback's order (take a free buffer *before* publishing the
-  finished one) and a dry pool pushes half-written frames.
-- `tdsh` has **no `chmod`, no `exec`, no ELF loader**. It cannot run host binaries.
-- QEMU has **no LX7 core**; a hello-world from the same toolchain fails identically
-  on every Xtensa core it offers. Xtensa measurements happen on the board or not
-  at all.
-
-## Verification left owed
-
-- **A fresh 16 MiB backup** — the last one predates `d4e2798` and `64ccc7d`.
-- `./scripts/tamacore-host.sh check --rom /run/media/vash/GIT/Tamagotchi_v3_us_eu.bin`
-  → expect `2000 frames, 250 pushed, 0 pixels differ`, RC 0.
-- `./scripts/tamacore-sync.sh check` → expect `in sync (13 files)`.
-- Fork host suite — 43/43 at last run; `/tmp` may be cleared, rebuild with
-  `cmake -B /tmp/tdtest -S . && cmake --build /tmp/tdtest -j8`.
+**Not committed:** nothing. Both trees clean.
