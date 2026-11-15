@@ -1,3 +1,53 @@
+## 5 COMMIT Unreleased 2026-11-14T21:23:00-07:00
+
+#### Coming From:
+
+Unreleased 547d232
+
+#### Purpose:
+
+Put Game Boy and Game Boy Color on the watch, because the NES's 256x240 at 1x is 46 percent of the framebuffer and cannot be scaled on this glass, and give the new port sound.
+
+#### Outcome:
+
+It runs at 59.54 fps and the operator's verdict on the sound was "looks and sounds perfect to me." THE PICTURE ARGUMENT WAS SETTLED BY ARITHMETIC BEFORE ANY CODE: 160 divides 320 exactly, so a Game Boy at 2x fills the glass edge to edge at 320x288 -- 69 percent of the framebuffer against the NES's 46 -- with no side margins, where 3x needs 480 columns and does not fit. That is the whole reason to prefer this console here, and it means the margins become the entire controller rather than the leftover strip below a drawn cluster. THE PERFORMANCE ARGUMENT WAS SETTLED BY MEASUREMENT BEFORE THE PORT EXISTED, AND IT OVERTURNED THE PROJECT'S OWN SCOPING DOCUMENT. `docs/gbc-scoping.md` projected 28 to 45 fps and recommended against the attempt; `gbcbench run` on Pokemon Crystal reports `frames=600 run_us=8615 fps=116.1 realtime=1.943`, which is nearly twice real time. The projection was wrong because it normalised a gnuboy figure through the NES interpreter as measured at `-Og`, and the firmware has since gained `-O2`, 120 MHz PSRAM and flash, and the 32 KB instruction cache. The measurement is the reason this port was written rather than argued about, and the scoping document now carries a note saying so. IN THE PORT ITSELF: 59.0 fps, 0.987x real time, emulation 13,768 us and blit 7,887 us. Those two run on separate cores and the guest does not wait for the blit, so throughput is the larger of them rather than their sum, which is why a pair of figures that add to more than a frame still holds full speed. The blit is cheap here in a way the NES's is not because gnuboy's `GB_PIXEL_565_BE` already writes the panel's byte order, so there is no palette lookup and no byte swap where the NES spends 4,355 us a frame turning indices into colours -- and that is against 92,160 pixels where the NES pushes 61,440. TWO BUGS IN THE PORT, BOTH MINE, AND THE SECOND IS THE ONE WORTH REMEMBERING. The first was a pointer overwritten by an index: `xQueueReceive(s_free_q, &s_render_target, 0)` copied a four-byte slot number over a four-byte pointer, so the render target became address 0x1 and the guest wrote its first frame into low memory. That was the hard fault the operator reported, and it printed nothing because this firmware builds with `CONFIG_ESP_CONSOLE_NONE`. THE SECOND FROZE THE PICTURE WITHOUT STOPPING THE GUEST: a defensive `if (slot < 0) return;` bailed out of `gb_video_cb` before the buffer reacquire, and a dry pool produces exactly "no render target," so the callback could never take a buffer back. Emulation then ran with no framebuffer at all, dropped to 8.5 ms a frame, and the glass kept showing the last frame ever pushed -- `frames` advanced 2,671 while `blits` advanced 1. It looked like a working emulator displaying a still picture, which is precisely the trap this project already has a rule about from the other side: DSP-007 says a display change is not verified until someone looks at the glass, and this is the converse, that the glass looking right is not evidence the pipeline is alive. Only the counters distinguished the two. The callback now always reacquires, the guest loop recovers independently, and neither path alone can strand the pool. AUDIO TURNED OUT TO ALREADY BE THERE, AND THREE DOCUMENTS SAID OTHERWISE. This port's header, the handoff notes and the scoping document all stated that `gnuboy`'s APU needed an external sample generator, naming `minigb_apu`, so audio was recorded as future work. It is not true of this fork: `components/gnuboy/sound.c` is a complete four-channel chip -- two squares, the 4-bit wave channel, noise, envelopes, sweep, length counters, NR50 master volume and NR51 panning -- synthesising straight into a host buffer. What was missing was a buffer and a callback, about twenty lines. AND THE SYNTHESIS WAS ALREADY BEING PAID FOR: `gb_sound_emulate()` runs from `gb_hw_vblank()` on every frame no matter what the host does with the output, and the `if (!output_buf) continue;` guard skips only the stores, not the channel arithmetic above them. So enabling audio cost the writes and the DMA copy and nothing else -- measured frame time did not move. THE RATE IS THE ONE REAL TRAP AND IT IS A ROUNDING BUG WITH A SEVEN-MINUTE FUSE. gnuboy does not resample. `gb_sound_reset()` sets `snd.rate = round(2^21 / samplerate)` and emits exactly one sample every `snd.rate` double-speed cycles, so the requested rate only selects the delivered one. Asking for 44,100 lands on 48, which delivers 2^21/48 = 43,690.67 Hz. Opening the sink at 44,100 would then drain 9.3 samples a second faster than the guest fills it; the DMA holds 4,092 frames, so the first click arrives roughly seven minutes in and presents as "the sound goes bad after a while." That is the same shape as the 0.7-sample-per-frame loss `pm.c` documents for the Pokemon Mini. Both the request and the clock now derive from one constant, `GB_AUDIO_HZ` 43,691, which makes the rounded divisor, the delivered rate and the I2S clock agree to 0.008 percent. A frame is 731.5 samples because 35,112 double-speed cycles divide by 48 with a remainder; the core carries that remainder across frames so 731 and 732 alternate and the average is exact, and the buffer only has to exceed the larger. Measured after wiring: `frames` 3,063 to 4,603 over 25.86 s is 1,540 frames, 59.54 fps, 0.9969x real time, `emu=9857us`, `blit=7874us`, zero audio drops in the window. The drop counter reads 4,802 at start and does not move afterwards, which is the ring filling from empty rather than a leak: 4,802 is one 4,092-frame ring plus about one frame, and a steady 62/s loss would have shown roughly 1,240 in the window. The `-Wall -Wextra -Werror` build also exercised an include collision worth recording: the gnuboy component ships its own `sound.h` and puts its directory on the include path, and a quoted include searches the including file's own directory first, so `main/gb.c` resolves to `main/sound.h` -- the amplifier's sink -- rather than the core's APU header. Confirmed from ninja's dependency list rather than assumed, because the two are different things with the same name. Build PASS at 0x2c9580 bytes with 7 percent of the app partition free, sha256 ea4433b490fd4178; deployment PASS by app-only flash to 0x10000 with `Hash of data verified`; the operator confirmed the picture fills the glass and the sound is correct. The required core-syntax audit was run against this entry before commit and passed after correcting three failures in its first draft: the Coming From field had been written with the fork commit this cycle produced rather than the `547d232` it started from, which is the resulting-hash prohibition; a vendored directory had been listed as one annotated path instead of the files it contains; and the audit result itself was absent, which this sentence supplies. `.ai/core.md` was confirmed unchanged and no other file in `.ai/` was touched.
+
+#### Next Steps:
+
+SRAM persistence is the owed item now that sound is closed: `gnuboy_load_sram` and `gnuboy_save_sram` exist in the core and are unused, so a Zelda save does not survive `gb stop`, and `saves/` on the card is empty and waiting for it. Only Link's Awakening DX has been run -- no other GBC cartridge, and no DMG cartridge at all, so the DMG compatibility path of the `GB_HW_CGB` machine is unproven. The left column reads Pause, Reset and Save and sends nothing, which is the same debt the NES and Pokemon Mini carry and the same disagreement `edges.h` exists to prevent. This cycle did not take the usual reboot and 16 MiB backup, so the last verified image remains `working-2026-11-14-2027.bin`; the firmware here is committed and rebuildable but is not archived. The wider backlog is unchanged: Pause, Reset and Save on all three emulators, the BLE controller reconnecting after every reboot, `pm.c` still duplicating the rasteriser `gamepad.c` owns, the NES owing battery-SRAM and its skip-path test, and the NES parked undecided with `docs/nes-accuracy.md` as its baseline and its page 15 crash as the first thing to chase.
+
+#### Files Modified:
+
+- ports/twatchultra/components/gnuboy/CMakeLists.txt
+- ports/twatchultra/components/gnuboy/COPYING
+- ports/twatchultra/components/gnuboy/CREDITS
+- ports/twatchultra/components/gnuboy/README.md
+- ports/twatchultra/components/gnuboy/cpu.c
+- ports/twatchultra/components/gnuboy/cpu.h
+- ports/twatchultra/components/gnuboy/gnuboy.c
+- ports/twatchultra/components/gnuboy/gnuboy.h
+- ports/twatchultra/components/gnuboy/hw.c
+- ports/twatchultra/components/gnuboy/hw.h
+- ports/twatchultra/components/gnuboy/lcd.c
+- ports/twatchultra/components/gnuboy/lcd.h
+- ports/twatchultra/components/gnuboy/sound.c
+- ports/twatchultra/components/gnuboy/sound.h
+- ports/twatchultra/components/gnuboy/tables.h
+- ports/twatchultra/main/gb.c
+- ports/twatchultra/main/gb.h
+- ports/twatchultra/main/gbcbench.c
+- ports/twatchultra/main/gbcbench.h
+- ports/twatchultra/main/CMakeLists.txt
+- ports/twatchultra/main/link_twatch.c
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: PASS
+
+---
+
 ## 4 COMMIT Unreleased 2026-11-14T20:31:00-07:00
 
 #### Coming From:
