@@ -1,3 +1,34 @@
+## 15 COMMIT Unreleased 2026-11-15T12:42:41-07:00
+
+#### Coming From:
+
+Unreleased f43d7ef
+
+#### Purpose:
+
+Make the Bluetooth console usable as a data channel, because it was silently losing bytes when a file was written through it.
+
+#### Outcome:
+
+File transfer over the BLE console is now byte-exact on both filesystems -- 1000 of 1000 bytes and 4000 of 4000, into littlefs and onto the SD card, each verified with `ls -l` read back through the same console -- and the defect that made it lossy was NOT in the Bluetooth layer. THE FIRST MEASUREMENT NAMED THE WRONG SUSPECT AND THE INSTRUMENT CLEARED IT. A 1000-byte transfer into littlefs arrived as 760 bytes, then 800, then 920, varying only with how fast the client sent. The BLE layer's own counters were then extended to report both what it accepted and what it handed to the reader, and they read `in=1853 out=1853 refused=0`: every byte that entered the ring left it. The loss was downstream. THE ACTUAL DROPPER WAS THE SHELL BRIDGE, and its size explains why nobody had seen it: `tdsh_bridge_esp.c` held a 256-byte input stream buffer, about six typed command lines, and passed it to `xStreamBufferSend()` with a zero timeout. That call returns a short count when the buffer is full and the caller ignored the count, so a file arriving at a few hundred bytes a second simply discarded everything past the first 256. A keyboard cannot fill 256 bytes between two frames; a file transfer fills it continuously. IT IS NOW 2048 BYTES AND THE WRITE WAITS. The wait is in bounded slices with a total budget, so the whole chain acquires backpressure rather than one component absorbing it: the shell drains, the bridge blocks briefly, the desktop's key handling slows, fewer bytes leave the transport, and the transport's own flow control tells the far end to pause. The BLE side completes that chain in two ways -- a full ring now REFUSES the write with ATT 0x11 instead of swallowing it, and XON/XOFF watermarks at three-quarters and one-quarter of the ring pause a client that honours them. The refusal was observed working: a test client that predated the flow control crashed with `BleakGATTProtocolError INSUFFICIENT_RESOURCE (17)`, which is the new refusal arriving where silent loss used to be, and once the client honoured XOFF and retried, the transfer came through exact. TWO CHANGES WERE TRIED, FOUND WRONG, AND REMOVED RATHER THAN LEFT IN. Growing `TD_EVENT_QUEUE_SIZE` from 32 to 128 was a plausible theory -- every input byte becomes one event and a 40-byte command line is 40 events -- and it changed nothing measurable, so it was reverted rather than shipped carrying a rationale that did not hold; the CMake comment asserting it was the cause would have misled the next reader. And blocking on the OUTPUT path was tried and made things dramatically worse: it stalls the renderer, which then repaints, and reading a 4000-byte file back produced 17,700 bytes of screen traffic with not one of the file's 100 line markers intact. Output therefore stays non-blocking and lossy under burst, which is the right trade -- a lost output byte shortens a diagnostic, where a lost input byte corrupts a file quietly. WHAT REMAINS IMPERFECT AND IS RECORDED RATHER THAN HIDDEN: reading a large file back over the console is still lossy, because the notify path is throttled by connection interval and the ring can overflow; `cat` of a 4000-byte file returned roughly 3.4 KB. Writing is solid, reading is best-effort, and the asymmetry is deliberate. A client that ignores both the ATT refusal and XON/XOFF can still lose data, which is stated in the header. The BLE connection also proved slow to recover after repeated client churn -- a killed client leaves the watch believing it is connected until supervision timeout, during which it does not advertise. Build PASS at 0x2db650 bytes with 3 percent of the app partition free, sha256 28aed4e0e70944d9; deployment PASS by app-only flash to 0x10000 with `Hash of data verified`; the board was rebooted to a clean desktop and a full 16 MiB image archived with it held in the bootloader across read and verify: `working-2026-11-15-1238.bin`, 16,777,216 bytes, sha256 `526e48a9ecb9cb8f51a404c86f8d08af9cea593448f88e423265612e9b37f133`, `verify OK (digest matched)`, its sidecar re-checked from its own directory, `ota_0` inside it compared byte-identical to the build. The operator's requirement was that file transfer be solid, and the acceptance is the byte counts above rather than a counter. The required core-syntax audit was run against this entry before commit and passed, with `.ai/core.md` confirmed unchanged and `.ai/core-log.md` the only `.ai/` file touched; no reference record changed, because this is a defect in this project's own bridge rather than an external fact.
+
+#### Next Steps:
+
+READING A FILE BACK OVER THE CONSOLE IS THE OWED HALF, and it needs a different approach from writing: the notify path is throttled by connection interval, so `cat` of a 4 KB file returned about 3.4 KB. Options, none yet tried: raise the ATT MTU above 256 so a notification carries more, shorten the connection interval by requesting different parameters, or stop using `cat` for retrieval and have the watch compute a checksum the client can compare -- which would make transfer verification cheap without needing the bytes back at all. THE CONNECTION-RECOVERY BEHAVIOUR SHOULD ALSO BE HANDLED: a client that dies without disconnecting leaves the watch advertising nothing until supervision timeout, which reads as a dead console; either a shorter supervision timeout or an explicit `bleuart drop` that terminates a stale connection would make the failure self-limiting. The `usbdiag` command and the DAC it was written for remain untested -- that work was interrupted by this defect and is still the larger objective, with the enumerated device (TTGK KM-HIFI-384KHZ 3302:3366, UAC 2.0, isochronous synchronous OUT) waiting to be tried now that the console can watch it. `usb_hid.c` still carries `ESP_INTR_FLAG_LEVEL1`, so the USB keyboard path remains broken. The `coredump` partition stays for now: it has named three faults in one session and cost one flash of a resized `ota_1`, and should be reverted deliberately rather than drifting. The wider backlog is unchanged: Pause, Reset and Save are labelled on all three emulators and send nothing, the Game Boy's right column has a third slot that is drawn furniture and could carry `gb save`, the BLE controller must be reconnected after every reboot, `pm.c` still duplicates the rasteriser `gamepad.c` owns, the NES owes battery-SRAM and its skip-path test, and the status strip still owes the battery and the year against entry 11's measurement.
+
+#### Files Modified:
+
+- ports/esp_idf/app/tdsh_bridge_esp.c
+- ports/twatchultra/main/bleuart.c
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: PASS
+
+---
+
 ## 14 COMMIT Unreleased 2026-11-15T11:50:33-07:00
 
 #### Coming From:
