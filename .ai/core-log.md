@@ -1,3 +1,33 @@
+## 6 COMMIT Unreleased 2026-11-14T21:35:00-07:00
+
+#### Coming From:
+
+Unreleased 18cc0c1
+
+#### Purpose:
+
+Reboot the watch and take a verified full-flash backup of the audio build, which entry 5 recorded as owing but not done.
+
+#### Outcome:
+
+The board was rebooted and a full 16 MiB image archive was taken and verified, so entry 5's statement that no backup had been made is superseded and a future session should not act on it. ENTRY 5 UNDERSTATED THE PROJECT STATE BECAUSE IT WAS WRITTEN BEFORE THE OPERATOR ASKED FOR THE BACKUP, and its `Next Steps` says the cycle did not take the usual reboot and 16 MiB backup and that the last verified image therefore remains `working-2026-11-14-2027.bin`. That was accurate when written and is no longer accurate, and it is corrected here rather than edited in place because a committed entry is settled history. THE REBOOT USED `--before default_reset --after hard_reset`, which the backup script documents as the only form that works from both a running board and one in esptool's stub on this native USB-JTAG port; the board re-enumerated and emitted 1,193 bytes of VT100 within the first seconds, which is the evidence that it came back. THE IMAGE IS `working-2026-11-14-2128.bin`, 16,777,216 bytes exactly, sha256 `24d2366080d576f745dc5027cd2934d40b3e84ef6687c43910d978745abb8b3c`, with the sidecar re-checked afterwards by `sha256sum -c` rather than trusted from its own creation. The read took 228.6 seconds at 587 kbit/s and `verify_flash` reported `verify OK (digest matched)` against the chip, with the board held in the bootloader across both so nothing could write NVS between the read and the compare -- which is the race `watch-backup.sh` exists to close, and the reason a backup that verified four minutes late was found to have three changed blocks on 2026-11-12. The read was confirmed complete at the expected size before the compare was attempted, so a short read could not have been verified as a good image. THE IMAGE CONTAINS THE BUILD THAT WAS FLASHED, ESTABLISHED FROM THE IMAGE ITSELF RATHER THAN ASSUMED: the partition table parsed out of offset 0x8000 lists `ota_0` at 0x10000 with size 0x300000, and the 2,921,856 bytes at that offset hash to `ea4433b490fd4178`, which is `build/tinydesk.bin` from the audio cycle byte for byte. So the archived image is the Game Boy Color port with sound, not a pre-audio image. The script also confirmed the board alive after its own reset and the peripheral port answered afterwards, so this cycle did not repeat the failure entries 15 and 20 record, where a board was left silent while the script exited 0. WHAT THE IMAGE DOES NOT HOLD is the SD card: the ROMs, the captures, the saves directory and the card's layout are device state outside the 16 MiB flash and are described only by the `README.md` at the card's root. The required core-syntax audit was run before this commit and passed: `.ai/core.md` was confirmed unchanged, `.ai/core-log.md` is the only `.ai/` file touched, and this entry validates against the template with six sections in order, a sequential number, a `Coming From` naming the pre-cycle `HEAD` rather than this commit, prose Outcome and Next Steps with no nested lists, and three Status lines using only allowed values.
+
+#### Next Steps:
+
+SRAM persistence remains the owed item on this port: `gnuboy_load_sram` and `gnuboy_save_sram` exist in the core and are unused, so a Zelda save does not survive `gb stop`, and the card's `saves/` directory is empty and waiting for it. No cartridge other than Link's Awakening DX has been run -- no other Game Boy Color title and no DMG cartridge at all -- so the DMG compatibility path of the `GB_HW_CGB` machine is unproven and is the larger of the two unknowns. The left column reads Pause, Reset and Save on this port and sends nothing, the same debt the NES and Pokemon Mini carry and the same disagreement `edges.h` exists to prevent. The wider backlog is unchanged: Pause, Reset and Save on all three emulators, the BLE controller reconnecting after every reboot, `pm.c` still duplicating the rasteriser `gamepad.c` owns, the NES owing battery-SRAM and its skip-path test, and the NES parked undecided with `docs/nes-accuracy.md` as its baseline and its page 15 crash as the first thing to chase.
+
+#### Files Modified:
+
+None.
+
+#### Status:
+
+- Build: N/A
+- Deployment: N/A
+- User Test: N/A
+
+---
+
 ## 5 COMMIT Unreleased 2026-11-14T21:23:00-07:00
 
 #### Coming From:
