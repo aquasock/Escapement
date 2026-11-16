@@ -1,3 +1,47 @@
+## 30 COMMIT Unreleased 2026-11-16T16:57:59-07:00
+
+#### Coming From:
+
+Unreleased 791cc7b
+
+#### Purpose:
+
+Finish the exercise the modules partition was created for: delete the inline FLAC decoder and recover the app-image space it held, proving the module path can carry the only decoder rather than a spare one.
+
+#### Outcome:
+
+THE INLINE DECODER IS GONE AND `music` STILL PLAYS. One player, two names: `music` is the user-facing command and `modflac` survives as its alias, both dispatching to the loop that decodes through the `modules` partition. Deleting `music.c`, `musicdec.cpp`, `musicdec.h`, the `micro-flac` requirement and its `REQUIRES` entry took the app from 0x2ead40 to 0x2e3000 and free space in ota_1 from 21 KB to 53 KB -- 32 KB recovered against the 31.7 KB the component was measured to cost. THE TRACK THAT PROVES IT IS THE OPERATOR'S, not a tone: a 5:58 FLAC through `music` gave `state done, 15792504 frames, 0 errors, 0 short writes`, verdict clean, and the operator confirmed by ear that it sounded good. 15,792,504 frames is 358.1 s at 44.1 kHz, matching the track. heap came home: internal SRAM 20,707 bytes free DURING playback, 33,727 after, so the PSRAM buffers are genuinely released. A clean `make clean && make flac` reproduces the flashed blob byte-for-byte (sha256 dd47bce9), so the module build is deterministic. TWO BUGS CAME OUT OF USING IT, AND THE SECOND IS THE ONE WORTH REMEMBERING. The rate was hard-coded at 44100 in `play_task` while the module had already parsed the real value into its handle -- the fix is a single read of `w[2]`, and verified: `tone1000_48000` reports `rate 48000` and exactly 192000 frames, so a 48 kHz file no longer plays sharp by a semitone and a half. THE SECOND IS THE MAPPING MOVES WHEN THE APP IMAGE DOES. Removing the inline decoder shifted the instruction window 0x42ae0000 -> 0x42ad0000 and the data window 0x3cbe0000 -> 0x3cbd0000. `moddata.at` still held the old pair, the blob was linked for it, AND THE BLOB STILL EXECUTED -- entry reached by offset from whatever base is live -- then read its `.rodata` 64 KB off. The only symptom was `last -5`, `FLAC_DECODER_ERROR_BAD_MAGIC_NUMBER`, on two files that were perfectly good, because micro-flac compares the input against a MAGIC_BYTES table living in that misdirected `.rodata`. It looks exactly like a corrupt file and is not one. THE FIX IS IN THREE PARTS. The module header now carries `linked_inst` and `linked_data` (ABI 2), `modload_prepare()` compares them against the live mapping and refuses a mismatch instead of calling into it, and `modload_why()` retains the reason so the report is `module linked for inst 42ae0000 data 3cbd0000, mapped at 42ad0000 3cbd0000 -- rebuild it` rather than "no module mapped at boot", which was true and useless. That guard was verified by deliberately flashing a header claiming the old base: it refused, reported the exact mismatch, and decoded nothing. `patch_header.py` and `link.ld` now take BOTH bases from `moddata.at` instead of pinning the text base in three separate places, and `make modaddr` reproduces the typed addresses by reading `/root/modaddr.txt` out of the storage partition with esptool -- no F10, no Enter, no display mirror, which are the three things that have each cost a cycle here. Two smaller corrections: `modtest` needed the same `--only-section` split as the real blob, because `.rodata` links into the data window at a LOWER address than `.text` so a plain `objcopy -O binary` started the file at `.rodata` and the header was not at offset 0 (`bad magic 0x75646f6d` -- the letters of the word "module" from a string literal); and the status command reported `handle: magic 00000000 rate 0` for the whole duration of a working track, because the handle was only copied out when the task ended and the block was freed, so it now reads the live block while one is playing.
+
+#### Next Steps:
+
+THE SECOND CODEC IS NOW CHEAP, which was the point of all of this. The decoder occupies 26,685 bytes of the 1 MB `modules` partition and 1,976 of the 1 MB `moddata`, against 704 KB for all eleven Rockbox codecs, so the arithmetic says a full codec set fits with room to spare. Doing it means a second blob, a second `make` target and a loader that can hold more than one entry point -- `modload` currently maps one partition and reads one header, so a registry of blobs by name is the next structural piece rather than another decoder. The Ogg container is the obvious companion to FLAC, and `MICRO_FLAC_DISABLE_OGG=1` is already set for the FLAC build, so an Opus or Vorbis path would reuse the partition without touching what works. THREE SMALLER ITEMS STAND. The module hard-codes nothing about rate now, but `modcall_t` still does not return it -- `modflac` reads the handle's `rate` word directly, which works and is documented, but a module that is not this one would need the field. `__assert_func` routes through the API table and returns rather than halting, and that path has still only been reviewed, never exercised by a failing assert. And the app has no picker, no queue, no seek and no progress display: `music` takes a path and plays it, which is the smallest thing that answers "does the decoder reach the speaker" and is no longer the whole answer the project wants.
+
+#### Files Modified:
+
+- ports/twatchultra/main/modflac.c
+- ports/twatchultra/main/modload.c
+- ports/twatchultra/main/modload.h
+- ports/twatchultra/main/CMakeLists.txt
+- ports/twatchultra/main/link_twatch.c
+- ports/twatchultra/main/music.c
+- ports/twatchultra/main/musicdec.cpp
+- ports/twatchultra/main/musicdec.h
+- ports/twatchultra/modules/Makefile
+- ports/twatchultra/modules/link.ld
+- ports/twatchultra/modules/moddata.at
+- ports/twatchultra/modules/patch_header.py
+- ports/twatchultra/modules/read_modaddr.py
+- ports/twatchultra/modules/src/flacmod.cpp
+- ports/twatchultra/modules/src/modtest.c
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: PASS
+
+---
+
 ## 29 COMMIT Unreleased 2026-11-16T16:08:24-07:00
 
 #### Coming From:
