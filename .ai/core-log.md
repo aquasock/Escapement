@@ -1,3 +1,33 @@
+## 25 COMMIT Unreleased 2026-11-16T13:24:38-07:00
+
+#### Coming From:
+
+Unreleased 14398a9
+
+#### Purpose:
+
+Take a full backup of the working FLAC-player firmware, then add a partition for codec blobs that costs no RAM, funded by shrinking the littlefs partition without losing a byte.
+
+#### Outcome:
+
+THE FLASH NOW CARRIES A 2 MB RAW `modules` PARTITION AT 0xE00000 and `storage` fell from 9.88 MB to 7.87 MB to fund it; both 3 MB OTA slots are untouched, and every file that was in the littlefs partition is still there, verified byte-for-byte. TWO BACKUPS WERE TAKEN, because the first became obsolete the moment the layout changed. `music-2026-11-16-1259.bin` captures the pre-change layout, 16,777,216 bytes, sha256 `7a308611b75adaad6546c833282b18b7feefb20d9b63a0d33774bc725d6c0a45`, with its app region verified byte-identical to the build then on the board. `modules-2026-11-16-1320.bin` captures the new layout, sha256 `34a9d33688e18e0940bf2f0ef7642143f8e0b871f3d3a2a040cbc4e86064262b`, checked with `sha256sum -c`, and its app region at 0x10000 verified byte-identical to the build at `7af3e9c2aa9cae89`. That digest moved from `40aa57945e448dcd` when the app was rebuilt for the new partition table, which changed only the app descriptor's build time -- the phenomenon entry 20 recorded, and the reason a digest read before a rebuild must not be compared against one read after. THE MIGRATION IS THE PART WORTH CARRYING, because the first measurement was wrong in a way that would have destroyed data. Counting non-0xFF bytes in the storage partition reported 4,303,700 bytes across 2,429 of 2,528 blocks, with 1,151,524 of them ABOVE the new 7.87 MB boundary, which reads as "shrinking this loses 1.1 MB". Mounting the partition with littlefs-python 0.19.0 gave the truth: 25 files and 11 directories, 22,244 bytes, 34 blocks in use. The rest was stale blocks awaiting garbage collection. A raw byte census is not a measure of what a filesystem holds; only a mount is. So the migration was done by extraction rather than by truncation: all 25 files were read out, a fresh littlefs image was built at 0x7E0000 and populated, and that image was flashed. Four files including `etc/board.conf` compared byte-identical afterwards, and the board came up with its board keys intact (`usb.host = 0`, `usb.dac = 1`, `bt.enable = 1` and the rest), its shell history, its Apps, its Start-menu `.tdlink` files and its Desktop. The music player still decodes the same 352800-frame 44.1 kHz tone with 0 errors and 0 short writes after the change, which is the evidence that the app, the filesystem and the SD card all still agree. THE PARTITION ITSELF IS UNPROVEN AND IS RECORDED AS SUCH. Xtensa executes from flash natively -- every instruction ESP-IDF runs is XIP-mapped -- so a blob at 0xE00000 can be mapped with `esp_partition_mmap()` as instructions and called, costing no internal SRAM, which is the resource this board lacks. All eleven Rockbox codecs are 704 KB against the partition's 2 MB. But nothing loads from it yet: a blob must be linked position-independently for that address and callable across the Xtensa windowed ABI, and neither has been demonstrated. The region was read back and confirmed all 0xFF. Subtype 0x40 is the first application-defined data subtype, chosen because ESP-IDF reserves 0x00-0x3F. The live table was read back from flash and decoded to confirm it, rather than trusted from the build directory. Reference FLS-004 was added with the layout, the address, the mmap reasoning and the mount-not-census rule. The required core-syntax audit was run before commit and passed, with `.ai/core.md` unchanged and `.ai/core-log.md` and `.ai/core-reference.md` the only `.ai/` files touched.
+
+#### Next Steps:
+
+THE MODULES PARTITION IS A ROOM WITH NOTHING IN IT, and proving it works is the next task: build one small position-independent blob, map it with `esp_partition_mmap()`, and call it, before any codec is linked for it. If the Xtensa windowed ABI turns out to be unusable for cross-partition calls the design is dead and the room should be given back to `storage`, so the experiment should be cheap and early rather than after a codec port. The alternative still on the table is trimming the app image instead -- MicroPython, wolfSSH and wolfSSL dominate it -- which would need no new mechanism at all. Three smaller items stand. The `music` command plays a file and nothing else: no seek, no queue, no resume, no Ogg-FLAC test, and no app window, which was deliberate because the smallest thing that answers "does a decoded sample reach the speaker" was the goal. `dac_wake()` is a mitigation, not an understanding, and the DAC path stays out of the player by the operator's instruction. And the storage partition is now 7.87 MB holding 136 KB, so the space freed is real; if a future codec needs more than 2 MB the modules partition can grow at storage's expense without touching the code.
+
+#### Files Modified:
+
+- ports/twatchultra/partitions.csv
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: PASS
+
+---
+
 ## 24 COMMIT Unreleased 2026-11-16T12:44:22-07:00
 
 #### Coming From:

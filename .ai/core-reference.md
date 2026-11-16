@@ -234,6 +234,8 @@ Topic IDs are the `record_id` prefix. An entry reserves a name; it does not clai
 | Where does the kernel image live in flash, and in what form? | FLS | FLS-001 |
 | What does the release image contain, and what is missing from it? | FLS | FLS-002 |
 | Why does a full image flash cost the display and the credentials? | FLS | FLS-002 |
+| Where can codec or decoder blobs live so they cost no RAM? | FLS | FLS-004 |
+| How much does a littlefs partition actually hold? | FLS | FLS-004 |
 | Why does NimBLE refuse to pair? | BLE | BLE-001 |
 | Why does a report-map read kill the link? | BLE | BLE-002 |
 | Boot protocol or report protocol? | BLE | BLE-003 |
@@ -332,6 +334,7 @@ KRN-005: "Core 0 runs the radios because the WiFi driver is a closed blob only E
 KRN-004: "The largest contiguous block is 512 KB (order 7), and exactly 524288 bytes is the worst size to request: malloc(524288) fails where malloc(524000) succeeds because the allocator header does not fit, and splitting the ROM into two halves fails for the same reason; one such allocation also consumes the block for the rest of the session"
 KRN-003: "The kernel is linked against a fixed address in the firmware's RAM (CONFIG_VECTORS_ADDR) which is the linker symbol space_for_vectors; moving it via a firmware change gives a kernel that boots and then dies silently at 'Run /sbin/init'"
 
+FLS-004: "The T-Watch Ultra firmware adds a 2 MB raw `modules` partition at 0xE00000 (subtype 0x40) for codec blobs meant to be mmap-ed as instructions, funded by shrinking `storage` from 9.88 MB to 7.87 MB; a littlefs partition's live contents must be read by MOUNTING it -- 4.2 MB of non-0xFF blocks held only 22 KB of files"
 FLS-001: "16 MiB layout: nvs 0xa000/0x5000, phy_init 0xf000/0x1000, factory 0x10000/0xc0000, etc 0xd0000/0x70000, linux 0x140000/0x400000, rootfs 0x540000/0x780000, home 0xcc0000/0x340000; xipImage is stored RAW at 0x140000 and can be written alone"
 FLS-002: "The release image is not this project's state: its kernel has no CO5300 driver, its firmware requires octal PSRAM, and its /etc has no WiFi credentials; flashing it costs the display, the login, and the credentials"
 
@@ -1239,6 +1242,20 @@ USB-006: "VERIFIED: the USB-C DAC's playback FU MUTE refuses SET_CUR with a STAL
     - "on the watch: `cat /etc/init.d/S03keepconfig` -- the FILES and KEYS lists, and the stamp gate"
     - "FLS-001 for the partition layout and the kernel-only write path"
   verification: "Verified on hardware: `/etc/TZ` written by hand and `/etc/init.d/S01hwclock` installed both survived a plain reboot, while `/etc/init.d/S01hwclock` was absent from the board at the start of this cycle despite being documented as running at shutdown. The surviving-file list is read directly from the script's own `FILES` and `KEYS` variables, not inferred."
+
+- record_id: FLS-004
+  kind: FLS
+  topic_id: FLS
+  status: VERIFIED
+  verified_date: 2026-11-16
+  title: "A 2 MB raw `modules` partition at 0xE00000 holds codec blobs to be mmap-ed as instructions, and a littlefs partition's live size is only knowable by mounting it"
+  statement: "The T-Watch Ultra's 16 MiB flash is laid out as nvs 24K, phy_init 4K, ota_0 3M at 0x10000, ota_1 3008K at 0x310000, coredump 64K at 0x600000, otadata 8K at 0x610000, storage (littlefs) and, since this change, a 2 MB `modules` partition of type data and subtype 0x40 at 0xE00000. `storage` shrank from 0x9E0000 to 0x7E0000 to fund it, so it is now 7.87 MB (2016 blocks of 4096). The two OTA slots are unchanged. `modules` is raw: Xtensa executes from flash natively because every instruction ESP-IDF runs is XIP-mapped, so a blob there can be mapped with esp_partition_mmap() as SPI_FLASH_MMAP_INST and called, costing no internal SRAM to load -- which is the resource this board is short of. Subtype 0x40 is the first application-defined data subtype; ESP-IDF reserves 0x00-0x3F."
+  consequence: "A codec or decoder that does not fit the app image has somewhere to live. The app had 27.5 KB of headroom in ota_1 and the FLAC decoder already cost 31.7 KB, so a second codec could not be added inline at all; all eleven Rockbox codecs are 704 KB against this partition's 2 MB. NOTHING LOADS FROM IT YET, and the open risk is real: a blob must be linked position-independently for this address and callable across the Xtensa windowed ABI, and neither has been demonstrated. The partition costs nothing while it is empty. THE SECOND LESSON IS ABOUT MEASUREMENT: a littlefs partition's live contents cannot be inferred from the raw flash. This one showed 4,303,700 non-erased bytes across 2,429 of 2,528 blocks, 1,151,524 of them above the new 7.87 MB boundary -- which read as 'shrinking would destroy 1.1 MB'. Mounting it showed the truth: 25 files and 11 directories, 22,244 bytes, 34 blocks. The rest was stale blocks awaiting garbage collection. Any future decision to shrink or reformat a littlefs partition must start from a mount, not from a byte census."
+  sources:
+    - "tinydesk-twatch ports/twatchultra/partitions.csv (the table, with the reasoning in comments)"
+    - "ESP-IDF 5.3.1 components/esp_partition/include/esp_partition.h (esp_partition_mmap, subtype ranges)"
+    - "measurements: `esptool read_flash 0x8000 0xc00` decoded with gen_esp32part.py, and littlefs-python 0.19.0 mounting the extracted storage partition"
+  verification: "Verified on hardware 2026-11-16 (core-log entry 25). The live table was read back from flash and decoded, showing `storage,data,littlefs,0x620000,8064K` and `modules,data,64,0xe00000,2M`. The migration was done by extracting all 25 files from the old partition with littlefs-python, rebuilding a fresh image at 0x7E0000 with them, and flashing that; four files including etc/board.conf compared byte-for-byte identical afterwards, and the board booted with its board keys, shell history, Apps, Start-menu .tdlink files and Desktop intact. The modules region was read back and confirmed all 0xFF. The music player still decodes the same 352800-frame 44.1 kHz tone with 0 errors. A full 16 MiB backup of the new layout was taken and its app region verified byte-identical to the build."
 
 - record_id: JFS-001
   kind: JFFS2
