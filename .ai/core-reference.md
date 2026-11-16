@@ -135,6 +135,10 @@ Topic IDs are the `record_id` prefix. An entry reserves a name; it does not clai
   name: "ESP32-S3 USB host"
   description: "The OTG port acting as a host under ESP-IDF 5.3.1: the FIFO split that bounds endpoint sizes, the event loops the host library requires, and the devices measured on it."
 
+- topic_id: MOD
+  name: "Loadable modules in flash"
+  description: "Running code from the `modules` flash partition on the ESP32-S3: mapping raw flash as instructions, calling across a partition boundary, and the API-table contract a blob uses to reach the firmware when it cannot link against it."
+
 - topic_id: AUD
   name: "Audio playback, decoding and volume"
   description: "How a sample reaches the speaker or the DAC's analog output and what happens to it on the way: compressed-audio decoding on this CPU and the memory cost that decides which decoder fits, volume as a taper law rather than a percentage, the perceptual and hardware conventions behind those laws, and the resolution cost of attenuating in the samples."
@@ -235,6 +239,7 @@ Topic IDs are the `record_id` prefix. An entry reserves a name; it does not clai
 | What does the release image contain, and what is missing from it? | FLS | FLS-002 |
 | Why does a full image flash cost the display and the credentials? | FLS | FLS-002 |
 | Where can codec or decoder blobs live so they cost no RAM? | FLS | FLS-004 |
+| How does a module in the modules partition call the firmware? | MOD | MOD-001 |
 | How much does a littlefs partition actually hold? | FLS | FLS-004 |
 | Why does NimBLE refuse to pair? | BLE | BLE-001 |
 | Why does a report-map read kill the link? | BLE | BLE-002 |
@@ -425,6 +430,7 @@ USB-002: "ESP-IDF 5.3.1's host needs TWO event loops: usb_host_lib_handle_events
 USB-003: "The TTGK KM-HIFI-384KHZ DAC (3302:3366) enumerates on the S3 at full speed as UAC2: playback interface 1, ep 0x01 isochronous synchronous OUT, interval 1, alt 1 = 2 ch S16 mps 384, alt 2 = S24 576, alt 3 = S32 768; clock 9 via input terminal 1, RANGE 8000/16000/32000/44100/48000/96000 Hz; it played a 48 kHz S16 tone on both channels; a plug inserted or removed in its 3.5 mm jack makes it re-enumerate"
 USB-004: "Isochronous OUT through IDF 5.3.1 at 16 packets per transfer puts a few-sample discontinuity at every transfer boundary (440 Hz tone sidebands at +/- n x 62.5 Hz, -36 dB) even with every packet full and on time; at 8 packets it is gone (sidebands -107 dB, THD+N -62 dB); mechanism unknown"
 USB-005: "Claiming a USB interface allocates DMA descriptor lists and IDF 5.3.1 PANICS (hcd_dwc.c:1059 assert) when it cannot; the internal DMA pool is what runs out (open SD files and 4 KB task stacks both draw on it), so all USB audio DMA allocation happens once in `uac2 open` and the USB tasks now run on PSRAM stacks"
+MOD-001: "A blob in the modules partition is mapped as INSTRUCTIONS (0x42000000..0x43ffffff) and called directly, but it must never be data-read through that pointer and must never map the partition twice; it reaches the firmware through ONE API table whose address the blob build derives from the app ELF, so a blob belongs to the build that produced it"
 AUD-001: "A volume percentage is a loudness scale, not an amplitude, and the three conventions differ: -10 dB at half is the psychoacoustic half-loudness result, -18 dB at half is what a 15A audio-taper pot and VLC's cubic law both give, and linear-in-dB spends an even 3.6 dB per 10% over a 36 dB range; a power law is accurate at one point and inverts the feel"
 AUD-002: "FLAC decoding fits because micro-flac (Apache-2.0) sizes one PSRAM working buffer from the file's own STREAMINFO and has Xtensa LPC assembly, costing 31.7 KB of flash; Rockbox's decoder cannot run here at all because it reserves ~190 KB of internal SRAM as static 7-channel buffers"
 USB-006: "VERIFIED: the USB-C DAC's playback FU MUTE refuses SET_CUR with a STALL, so its silent first stream cannot be unmuted from the host; a streaming alternate-setting cycle (dac_wake(), `uac2 wake`) re-arms it, and its hardware volume barely changes loudness on headphones"
@@ -1256,6 +1262,20 @@ USB-006: "VERIFIED: the USB-C DAC's playback FU MUTE refuses SET_CUR with a STAL
     - "ESP-IDF 5.3.1 components/esp_partition/include/esp_partition.h (esp_partition_mmap, subtype ranges)"
     - "measurements: `esptool read_flash 0x8000 0xc00` decoded with gen_esp32part.py, and littlefs-python 0.19.0 mounting the extracted storage partition"
   verification: "Verified on hardware 2026-11-16 (core-log entry 25). The live table was read back from flash and decoded, showing `storage,data,littlefs,0x620000,8064K` and `modules,data,64,0xe00000,2M`. The migration was done by extracting all 25 files from the old partition with littlefs-python, rebuilding a fresh image at 0x7E0000 with them, and flashing that; four files including etc/board.conf compared byte-for-byte identical afterwards, and the board booted with its board keys, shell history, Apps, Start-menu .tdlink files and Desktop intact. The modules region was read back and confirmed all 0xFF. The music player still decodes the same 352800-frame 44.1 kHz tone with 0 errors. A full 16 MiB backup of the new layout was taken and its app region verified byte-identical to the build."
+
+- record_id: MOD-001
+  kind: MOD
+  topic_id: MOD
+  status: VERIFIED
+  verified_date: 2026-11-16
+  title: "Code loads from the modules partition by mapping flash as INSTRUCTIONS and calling it, and reaches the firmware through one API table whose address the blob build derives from the app's ELF"
+  statement: "A raw flash partition can be executed from on the ESP32-S3 because every instruction ESP-IDF runs is already XIP-mapped: esp_partition_mmap(p, 0, p->size, ESP_PARTITION_MMAP_INST, &base, &h) returns an address in the instruction window 0x42000000..0x43ffffff (measured: 0x42ae0000 for a 2 MB partition at 0xE00000), and a function pointer into it can be called across a partition boundary with the Xtensa windowed ABI intact. Three constraints are measured rather than assumed. FIRST, the mapped bytes must not be DATA-READ through that pointer: a load faults with exccause 3 (LoadStoreErrorCause) while the same bytes read through esp_partition_read() are fine, so a blob header is read with esp_partition_read() into a stack struct and never through the mapped address. SECOND, mapping the same partition twice -- once DATA, once INST -- does not give two windows: the second mapping returned 0x3cae0000, which is PSRAM, and the call faulted with exccause 2 (InstructionFetchErrorCause). THIRD, a blob has no writable state: it executes from read-only flash, its .bss cannot be zeroed because no loader runs, so link.ld discards .data and .bss and the module must keep no static buffers. Because a blob cannot resolve an external symbol, it reaches the firmware through ONE table of function pointers (modhost_t, ABI-versioned); the firmware publishes the table's address in its own RAM as g_modhost_ptr and the blob build reads that symbol's ADDRESS out of the app's ELF with nm, passing it as a compile-time constant. Measured drift: rebuilding the app moved it from 0x3c27b630 to 0x3c27b650 within one cycle."
+  consequence: "Code that does not fit the app image has somewhere to run without spending internal SRAM, which is this board's scarce pool. A blob is tied to the firmware build that produced it, because the table's address is absolute; the Makefile derives it every time, so the binding cannot silently go stale, and a check target fails loudly when the app has not been built. The build must compile HOSTED -- libstdc++ headers refuse -ffreestanding -- and enforce freestanding-ness at link time with -nostdlib plus a shim; C and C++ flags must be separate because gcc rejects -std=gnu++17, -fno-rtti and -fno-threadsafe-statics on C input; and the published symbol needs __attribute__((used)) plus a real reference from the firmware, since --gc-sections collects a section nothing references and the blob needs the symbol's ADDRESS rather than its value. A blob should report errors upward rather than assert: the shim's __assert_func reports through the table and returns."
+  sources:
+    - "tinydesk-twatch ports/twatchultra/main/modload.c, modhost.c, modhost.h; modules/Makefile, modules/link.ld, modules/src/modshim.c, modules/src/modtest.c"
+    - "ESP-IDF 5.3.1 components/esp_partition/include/esp_partition.h (esp_partition_mmap, SPI_FLASH_MMAP_INST, esp_partition_read)"
+    - "coredumps: exccause 3 excvaddr 0x42ae0014 (data load through an instruction mapping); exccause 2 excvaddr 0x3cae0028 (executing a second mapping that landed in PSRAM)"
+  verification: "Verified on hardware 2026-11-16 (core-log entries 26 and 27). A 77-byte blob mapped at 0x42ae0000 and called returned 42, proving control transfer and the windowed ABI. A 730-byte blob then read the API table at the build-derived address, called malloc, memset, memcpy and free through it, wrote into a caller-owned PCM buffer, and returned 42, with the console showing 'mapped for execution at 0x42ae0000', 'entry +0x2c' and 'returned 42'. The two fault causes are from coredumps decoded against the matching ELF. Neither the table's enoughness for a real codec nor its cost has been demonstrated: only memory and logging are carried so far, and a decoder additionally needs its buffers supplied by the caller."
 
 - record_id: JFS-001
   kind: JFFS2

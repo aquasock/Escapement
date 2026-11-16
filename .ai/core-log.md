@@ -1,3 +1,40 @@
+## 27 COMMIT Unreleased 2026-11-16T14:28:35-07:00
+
+#### Coming From:
+
+Unreleased c901c46
+
+#### Purpose:
+
+Give a module in the `modules` partition a way to call back into the firmware, so a codec blob can allocate memory and report errors instead of being isolated in read-only flash.
+
+#### Outcome:
+
+A MODULE CAN NOW REACH THE FIRMWARE THROUGH AN API TABLE, and the round trip is proven on hardware: a 730-byte blob named `modapi` reads the table, calls `malloc`, `memset`, `memcpy` and `free` THROUGH it, writes into a caller-owned PCM buffer, and returns 42 when every step worked. The console output is the evidence: `'modules' 2097152 B mapped for execution at 0x42ae0000`, `blob: 'modapi' abi 1 size 730 entry +0x2c`, `modtest: calling 0x42ae002c(&call)`, `modtest: returned 42`. THE DESIGN IS ONE TABLE RATHER THAN BOUND SYMBOLS, and the reason is worth keeping: binding each function with `--defsym` is simpler, but every blob then breaks the moment the app is rebuilt, which defeats the purpose of a separately updatable codec partition. One table means ONE address has to be right instead of one per libc function. THE ADDRESS IS DERIVED AT BUILD TIME, NOT TYPED. A blob executes from read-only flash and cannot hold a pointer, so the firmware publishes `g_modhost_ptr` in its own RAM and `modules/Makefile` reads that symbol's ADDRESS out of the app's ELF with `nm`, passing it as `-DMODHOST_PTR_AT`; the blob dereferences it once. That this was not theoretical showed immediately: rebuilding the app moved the symbol from 0x3c27b630 to 0x3c27b650 and the blob build picked the new value up automatically. THE CONTRACT IS THAT A BLOB BELONGS TO THE FIRMWARE BUILD THAT PRODUCED IT, which is honest rather than unfortunate — and the `check` target fails loudly when the app has not been built or the symbol is missing, instead of linking a blob that dereferences garbage. FOUR BUILD FACTS COST TIME AND ARE NOW IN THE MAKEFILE WITH REASONS. First, the blob must be compiled HOSTED, not `-ffreestanding`: micro-flac's decoder includes `<vector>` and the libstdc++ headers refuse freestanding mode outright, so freestanding-ness is enforced where it belongs, at link time with `-nostdlib` and by the shim. Second, C and C++ flags must be separate, because gcc rejects `-std=gnu++17`, `-fno-rtti` and `-fno-threadsafe-statics` on C input and the build treats warnings as errors. Third, the shim CANNOT USE STATIC BUFFERS: the first `__assert_func` built its message in `static char msg[120]` and failed to link with "`.bss` referenced in section `.text`", because a blob has no writable bss — the partition is read-only flash and there is no loader to zero one — which is the same constraint the earlier `link.ld` already encoded by discarding `.data` and `.bss`. Fourth, `g_modhost_ptr` needs `__attribute__((used))` AND a real reference from the firmware, because `--gc-sections` collects a section nothing references, and a blob build needs the symbol's ADDRESS rather than its value. What this does NOT prove is a codec: the table carries only memory and logging, and a decoder additionally needs its buffers handed in and a way to report errors upward. The measurement from the previous cycle — micro-flac as a blob is 26,257 bytes of text and 20 bytes of bss — says the remaining work is plumbing rather than discovery. Build PASS at 0x2e9e60 bytes, flashed app-only to 0x10000 and the blob to 0xE00000, both at 115200 after a 460800 attempt failed to connect. Reference MOD-001 was added for the module mechanism.
+
+#### Next Steps:
+
+THE NEXT STEP IS A REAL DECODER IN THE PARTITION, and four things about it are now known. It must reach memory only through the table, because it cannot call libc; the shim already routes `malloc`, `free`, `operator new` and `operator delete`, so micro-flac should link with little more than its buffers being caller-supplied. It must hand back a status rather than assert, which the `modcall_t` shape provides and the `__assert_func` stub supports by reporting and returning instead of halting. Its 20 bytes of bss still have to be dealt with — the simplest honest route is to have the caller allocate that block and pass it in, rather than pinning a fixed address in the app's RAM, which would be another build-time constant to keep in step. And its link address must be re-measured after any partition-table change; `modules/link.ld` hard-codes 0x42ae0000, which `modtest` reports. The immediate goal is to free the 31.7 KB micro-flac costs inline in the app, where only 24 KB of headroom remains. Three smaller items stand: the API table has no allocator-with-caps entry beyond `malloc_prefer_psram`, so a decoder wanting internal RAM specifically would need one; there is no version negotiation beyond a single `abi_version` integer, which is enough now and will not be if the table grows; and `music` still plays only inline and knows nothing about modules, so switching it over is the integration point. The DAC path stays out of the player by the operator's instruction, and the `music` command lacks seek, queue, resume and an app window.
+
+#### Files Modified:
+
+- ports/twatchultra/main/modhost.c
+- ports/twatchultra/main/modhost.h
+- ports/twatchultra/main/modload.c
+- ports/twatchultra/main/link_twatch.c
+- ports/twatchultra/main/CMakeLists.txt
+- ports/twatchultra/modules/Makefile
+- ports/twatchultra/modules/src/modshim.c
+- ports/twatchultra/modules/src/modtest.c
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: N/A
+
+---
+
 ## 26 COMMIT Unreleased 2026-11-16T13:50:14-07:00
 
 #### Coming From:
