@@ -1,3 +1,40 @@
+## 26 COMMIT Unreleased 2026-11-16T13:50:14-07:00
+
+#### Coming From:
+
+Unreleased ff8cb49
+
+#### Purpose:
+
+Prove that code stored in the `modules` flash partition can be mapped as instructions and called, before any codec is ported to live there.
+
+#### Outcome:
+
+IT WORKS: a 77-byte blob at 0xE00000 is mapped with `esp_partition_mmap(ESP_PARTITION_MMAP_INST)` at **0x42ae0000**, called through a function pointer, and returns **42** for 6 x 7 -- which proves the arguments arrived across the boundary, a loop ran, an internal function call inside the blob survived, and the heap figures the caller passed were read correctly. The load costs ZERO internal SRAM, which is the whole reason the design exists. The result record read back from flash is `STLR`, inst 0x42ae0000, entry 0x42ae0028, called 1, heap free 58531 largest 31744, returned 42. TWO COREDUMPS TAUGHT THE DESIGN AND BOTH WOULD HAVE BEEN GUESSED WRONG. First, reading the blob header THROUGH the instruction-mapped pointer faults: `exccause 3 (LoadStoreErrorCause), excvaddr 0x42ae0014`, in `memcpy` reached from printf formatting the header's name string, with the magic word at offset 0 reading fine and the string at +0x10 not. Flash instructions live on the instruction bus at 0x42000000..0x43ffffff and a data load there is not a supported access, however it happens to behave in a given case. Second, mapping the SAME partition TWICE -- once DATA, once INST -- does not give two windows: the second mapping came back at `0x3cae0000`, which is PSRAM address space, and the call faulted with `exccause 2 (InstructionFetchErrorCause), excvaddr 0x3cae0028`. The design is therefore exactly ONE mapping as INSTRUCTIONS for execution only, with the header read by `esp_partition_read()` into a stack struct -- a normal flash read through the data path that cannot fault on the instruction bus. THE REPORTING PATH FAILED TWICE FOR UNRELATED REASONS AND IS WORTH RECORDING because it cost most of the cycle's time. The display mirror sends only CHANGED cells, so a one-line result is unreadable without a forced repaint, and a restored Log Viewer window holds focus at boot and eats the keystrokes meant for the Terminal; and `esp_partition_write()` refuses a partition that is currently mapped, so writing the verdict into `modules` itself needs the unmap first. The result now goes both to a flash sector and to a littlefs file, and a boot-time diagnostic (`MODTEST_AT_BOOT`) runs the experiment once so no console is in the loop at all. An arithmetic slip also cost a round: the result sector is at partition offset 0x1FF000, so absolute 0xFFF000, and it was read at 0xEFF000 twice before that was noticed. THE BLOB IS SMALL ON PURPOSE: `modules/src/modtest.c` touches no libc, has no initialised global, and calls nothing outside itself, because each of those would need a relocation the blob cannot resolve, and the point was to fail for the interesting reason if it failed at all. `modules/Makefile` builds it `-nostdlib` against `modules/link.ld`, which places it at the MEASURED address and discards `.data` and `.bss` because a blob has no loader to populate them; `patch_header.py` fills in size and entry offset from the linked image so a stale offset cannot jump into the middle of an instruction. THE ADDRESS IS A BUILD-TIME CONSTANT THAT MUST BE RE-MEASURED if the partition table moves, and the partition now holds both the experiment and its own result, so a codec blob must not be placed at the 0x1FF000 sector. Build PASS at 0x2e9f30 bytes, flashed app-only to 0x10000 with `Hash of data verified` at 115200 after a 460800 attempt reported "the chip stopped responding", and the result read back with esptool rather than through any console.
+
+#### Next Steps:
+
+THE ROOM IS NOW PROVEN AND EMPTY, so the next task is to put something real in it: a second codec, most likely an MP3 decoder from Rockbox's set, built as a module rather than linked into the app. Three things about that are now known and constrain it. A blob must not use libc, initialised globals, or any external symbol, so a decoder written against its own allocator and file API will need a shim layer inside the blob and a way to hand it a buffer from the caller -- the experiment passed a heap figure, but a real blob needs the buffer itself. The link address must be re-measured after any partition-table change, and `modules/link.ld` hard-codes what `modtest` reports. And the result sector at partition offset 0x1FF000 is now used by the diagnostic, so blob placement must avoid it or the diagnostic must move. The boot-time diagnostic (`MODTEST_AT_BOOT` in the port's CMakeLists) should be removed once it stops being useful, since it runs an experiment on every boot; it is kept for now because it makes the test reproducible without any console. Four smaller items stand: the `music` command still has no seek, queue, resume or app window; `dac_wake()` remains a mitigation rather than an understanding; the DAC path stays out of the player by the operator's instruction; and the modules partition holds 2 MB of which all eleven Rockbox codecs would use 704 KB, so there is room for the whole set if the port succeeds.
+
+#### Files Modified:
+
+- ports/twatchultra/main/modload.c
+- ports/twatchultra/main/modload.h
+- ports/twatchultra/main/CMakeLists.txt
+- ports/twatchultra/main/link_twatch.c
+- ports/twatchultra/modules/Makefile
+- ports/twatchultra/modules/link.ld
+- ports/twatchultra/modules/patch_header.py
+- ports/twatchultra/modules/src/modtest.c
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: N/A
+
+---
+
 ## 25 COMMIT Unreleased 2026-11-16T13:24:38-07:00
 
 #### Coming From:
