@@ -128,7 +128,13 @@ baseline-2026-11-16.bin           entry 23, PRE-FLAC — do not restore expectin
 ```
 
 **A digest read before a rebuild will not match one read after** — the app
-descriptor's build time moves.
+descriptor's build time moves, and esptool appends an image digest computed over
+it. Measured on this change: after deleting the dead `main/music.h`, the rebuild
+produced the same size (0x2e3090) and differed from the flashed image in exactly
+69 bytes — 4 for the timestamp `16:45:02` -> `16:59:14`, the descriptor's ELF
+hash, and the trailing 32-byte digest. Every byte in between was identical, so
+the board runs the same code and was not reflashed. Compare regions, never whole
+digests.
 
 ## Next steps
 
