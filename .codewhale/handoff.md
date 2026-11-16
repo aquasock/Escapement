@@ -1,15 +1,60 @@
-# Handoff — Escapement / TinyDesk on T-Watch Ultra, 2026-11-16T13:30
-
-Orientation, not authority. **Verify before acting on it.** The files, the
-coredump partition and the board are the fact; this file is a claim.
-
 ## One line
 
-**FLAC plays on the watch from the SD card out of the built-in speaker. The flash
-now carries a 2 MB raw `modules` partition at 0xE00000, funded by shrinking
-`storage` to 7.87 MB with every file migrated and verified. The partition is a
-room with nothing in it: nothing loads from it yet, and whether a blob can be
-called across the Xtensa windowed ABI is unproven.**
+**CODE IN THE `modules` PARTITION RUNS. A blob mapped as instructions at
+0x42ae0000 was called across a partition boundary and returned 42, at zero
+internal SRAM cost. FLAC plays on the built-in speaker. The room is proven and
+empty — putting a real codec in it is the next task.**
+
+## The modules partition — PROVEN, and the two rules that make it work
+
+```
+map    esp_partition_mmap(p, 0, p->size, ESP_PARTITION_MMAP_INST, &base, &h)
+       -> 0x42ae0000, the ESP32-S3 instruction window
+read   esp_partition_read() into a stack struct -- NEVER through the mapped ptr
+call   ((entry_t)(inst_base + entry_offset))(args...)
+```
+
+**Rule 1: one mapping only.** Two coredumps prove it.
+- Reading through the instruction-mapped pointer faults: `exccause 3
+  (LoadStoreErrorCause), excvaddr 0x42ae0014` in `memcpy`. The magic at +0 read
+  fine, the string at +0x10 did not. Instruction-bus bytes are not data.
+- Mapping the same partition twice (DATA then INST) does **not** give two
+  windows. The second came back at `0x3cae0000` — PSRAM — and the call faulted
+  with `exccause 2 (InstructionFetchErrorCause)`.
+
+**Rule 2: a blob may not use libc, initialised globals, or any external
+symbol** — each needs a relocation the blob cannot resolve. `modules/Makefile`
+builds `-nostdlib`; `link.ld` discards `.data`/`.bss` and pins the measured
+address.
+
+```
+build   cd ports/twatchultra/modules && make
+flash   esptool write_flash 0xE00000 build/modtest.bin
+read    esptool read_flash 0xFFF000 0x30   (result sector: 0xE00000+0x1FF000)
+```
+
+**The result sector at partition offset 0x1FF000 / absolute 0xFFF000 is taken by
+the diagnostic. A real codec blob must avoid it or the diagnostic must move.**
+
+**Diagnostic still on:** `MODTEST_AT_BOOT=1` in `ports/twatchultra/main/CMakeLists.txt`
+runs the experiment every boot. Remove it when it stops being useful.
+
+## Reporting a result — the thing that ate this cycle
+
+The watch's console cannot be trusted for a one-line answer:
+
+- **The display mirror sends only CHANGED cells**, so a capture attaches with an
+  incomplete grid. `repaint` re-pushes it.
+- **A restored window (Log Viewer) holds focus at boot** and eats keystrokes
+  meant for Terminal. Check the highlight (SGR `48;5;25`) before Enter.
+- **`esp_partition_write()` refuses a mapped partition** — unmap first.
+- **USB console goes silent after a few seconds**; a fresh `esptool ... chip_id
+  --after hard_reset` restores it. BLE is the fallback but drops mid-command
+  sometimes.
+- esptool leaves the port at its own baud; the console needs 115200.
+
+Best channel found: **write the answer to flash and read it with esptool.**
+No display, no focus, no timing.
 
 ## Backups — take one after any layout change, the old ones stop matching
 
