@@ -240,6 +240,7 @@ Topic IDs are the `record_id` prefix. An entry reserves a name; it does not clai
 | Why does a full image flash cost the display and the credentials? | FLS | FLS-002 |
 | Where can codec or decoder blobs live so they cost no RAM? | FLS | FLS-004 |
 | How does a module in the modules partition call the firmware? | MOD | MOD-001 |
+| Why does a module still run but decode garbage after an app rebuild? | MOD | MOD-002 |
 | How much does a littlefs partition actually hold? | FLS | FLS-004 |
 | Why does NimBLE refuse to pair? | BLE | BLE-001 |
 | Why does a report-map read kill the link? | BLE | BLE-002 |
@@ -1276,6 +1277,20 @@ USB-006: "VERIFIED: the USB-C DAC's playback FU MUTE refuses SET_CUR with a STAL
     - "ESP-IDF 5.3.1 components/esp_partition/include/esp_partition.h (esp_partition_mmap, SPI_FLASH_MMAP_INST, esp_partition_read)"
     - "coredumps: exccause 3 excvaddr 0x42ae0014 (data load through an instruction mapping); exccause 2 excvaddr 0x3cae0028 (executing a second mapping that landed in PSRAM)"
   verification: "Verified on hardware 2026-11-16 (core-log entries 26 and 27). A 77-byte blob mapped at 0x42ae0000 and called returned 42, proving control transfer and the windowed ABI. A 730-byte blob then read the API table at the build-derived address, called malloc, memset, memcpy and free through it, wrote into a caller-owned PCM buffer, and returned 42, with the console showing 'mapped for execution at 0x42ae0000', 'entry +0x2c' and 'returned 42'. The two fault causes are from coredumps decoded against the matching ELF. Neither the table's enoughness for a real codec nor its cost has been demonstrated: only memory and logging are carried so far, and a decoder additionally needs its buffers supplied by the caller."
+
+- record_id: MOD-002
+  kind: MOD
+  topic_id: MOD
+  status: VERIFIED
+  verified_date: 2026-11-16
+  title: "The two mmap addresses a module is linked for are runtime-chosen and MOVE when the app image changes size, and a blob linked for a stale pair still executes while reading its constants from the wrong place"
+  statement: "A module with both code and constants needs TWO mappings of TWO partitions, because the ESP32-S3's address windows are complementary: 0x42000000..0x43ffffff fetches instructions and faults on a data load (exccause 3), 0x3C000000..0x3DFFFFFF serves data loads and faults on a fetch (exccause 2), and neither can serve the same bytes. So `modules` at 0xE00000 holds .text mapped ESP_PARTITION_MMAP_INST and `moddata` at 0xF00000 holds .rodata mapped ESP_PARTITION_MMAP_DATA. BOTH BASE ADDRESSES ARE CHOSEN BY THE MMU AT BOOT AND BOTH CHANGE WHEN THE APP IMAGE CHANGES SIZE: measured, 0x42ae0000/0x3cbe0000 while the inline FLAC decoder was linked into the app, 0x42ad0000/0x3cbd0000 once it was removed. A blob linked for the stale pair is not merely out of date -- IT STILL EXECUTES, because the entry point is reached by offset from whatever instruction base is live, and only the constant reads go wrong, from 64 KB away in the data window. micro-flac compares the input's first four bytes against a MAGIC_BYTES table in .rodata, so the only symptom was FLAC_DECODER_ERROR_BAD_MAGIC_NUMBER (-5) on files that were perfectly good."
+  consequence: "The link addresses must be derived at build time from what the board actually mapped, never typed, and the loader must refuse a mismatch rather than call into one. modload_header_t therefore carries linked_inst and linked_data (ABI 2), modload_prepare() compares them against the live mapping and leaves the reason in modload_why() for whichever command reports it -- 'module linked for inst 42ae0000 data 3cbd0000, mapped at 42ad0000 3cbd0000 -- rebuild it' -- instead of a generic 'no module mapped at boot'. modules/moddata.at holds the pair and the Makefile passes BOTH as --defsym: MODTEXT_AT for the . = in link.ld and MODDATA_AT for the .rodata address, so the text base is not pinned in three separate places. `make modaddr` refreshes the file by reading /root/modaddr.txt (which modload_prepare writes at every boot) out of the raw storage partition with esptool, avoiding the console, the display mirror and the line discipline entirely. ANY app change that alters the image size requires make modaddr and a module rebuild; the guard makes forgetting it a log line rather than a decoder reading garbage."
+  sources:
+    - "tinydesk-twatch ports/twatchultra/main/modload.h (modload_header_t, MODLOAD_ABI_VERSION 2), main/modload.c (modload_prepare, modload_why)"
+    - "tinydesk-twatch ports/twatchultra/modules/link.ld, Makefile, patch_header.py, read_modaddr.py, moddata.at"
+    - "the two observed pairs: /root/modaddr.txt read on the board before and after the inline decoder was removed"
+  verification: "Verified on hardware 2026-11-16 (core-log entry 30, fork commits e712466 and 791cc7b). Both moves observed directly: the board reported inst=0x42ae0000 data=0x3cbe0000 while the inline decoder was linked in and inst=0x42ad0000 data=0x3cbd0000 after it was removed, and a module linked for the first pair reported 'bad magic number' on two tones that decode cleanly when relinked. The guard was then verified by deliberately flashing a header claiming the old base: it refused, printed the exact mismatch, decoded nothing, and did not crash. After relinking, a 5:58 track decoded at 15792504 frames with 0 errors and 0 short writes, and a clean rebuild reproduced the flashed blob byte-for-byte."
 
 - record_id: JFS-001
   kind: JFFS2
