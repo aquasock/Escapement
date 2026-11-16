@@ -240,6 +240,8 @@ Topic IDs are the `record_id` prefix. An entry reserves a name; it does not clai
 | Why does an attached USB device never enumerate, or a transfer never complete? | USB | USB-002 |
 | What does the USB-C DAC offer, and which alternate plays 16-bit stereo? | USB | USB-003 |
 | Why does USB audio sound scratchy with every packet on time? | USB | USB-004 |
+| Why does starting the USB stream from the file player panic? | USB | USB-005 |
+| Why is the DAC silent when the watch says it is streaming? | USB | USB-006 |
 | Why does an unattended reboot miss the keyboard entirely? | BLE | BLE-004 |
 | Why does the keyboard connect but type nothing? | BLE | BLE-003 |
 | Why does a saved bond never come back at boot? | BLE | BLE-006 |
@@ -412,7 +414,9 @@ BLE-008: "NimBLE can run central and peripheral at once, so the watch keeps its 
 USB-001: "ESP-IDF 5.3.1 splits the S3's one host FIFO by CONFIG_USB_HOST_HW_BUFFER_BIAS: at Balanced, periodic TX is OTG_DFIFO_DEPTH/8 = 32 words and the HCD refuses any isochronous OUT endpoint above 128 bytes (the Kconfig help says 192; the code and the board say 128); PERIODIC_OUT is required for USB audio and leaves IN endpoints at 128"
 USB-002: "ESP-IDF 5.3.1's host needs TWO event loops: usb_host_lib_handle_events() or nothing enumerates, and usb_host_client_handle_events() or no transfer completes; control submits do not block, completion callbacks are called unconditionally (NULL is a jump to 0), and is_synchronous must be false"
 USB-003: "The TTGK KM-HIFI-384KHZ DAC (3302:3366) enumerates on the S3 at full speed as UAC2: playback interface 1, ep 0x01 isochronous synchronous OUT, interval 1, alt 1 = 2 ch S16 mps 384, alt 2 = S24 576, alt 3 = S32 768; clock 9 via input terminal 1, RANGE 8000/16000/32000/44100/48000/96000 Hz; it played a 48 kHz S16 tone on both channels; a plug inserted or removed in its 3.5 mm jack makes it re-enumerate"
-USB-004: "INFERRED: isochronous OUT through IDF 5.3.1 at 16 packets per transfer puts a few-sample discontinuity at every transfer boundary (440 Hz tone sidebands at +/- n x 62.5 Hz, -36 dB) even with every packet full and on time; at 8 packets the operator heard it clean, mechanism unknown and the 8-packet case unmeasured"
+USB-004: "Isochronous OUT through IDF 5.3.1 at 16 packets per transfer puts a few-sample discontinuity at every transfer boundary (440 Hz tone sidebands at +/- n x 62.5 Hz, -36 dB) even with every packet full and on time; at 8 packets it is gone (sidebands -107 dB, THD+N -62 dB); mechanism unknown"
+USB-005: "Claiming a USB interface allocates DMA descriptor lists and IDF 5.3.1 PANICS (hcd_dwc.c:1059 assert) when it cannot; an open SD file has already taken DMA RAM, so all USB audio DMA allocation happens once in `uac2 open`"
+USB-006: "INFERRED: the USB-C DAC sometimes plays a clean, unmuted stream as silence until the headphone plug is re-seated (it re-enumerates), and its hardware volume barely changes loudness on headphones"
 ```
 
 ---
@@ -2301,15 +2305,42 @@ USB-004: "INFERRED: isochronous OUT through IDF 5.3.1 at 16 packets per transfer
 - record_id: USB-004
   kind: USB
   topic_id: USB
-  status: INFERRED
+  status: VERIFIED
   verified_date: 2026-11-15
-  title: "Isochronous OUT through the IDF 5.3.1 host glitches at every transfer boundary at 16 packets per transfer"
+  title: "Isochronous OUT through the IDF 5.3.1 host glitches at every transfer boundary at 16 packets per transfer, and not at 8"
   statement: "Streaming 48 kHz stereo S16 to the USB-003 DAC as isochronous OUT transfers of 16 packets each (192 bytes per 1 ms packet, three transfers in flight, each resubmitted from its completion callback), the DAC's analog output carries a discontinuity once per transfer: a 440 Hz test tone captured on a PC line input shows sidebands at 440 +/- n x 62.5 Hz at -36 dB each, and fitting the phase in 1 ms windows shows a step of about 0.18 rad (about 3 samples) every 16 ms, a brief pull toward zero over 2-3 samples. It persists with the driver proven to hand the HCD full packets on time (short=0, underruns=0, errors=0, missed=0). At 8 packets per transfer, with nothing else changed, the operator heard the tone as clean."
-  consequence: "The glitch is at the URB boundary in the host path or in the DAC's handling of it, not in buffering upstream of usb_host_transfer_submit(); it cannot be fixed by feeding the ring better, and a counter of SKIPPED packets does not see it. 8 packets per transfer is in use (uac2.c UAC2_PKTS_PER_XFER). The MECHANISM IS UNKNOWN: plausible candidates are a frame left empty or late between the last packet of one URB and the first of the next, or the DAC concealing a late packet -- neither is established. Shorter transfers are a workaround accepted by ear, not a fix."
+  consequence: "The glitch is at the URB boundary in the host path or in the DAC\'s handling of it, not in buffering upstream of usb_host_transfer_submit(); it cannot be fixed by feeding the ring better, and a counter of SKIPPED packets does not see it. At 8 packets per transfer it is gone by measurement, and 8 is what uac2.c uses (UAC2_PKTS_PER_XFER). WHY the boundary costs samples at 16 and not at 8 is still unknown -- a frame left empty or late between URBs, or the DAC concealing a late packet, are candidates and neither is established -- so a future change to the transfer length should be measured again rather than assumed safe."
   sources:
     - "PC line-in captures of `uac2 tone`, 2026-11-15, analysed for phase steps (1 ms sine fits), local-fit residual and the 62.5 Hz sideband family"
     - "tinydesk-twatch ports/twatchultra/main/uac2.c: xfer_done(), UAC2_PKTS_PER_XFER, the `short` counter"
-  verification: "Inferred 2026-11-15 (core-log entry 18). Measured at 16 packets: before the buffering fix 115 phase steps and sidebands -36.7..-36.2 dB; after it, with short=0 underruns=0 reported by the watch, 172 steps and -36.6..-36.1 dB -- unchanged, which is what moved the cause from the buffering to the transfer boundary. At 8 packets the line-in captures came back empty (no 440 Hz reached the PC, apparently a cable or DAC-output problem on that run), so the 8-packet result rests on the operator's ears alone; the 125 Hz spacing that would confirm the per-transfer mechanism was never measured. Upgrade to VERIFIED only with a capture at 8 packets."
+  verification: "Measured on hardware 2026-11-15 from the DAC\'s line output on a PC line-in. At 16 packets: 115 phase steps and sidebands -36.7..-36.2 dB before the buffering fix, and 172 steps and -36.6..-36.1 dB after it with short=0 underruns=0 -- unchanged, which placed the cause at the boundary. At 8 packets: 0 phase steps, sidebands -107..-109 dB, harmonics h2..h6 at -93 dB or lower, THD+N -62.4 dB at full level (core-log entry 19). Revised 2026-11-15 (core-log entry 19): INFERRED to VERIFIED, the 8-packet case measured."
+
+- record_id: USB-005
+  kind: USB
+  topic_id: USB
+  status: VERIFIED
+  verified_date: 2026-11-15
+  title: "Claiming an interface allocates DMA memory, IDF 5.3.1 asserts when it cannot, and an open SD file has already taken some"
+  statement: "usb_host_interface_claim() allocates a pipe for each endpoint of the alternate setting, and hcd_pipe_alloc() allocates that pipe's transfer-descriptor lists in DMA-capable internal RAM (hcd_dwc.c buffer_block_alloc, transfer_descriptor_list_alloc). When that allocation fails, IDF 5.3.1 does not return an error: transfer_descriptor_list_alloc() asserts (hcd_dwc.c:1059, 'ret == ESP_OK') and the chip panics. usb_host_transfer_alloc() also takes its data buffer from DMA-capable memory (usb_private.c urb_alloc -> esp_dma_capable_malloc), but returns ESP_ERR_NO_MEM when it cannot."
+  consequence: "On this board DMA-capable internal RAM is the scarce pool (heap read 17,387 bytes free, largest block 7,168, with the USB host, BLE and the desktop running), and the SD card's SPI driver and FATFS take DMA-capable buffers of their own once a file is open. So the same stream start that succeeds from the shell panics from a file player that has opened its file first. Every DMA allocation the USB audio stream needs -- its transfers and its interface claim -- is therefore made once, in `uac2 open`, before any file is opened, and held while the DAC is open; stop and rate changes only switch the alternate setting. Any future USB host code on this board should do the same: claim early, never claim from a path that has touched the SD card, and treat a failed claim as a panic risk rather than an error to handle."
+  sources:
+    - "ESP-IDF 5.3.1 components/usb/hcd_dwc.c:1059 transfer_descriptor_list_alloc, :1598 buffer_block_alloc, :1868 hcd_pipe_alloc"
+    - "ESP-IDF 5.3.1 components/usb/usb_private.c urb_alloc (esp_dma_capable_malloc), usb_host.c:1385 usb_host_transfer_alloc"
+    - "tinydesk-twatch ports/twatchultra/main/uac2.c: uac2_open() (allocate and claim once), UAC2_XFER_BUF_BYTES"
+  verification: "Verified on hardware 2026-11-15 (core-log entry 19) by coredump: 'assert failed: transfer_descriptor_list_alloc hcd_dwc.c:1059 (ret == ESP_OK)' in task 'uac2play', stack hcd_pipe_alloc <- usbh_ep_alloc <- interface_claim <- usb_host_interface_claim <- uac2_start_rate(44100) <- play_task. The build before it, which claimed at start but allocated transfers there too, failed instead with 'transfer alloc: ESP_ERR_NO_MEM' from the player while `uac2 tone` from the shell started fine on the same boot. With everything allocated in `uac2 open`, clip10.wav played to the end with short=0 underruns=0."
+
+- record_id: USB-006
+  kind: USB
+  topic_id: USB
+  status: INFERRED
+  verified_date: 2026-11-15
+  title: "The USB-003 DAC sometimes outputs silence from a clean stream until its headphone plug is re-seated, and its hardware volume does little"
+  statement: "On several occasions the DAC played a complete, gap-free 44.1 or 48 kHz stream (watch counters short=0, underruns=0, errors=0; set_rate ESP_OK) as silence on headphones and on a PC line input, while its playback Feature Unit read back unmuted at the expected volume. Pulling the headphone plug and re-inserting it made the DAC re-enumerate, and after `uac2 open` the same file played with perfect quality. Separately, the playback Feature Unit's Volume control accepts SET_CUR across its RANGE of -18944..0 /256 dB (-74 to 0 dB) and reads back what was set, but on the operator's headphones -26 dB sounded like roughly 70 percent of full."
+  consequence: "Silence from this DAC with clean watch-side counters is a DAC-side state, not a stream fault, and the cheapest recovery is to re-seat the headphone plug and run `uac2 open` (which now survives the re-enumeration). Its hardware volume is not a usable volume control on headphones; scaling the samples measured exact (-20.0 dB in every band at 10 percent) and is the better control."
+  sources:
+    - "on the watch, `uac2`, `uac2 ev` and `uac2 fu` during the silent and the audible runs, 2026-11-15"
+    - "operator listening reports, and PC line-in captures that came back silent while the watch reported a clean stream"
+  verification: "Inferred 2026-11-15 (core-log entry 19) from repeated observation, not a measurement of mechanism: silent runs at 17:16, 17:31, 17:34, 19:15-19:17, 19:55 and 19:56 against audible runs on other boots, and one deliberate test at 19:57 where re-seating the plug turned a silent state audible. What sets the silent state -- jack state at enumeration, power-up order, something else -- is not established. The volume observation is the operator's ears only; the DAC's analog output level against its Feature Unit setting has not been measured."
 
 ```
 

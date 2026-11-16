@@ -1,3 +1,34 @@
+## 19 COMMIT Unreleased 2026-11-15T20:07:47-07:00
+
+#### Coming From:
+
+Unreleased a4eb902
+
+#### Purpose:
+
+Play an audio file from the SD card on headphones through the USB-C DAC, which the speaker could already do.
+
+#### Outcome:
+
+The operator passed it: `clip10.wav` played on headphones with "perfect quality" through fork commit `e051111` on `t-watch-ultra`, with `short=0 underruns=0` for the whole clip and the slowest SD read at 12 to 63 ms against a 500 ms ring. `uac2 play <file.wav>` streams 16-bit PCM from the card on its own task at the FILE's rate when the DAC's clock offers it, so a 44.1 kHz file needs no resampler: packets alternate 44 and 45 frames, sized from a running frame count so the average is exact, and IDF packs variable packets back to back (`hcd_dwc.c` `_buffer_fill_isoc`). The ring is about 500 ms in PSRAM. GETTING THERE TOOK FOUR FAULTS, EACH NAMED BY AN INSTRUMENT AND NOT BY READING. The player's log lines reached nothing, because only the shell task's output reaches the Terminal window, so its first failure was silent; its messages and every start failure are now kept and printed by `uac2`, and a failed start undoes what it took, which it did not, so one failure had made every later claim fail. That record named `transfer alloc: ESP_ERR_NO_MEM` from the player while `uac2 tone` started the same stream from the shell on the same boot; after the transfers were pre-allocated, the coredump named the deeper cause: `assert failed: transfer_descriptor_list_alloc hcd_dwc.c:1059`, IDF 5.3.1 panicking inside `usb_host_interface_claim()` when it cannot allocate the pipe's DMA descriptor lists, because an open SD file has already taken DMA-capable RAM (USB-005). Every DMA allocation the stream needs, its three 1,536-byte transfers and the interface claim, now happens once in `uac2 open` before any file is opened and is held while the DAC is open; stop and rate changes only switch the alternate setting, and streams are capped at 48 kHz. That removed every free from the unplug path, and the unplug recovery that panicked in entry 18 then worked once on hardware: re-seating the headphone plug made the DAC re-enumerate, and `uac2 open` recovered without a reboot. THE OPERATOR'S "DISTORTED, HISS, POPS, NO BASS" WAS NOT THE STREAM. It was measured three ways. A 440 Hz tone from the DAC's line output had no phase steps, sidebands at -107 dB and THD+N -62 dB at 8 packets per transfer, which confirms entry 18's change by measurement (USB-004 is now VERIFIED). The music captured at 10 and 100 percent software volume differed by exactly 20.0 dB in every band from 0 to 20 kHz. And the line output of `clip10.wav` matched the source file, copied off the card, to -50 dB from 300 Hz to 3 kHz once the two clocks were aligned to a fraction of a sample. The source plays well on the PC. What was wrong was DAC state: on several boots it played a clean, unmuted stream as silence, and re-seating the plug fixed it (USB-006, inferred). VOLUME IS NOT SETTLED. `uac2 vol` was first a sample scale, then, after the operator heard hiss, the DAC's own Feature Unit 2 Volume (range -74 to 0 dB, read back correctly); but on headphones 5 percent, -26 dB, sounded like about 70 percent, so the DAC's control is weak and the scale, which measured exact, is likely the better control after all. Diagnostics added: `uac2 fu [set]` reads and writes the DAC's mute and volume, `uac2 ev` lists short or empty transfers with whether the reader was inside `fread()`, and the play result reports the slowest read. Build PASS at 0x2dfbe0 bytes with 2 percent of the app partition free, sha256 b8f4bc165f13a15a, deployed by app-only flash with `Hash of data verified`. Ten builds were flashed during the cycle; this is the one passed. A full image was archived with the board held in the bootloader across read and verify: `working-2026-11-15-2002.bin`, 16,777,216 bytes, sha256 `3c243d792c50b6d7009b1008c5189898607e68aca8e5243279a08138f0b8f80e`, `verify OK (digest matched)`, its sidecar re-checked from its own directory, `ota_0` inside it byte-identical to the build, and the board up afterwards. The PC's line-in was set to 5 percent for captures and restored to 86 percent at the end, which is ALSA `Capture` 63 and `Line Boost` 2. The required core-syntax audit was run before commit and passed, with `.ai/core.md` confirmed unchanged and `.ai/core-log.md` and `.ai/core-reference.md` the only `.ai/` files touched; USB-004 was revised to VERIFIED and USB-005 and USB-006 added with index and routing rows, 137 records with no duplicate ids.
+
+#### Next Steps:
+
+VOLUME FIRST, AND IT IS SMALL. Put `uac2 vol` back on scaling the samples with the DAC held at 0 dB, using steps of a fixed number of decibels so the curve matches hearing, as the Tamagotchi's volume already does, and confirm it both by ear and with a line-in capture. A capture needs the PC's line-in near 5 percent, because at its normal 86 percent the DAC clips it. THE DAC'S SILENT STATE IS UNDERSTOOD ONLY AS A WORKAROUND: re-seating the headphone plug and running `uac2 open` recovers it, but what puts it there is not established, so the next time it happens note whether the headphones went in before or after the watch powered the DAC. `full.wav`, about 4 minutes 49 seconds, has never been played; it is the test of SD reads over a long track. A file at a rate the DAC does not list is refused rather than converted, and the emulators still need a resampler to reach the DAC. The watch's USB stays in host mode after any audio command, so a flash needs a reboot first. `bleuart fetch`, `usb_hid.c`'s `ESP_INTR_FLAG_LEVEL1`, the `coredump` partition and entry 1's wrong fork path stand as entry 17 left them.
+
+#### Files Modified:
+
+- ports/twatchultra/main/uac2.c
+- ports/twatchultra/main/uac2.h
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: PASS
+
+---
+
 ## 18 COMMIT Unreleased 2026-11-15T17:37:51-07:00
 
 #### Coming From:
