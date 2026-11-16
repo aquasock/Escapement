@@ -9,6 +9,21 @@ coredump partition and the board are the fact; this file is a claim.
 replug — and the boot loop is gone. Cycle 1 is done and committed. Cycle 2 is
 routing plus a global volume.**
 
+**A full 4:49 track played to the end clean, confirmed by ear and by the
+counters.** The operator heard no pops, underruns, distortion or cutouts. The
+watch agreed: `play: done, short=0 underruns=0, slowest read 68 ms, 1 reads
+>50 ms`, with `errors=0 missed=0` across 333,648 packets (5.56 minutes of
+stream, including the post-track silence). The cumulative `underruns` figure
+climbs after the file ends because the stream keeps running and every transfer
+after it is pure silence by design; the play path measures its own delta, which
+was zero. The single global `short=1` correlates with the one 68 ms SD stall —
+one part-filled transfer in 5.5 minutes, inaudible — and is not a defect.
+
+**One unresolved detail:** the operator reported listening at 100 percent but
+`uac2` read `vol=70%(DAC)` at the end. Either an outside control was used or
+the percentage reported is not what was heard; worth pinning down in cycle 2
+when the volume path moves to sample scaling anyway.
+
 ## Where things live
 
 - Project-control repo: `/run/media/vash/GIT/Escapement`, branch `main`, at the
