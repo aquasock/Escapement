@@ -1,3 +1,35 @@
+## 29 COMMIT Unreleased 2026-11-16T16:08:24-07:00
+
+#### Coming From:
+
+Unreleased 6c38889
+
+#### Purpose:
+
+Finish the codec-module path so a FLAC decoder running out of the `modules` partition plays audio, proving that the partition can carry code and not merely execute a test.
+
+#### Outcome:
+
+IT PLAYS. The operator heard the 440 Hz tone on the watch's speaker, decoded by code running out of the `modules` partition -- fetched from flash by XIP, called across a partition boundary, never linked into the app. THE NUMBERS ARE EXACT: `state done, 352800 frames, 78 calls, verdict 0` with `handle: magic 464c4143 ready 1 rate 44100 ch 2 bits 16`. 352,800 frames is exactly 8 seconds at 44.1 kHz, so every sample was decoded; magic `464c4143` is "FLAC", which says the API table reached the module; rate, channel count and bit depth say STREAMINFO parsed correctly; and verdict 0 is a clean end of stream. THE LAST BLOCKER WAS A BUILD-SYSTEM BUG AND ITS SYMPTOM WAS SILENCE. A blob was linked against `0x3c27b8fc` while the firmware published `0x3c27ba74`, so the module's `host()` read garbage and every call returned MODCALL_ERROR -- with no crash, no log and no clue except a status line reading `verdict -1`. The cause is that a `-D` FLAG DOES NOT MAKE AN OBJECT DEPEND ON ITS VALUE: rebuilding the app changed the define, make saw unchanged prerequisites and reused the stale `flacmod.o`, and the blob was linked against an address the firmware no longer used. The fix is structural rather than a corrected number: `modules/gen_addr.py` reads `g_modhost_ptr` and `g_modbss` out of the app ELF into `build/modaddr.h`, every module object depends on that header, and a moved address therefore forces a rebuild. Verified by disassembly before flashing -- the linked entry loads `l32r a8, ... (3c27ba74)`, the address the firmware actually publishes. THE SPLIT INTO TWO PARTITIONS IS WHAT MADE `.rodata` POSSIBLE: `modules` at 0xE00000 for `.text` mapped as INSTRUCTIONS, `moddata` at 0xF00000 for `.rodata` mapped as DATA, because the two mmap windows are complementary and cannot serve the same bytes. The loader maps both at boot and publishes the addresses it was given in `/root/modaddr.txt`; `modules/moddata.at` carries them and the Makefile passes them as `--defsym` so `.rodata` links at whatever the MMU handed out rather than at a number typed in by hand. Three further mechanisms carried over from the work that found them: the lent bss `g_modbss`, which the module's `link.ld` claims for `.bss` because a library's function-local statics still need zeroed writable RAM and a blob cannot zero its own; `FLAC_MALLOC`/`FLAC_FREE` redirected to the host table through `flacmalloc.h`, `-include`d because the override is a NAME and every translation unit needs the declaration; and `abs`/`labs` plus both LPC assembly widths supplied by the shim and libgcc. THE HARNESS COST MORE THAN THE CODE AND THE RECIPE IS NOW KNOWN. Ctrl+Q is `0x11`, which is XON: with `IXON` set the line discipline swallows it as flow control and it never reaches the desktop, so "close the focused window" silently did nothing through dozens of attempts. With `IXON` cleared the sequence is simply reboot, wait for boot, F10, Enter, then type. Two further traps: the USB console goes silent after esptool and a fresh `chip_id --after hard_reset` restores it, and an orphaned helper holding `/dev/ttyACM1` makes every esptool invocation fail with a serial exception while the board looks fine -- `fuser` on the port named it immediately once it was suspected. Build PASS at 0x2eace0 bytes with micro-flac STILL LINKED INLINE for the `music` command, so nothing regressed and the 31.7 KB has not yet been recovered; that is the next step. Reference MOD-001 gained the corrections from this cycle.
+
+#### Next Steps:
+
+THE PRIZE IS NOW IN REACH: micro-flac is still compiled into the app for the `music` command, so deleting `musicdec.cpp`, the `micro-flac` component requirement and the `REQUIRES` entry should recover the 31.7 KB that prompted the whole exercise -- leaving `modflac` as the only FLAC path, and the app image with roughly 56 KB of headroom instead of 24 KB. Before deleting, `modflac` should be tested on a REAL track rather than a tone, because a tone exercises no joint-stereo, no variable block sizes and no wasted-bits handling, all of which the decoder path takes. The module's rate is currently hard-coded to 44100 at stream start because `modcall_t` does not yet report it back; a 48 kHz file would play at the wrong pitch, and adding the rate to the returned state is small. Beyond that the module mechanism can carry the rest of the codec set: all eleven Rockbox codecs are 704 KB against 1.8 MB of free space across the two partitions, and the 28 KB this decoder occupies shows the arithmetic works. Three smaller items stand. The `__assert_func` stub reports through the table and returns rather than halting, but that path has still only been reviewed, never exercised. The `modflac` diagnostic still writes to `/sd` rather than `/fs`, because a PSRAM-stack task may not touch littlefs -- that is a rule now, recorded in the reference, not a workaround. And `music` has no seek, queue, resume or app window, and the DAC path stays out of the player by the operator's instruction.
+
+#### Files Modified:
+
+- ports/twatchultra/modules/gen_addr.py
+- ports/twatchultra/modules/Makefile
+- ports/twatchultra/main/modflac.c
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: PASS
+
+---
+
 ## 28 COMMIT Unreleased 2026-11-16T15:08:54-07:00
 
 #### Coming From:
