@@ -134,6 +134,10 @@ Topic IDs are the `record_id` prefix. An entry reserves a name; it does not clai
 - topic_id: USB
   name: "ESP32-S3 USB host"
   description: "The OTG port acting as a host under ESP-IDF 5.3.1: the FIFO split that bounds endpoint sizes, the event loops the host library requires, and the devices measured on it."
+
+- topic_id: AUD
+  name: "Audio playback and volume"
+  description: "How a sample reaches the DAC's analog output and what happens to it on the way: volume as a taper law rather than a percentage, the perceptual and hardware conventions behind those laws, and the resolution cost of attenuating in the samples."
 ```
 
 ---
@@ -242,6 +246,7 @@ Topic IDs are the `record_id` prefix. An entry reserves a name; it does not clai
 | Why does USB audio sound scratchy with every packet on time? | USB | USB-004 |
 | Why does starting the USB stream from the file player panic? | USB | USB-005 |
 | Why is the DAC silent when the watch says it is streaming? | USB | USB-006 |
+| What should a volume control's taper law be? | AUD | AUD-001 |
 | Why does an unattended reboot miss the keyboard entirely? | BLE | BLE-004 |
 | Why does the keyboard connect but type nothing? | BLE | BLE-003 |
 | Why does a saved bond never come back at boot? | BLE | BLE-006 |
@@ -416,6 +421,7 @@ USB-002: "ESP-IDF 5.3.1's host needs TWO event loops: usb_host_lib_handle_events
 USB-003: "The TTGK KM-HIFI-384KHZ DAC (3302:3366) enumerates on the S3 at full speed as UAC2: playback interface 1, ep 0x01 isochronous synchronous OUT, interval 1, alt 1 = 2 ch S16 mps 384, alt 2 = S24 576, alt 3 = S32 768; clock 9 via input terminal 1, RANGE 8000/16000/32000/44100/48000/96000 Hz; it played a 48 kHz S16 tone on both channels; a plug inserted or removed in its 3.5 mm jack makes it re-enumerate"
 USB-004: "Isochronous OUT through IDF 5.3.1 at 16 packets per transfer puts a few-sample discontinuity at every transfer boundary (440 Hz tone sidebands at +/- n x 62.5 Hz, -36 dB) even with every packet full and on time; at 8 packets it is gone (sidebands -107 dB, THD+N -62 dB); mechanism unknown"
 USB-005: "Claiming a USB interface allocates DMA descriptor lists and IDF 5.3.1 PANICS (hcd_dwc.c:1059 assert) when it cannot; the internal DMA pool is what runs out (open SD files and 4 KB task stacks both draw on it), so all USB audio DMA allocation happens once in `uac2 open` and the USB tasks now run on PSRAM stacks"
+AUD-001: "A volume percentage is a loudness scale, not an amplitude, and the three conventions differ: -10 dB at half is the psychoacoustic half-loudness result, -18 dB at half is what a 15A audio-taper pot and VLC's cubic law both give, and linear-in-dB spends an even 3.6 dB per 10% over a 36 dB range; a power law is accurate at one point and inverts the feel"
 USB-006: "VERIFIED: the USB-C DAC's playback FU MUTE refuses SET_CUR with a STALL, so its silent first stream cannot be unmuted from the host; a streaming alternate-setting cycle (dac_wake(), `uac2 wake`) re-arms it, and its hardware volume barely changes loudness on headphones"
 ```
 
@@ -2342,6 +2348,20 @@ USB-006: "VERIFIED: the USB-C DAC's playback FU MUTE refuses SET_CUR with a STAL
     - "operator listening reports, and PC line-in captures that came back silent while the watch reported a clean stream"
     - "tinydesk-twatch ports/twatchultra/main/uac2.c: dac_wake(), apply_volume(), fu_report()"
   verification: "Revised 2026-11-16 (core-log entry 22) from INFERRED to VERIFIED for the recovery and the refusal, still inferred for the device's internal state. Silent first plays were reproduced at 17:16, 17:31, 17:34, 19:15-19:17, 19:55 and 19:56 on 2026-11-15; on 2026-11-16 the operator stated the pattern plainly -- the first play after a plug is silent, and after a headphone replug the same file is audible. The STALL is measured, not inferred: `uac2 fu set` logged `W uac2: ctrl 21/01 status 4` and `E uac2: ctrl A1/01: no completion`. With dac_wake() in the start path, the first play after a plug was audible with `frames` climbing, `errors=0`, `underruns=0`, `short=0`, and no headphone replug. What the dongle's output stage actually latches cannot be observed from this side, so the mechanism remains behavioural."
+
+- record_id: AUD-001
+  kind: AUD
+  topic_id: AUD
+  status: VERIFIED
+  verified_date: 2026-11-16
+  title: "A volume percentage is a loudness scale, not an amplitude: -10 dB at half is a lab result, -18 dB at half is the hardware convention, and only linear-in-dB gives even steps"
+  statement: "Three different laws are all defensible for mapping a volume percentage to a gain, and they disagree by up to 10 dB at the same dial position. The psychoacoustic result is that loudness roughly doubles every +10 dB, so HALF AS LOUD is -10 dB and the amplitude gain is (pct/100)^1.66096. The hardware convention comes from the audio-taper potentiometer: a 15A taper presents about 15 percent of its resistance at half rotation, which is -16.5 dB, and a 10A taper gives -20.0 dB at half. VLC's software mixer cubes the GAIN (modules/audio_output/volume.h, 'Cubic mapping from software volume to amplification factor', with a comment requiring every volume-capable plugin to match it), and its Qt dial spans more than unity -- qt-max-volume defaults to 125 with a range of 60..300 (modules/gui/qt/qt.cpp), and the plain slider sets maximum 200 -- so unity sits at 80 percent of travel and the top of the dial is OVERDRIVE. Over the sub-unity portion, VLC's cubic reaches -18.1 dB at the factor-0.5 point, agreeing with linear-in-dB over a 36 dB range, which puts 50 percent at -18.00 dB; the two arrive at the same midpoint by different routes. A fourth shape, linear amplitude (gain = pct/100), is what a wrong potentiometer produces: -6 dB at half, with all its attenuation crammed into the bottom of the travel."
+  consequence: "For a percentage control a listener uses rather than measures, the midpoint should be about -18 dB, not -10 dB: the operator rejected a -10 dB-at-half power law by ear as 'inverted -- steep at the bottom and dead at the top' even though it measured exact to 0.02 dB at the DAC's line output, and that description is the correct reading of the SHAPE rather than of the accuracy. A power law is right at exactly one point of the travel and wrong on both sides of it: the -10 dB-at-half version spends 10 of its 33 dB in the first tenth of travel and 1.7 dB in the last, and VLC's cubic is more front-loaded still (18 dB in the first tenth, -60 dB by 10 percent, 2.7 dB in the last). Linear-in-dB over a 36 dB range spends an even 3.6 dB per 10 percent of travel, so no part of the dial is dead, one percent of travel is 0.36 dB which is under the ~1 dB the ear resolves, and the bottom of the travel is -36 dB -- still audible on headphones. VLC's overdrive cannot be copied on this board: 100 percent is already digital full scale, so any boost above it clips in the samples, and only the sub-unity portion of its law is usable. Attenuating in the samples also costs resolution at the bottom -- 10 percent gives gain 0.063, so a 16-bit full-scale sample becomes 2069 of 32767, about 11 effective bits -- which is a noise-floor matter, not a loudness one, and the reason a S24 or S32 alternate would be wanted before going deeper than 36 dB."
+  sources:
+    - "VLC source, modules/audio_output/volume.h (aout_SoftVolumeSet, 'Cubic mapping'), modules/gui/qt/qt.cpp (qt-max-volume default 125, range 60..300), modules/gui/qt/components/controller_widget.cpp (QSlider maximum 200), include/vlc_aout.h (AOUT_VOLUME_DEFAULT 256, AOUT_VOLUME_MAX 512)"
+    - "audio-taper potentiometer resistance laws: 15A and 10A tapers, approximately 15 percent and 10 percent of resistance at half rotation"
+    - "tinydesk-twatch ports/twatchultra/main/uac2.c: vol_db256(), apply_volume(), UAC2_VOL_RANGE_DB, dac_flat()"
+  verification: "Verified on hardware 2026-11-16 (core-log entry 23) at the DAC's analog line output, captured on a PC line input with its capture gain at -15 dB and Line Boost at 0 dB -- both required, because at the default +20 dB boost the codec limited the signal and every reading above about 70 percent flattened to the same level, which produced a false 'the curve is wrong at the top' conclusion that cost a round trip. With the capture chain clean, a five-point sweep of the -10 dB-at-half power law matched the predicted curve to within 0.02 dB (100, 75, 50, 25 and 10 percent measured -28.61, -32.76, -38.61, -48.59 and -61.82 dBFS), so the law was implemented correctly and its rejection was a matter of shape, not error. The linear-in-dB replacement was verified in the firmware's own arithmetic: 3.60 dB per 10 percent of travel at every step, monotonic over 1..100, 50 percent at exactly -18.00 dB, and 100 percent at unity with the multiply skipped."
 
 ```
 

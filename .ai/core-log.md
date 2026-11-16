@@ -1,3 +1,33 @@
+## 23 COMMIT Unreleased 2026-11-16T11:31:12-07:00
+
+#### Coming From:
+
+Unreleased d55b06d
+
+#### Purpose:
+
+Replace the DAC's unusable hardware volume with a sample-scaling control whose taper follows how loudness is actually heard, and establish a backed-up baseline once the operator accepted it.
+
+#### Outcome:
+
+THE VOLUME IS NOW OURS, IT IS UNIFORM IN dB, AND WAV PLAYBACK OVER THE USB-C DAC IS QUALIFIED AS THE PROJECT BASELINE. The DAC's own Feature Unit was already proven to misreport itself in entry 22; this cycle measured it across its whole range before removing it: 10 percent reads -20.00 dB, 25 percent -12.04, 50 percent -6.01 and 100 percent 0.00, every value echoed exactly by GET_CUR, while the output did not follow and nothing changed audibly until past the halfway point. So the Feature Unit is now held at 0 dB and unmuted once at open and again after every dac_wake(), and all attenuation happens in the samples through s_gain_q15. THE TAPER TOOK THREE ATTEMPTS AND THE REJECTIONS ARE THE RESULT. The first was the psychoacoustic law, gain = (pct/100)^1.66096, putting half-loudness (-10 dB) at 50 percent of travel; measured at the DAC's line output it was correct to 0.02 dB across a five-point sweep (100, 75, 50, 25 and 10 percent reading -28.61, -32.76, -38.61, -48.59 and -61.82 dBFS against predicted values within 0.02 of each), and the operator rejected it by ear as inverted, steep at the bottom and dead at the top. That reading was right and is a statement about SHAPE, not accuracy: a power law is exact at one point of the travel and wrong either side of it, spending 10 of its 33 dB in the first tenth and 1.7 dB in the last. VLC was then taken as the trusted reference and read from source rather than memory: modules/audio_output/volume.h cubes the GAIN with a comment requiring every volume-capable plugin to match it, and its Qt dial is not a 0..1 control, because qt-max-volume defaults to 125 with a range of 60..300 and the plain slider sets maximum 200, so unity sits at 80 percent of travel and the last fifth is overdrive. That produced two useful facts and one hard constraint: VLC and a linear-in-dB curve agree at the midpoint, -18.1 dB against -18.00 dB, which is the figure the operator remembered from consumer gear; cubic is MORE front-loaded than the rejected power law; and the overdrive cannot be copied here, because this board's 100 percent is already digital full scale so a boost would clip in the samples, leaving only the bottom-heavy sub-unity portion of VLC's law usable. The shipped law is therefore linear in dB over 36 dB, gain = 10^(dB/20) with dB = -36 * (1 - pct/100), and it was accepted by ear on a live stream stepped 100 to 75 to 50 to 25 to 10 percent while a track played, reporting even 9 dB per quarter-turn with no glitch, gap or click on any change. Verified in the firmware's arithmetic: 3.60 dB per 10 percent of travel at every step, strictly monotonic over 1..100, 50 percent at exactly -18.00 dB, and unity at 100 percent with the multiply skipped entirely. The play task is also the last one on an internal stack and now takes its 4 KB from PSRAM, matching usb_lib, the uac2 client and the uac2 worker, which is 16 KB of internal SRAM returned across this cycle and the last. TWO INSTRUMENT LESSONS COST TIME AND ARE RECORDED IN THE REFERENCE. The PC's capture chain has a +20 dB Line Boost and an AGC; at their defaults the codec limited the signal, every reading above about 70 percent flattened to the same level, and the resulting false 'the curve is wrong at the top' conclusion sent the work in the wrong direction until the boost was zeroed and the capture gain set to -15 dB, after which the noise floor dropped to -91 dBFS and the readings became trustworthy. And a BLE session left holding a link across a watch reset reports 'Service Discovery has not been performed yet' for every command while the board is healthy, so the session must be torn down and reopened rather than reused. Sixteen workarounds and dead ends are not repeated here because the surviving design is recorded in the code comments beside the reason for each rejection. Build PASS at 0x2e1460 bytes with 2 percent of the app partition free, sha256 `abaa8528e1b35c5d`, flashed app-only to 0x10000 with `Hash of data verified`. A full 16 MiB backup was then taken as `baseline-2026-11-16.bin` in the operator's backup directory, 16,777,216 bytes, sha256 `1ee127d64d06e4c8112edfaa1926b8c4005984e1ca965bf7beccbafd01c46818`, checked with `sha256sum -c`, and confirmed to hold the flashed app: `ota_0` inside it, read back out at offset 0x10000 for 0x2e1460 bytes, hashes to `abaa8528e1b35c5d`. The operator accepted the audio by ear and declared wav playback over the USB-C DAC qualified, which is what this baseline records. Reference AUD-001 was added with a new AUD topic and its catalog, routing and index entries, holding the three competing taper laws, VLC's cubic and overdrive, and the capture-chain trap.
+
+#### Next Steps:
+
+CYCLE 2'S OTHER HALF IS ROUTING, which this cycle did not touch: the emulators and `uac2 play` both feed one sink and there is no selector between them, so a track and a running core would compete for the same ring. Cycle 3 remains the emulators' resampler, since gnuboy emits 43,691 Hz and `uac2` refuses a rate the clock's RANGE does not list rather than converting it. Three smaller items stand and none is blocking: the build now takes its task stacks from PSRAM, so any future task added to this port should state why it may or may not do the same, and none of those tasks may call a flash or OTA API because the cache is disabled during those operations; attenuating in the samples costs resolution at the bottom of the travel, 10 percent giving gain 0.063 so a 16-bit full-scale sample becomes 2069 of 32767, about 11 effective bits, which is a noise-floor matter and not a loudness one, and is the reason the DAC's S24 (alt 2) and S32 (alt 3) alternates would be wanted before pushing the range past 36 dB; and the DAC's output stage still latches a state the host cannot clear, with dac_wake() reproducing the lever a headphone replug pulls rather than establishing what the dongle latches. The BLE shell input path still drops multi-byte writes, and `bleuart fetch` is still in the build and still untested now that TOL-004's write path is correct.
+
+#### Files Modified:
+
+- ports/twatchultra/main/uac2.c
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: PASS
+
+---
+
 ## 22 COMMIT Unreleased 2026-11-16T09:53:32-07:00
 
 #### Coming From:
