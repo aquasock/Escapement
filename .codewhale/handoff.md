@@ -1,75 +1,64 @@
 ## One line
 
-**FLAC plays on the built-in speaker (inline decoder). The `modules` partition
-runs code and the API table works. A FLAC decoder now BUILDS AND RUNS as a
-28,660-byte module but faults reading its own `.rodata` — the last piece is a
-second partition for data. Nothing regressed: the inline path still plays.**
+**FLAC plays on the built-in speaker (inline decoder, verified). The `modules`
+partition runs code and the API table works. A FLAC decoder builds as a module
+and is CALLED, but has never been seen to decode a sample — the last blocker was
+a stale address, now fixed and NOT yet re-tested.**
 
-## THE RULE THAT NOW COMPLETES ITSELF — read before touching modules
+## READ THIS BEFORE TOUCHING THE TEST PATH
 
-Three coredumps, one rule, and the third variant is the one that blocks a codec:
+Most of the last cycle went into a harness, not the code. The traps, in order of
+how much they cost:
 
-```
-0x42000000..0x43ffffff   INSTRUCTION window  -- fetch YES, data NO
-0x3C000000..0x3DFFFFFF   DATA window         -- data YES, fetch NO
-```
+**1. Ctrl+Q is 0x11 = XON.** With `IXON` set on the tty the line discipline
+swallows it as flow control and it never reaches the desktop, so "close the
+focused window" silently does nothing. Every serial helper MUST do:
 
-- header load through INST → `exccause 3, excvaddr 0x42ae0014` (entry 26)
-- executing a DATA mapping    → `exccause 2, excvaddr 0x3cae0028` (entry 27)
-- **CRC table read through INST → `exccause 3, excvaddr 0x42ae6ff0`** (entry 28)
-
-**The two windows are complementary and cannot coexist for the same bytes.** A
-blob with `.text` AND `.rodata` therefore needs **two mappings of two regions**.
-
-## What exists and works
-
-```
-main/modhost.h|c    API table (ABI 1): malloc free malloc_prefer_psram
-                    memcpy memset log + reserved[4]
-main/modload.c|h    map, prepare (boot), zero_bss, read_header, entry
-main/modflac.c|h    `modflac <file.flac>` -- decodes through the module
-modules/            Makefile, link.ld, patch_header.py
-  src/modtest.c     API-table proof (returns 42)
-  src/modshim.c     routes malloc/new/memcpy/abs/assert through the table
-  src/flacmod.cpp   micro-flac entry (constructs the decoder in caller state)
-  src/flacmalloc.h  FLAC_MALLOC/FLAC_FREE -> shim (must be -include'd)
+```python
+a[0] &= ~(termios.IXON | termios.IXOFF | termios.IXANY)
+a[3] &= ~(termios.ECHO | termios.ICANON | termios.ISIG)
 ```
 
-```
-build   cd ports/twatchultra/modules
-        make          -> modtest.bin   (API-table proof)
-        make flac     -> flac.bin      (28,660 B, runs, faults on rodata)
-flash   esptool write_flash 0xE00000 build/<name>.bin
-```
+**2. The USB console goes silent after esptool.** A fresh
+`esptool ... chip_id --before default_reset --after hard_reset` restores it.
+esptool also leaves the port at its own baud; the console needs 115200.
 
-**Two mechanisms that were built here and should be reused:**
+**3. The desktop restores a focused window at boot** and eats keystrokes meant
+for Terminal. F10 is a TOGGLE — pressing it when the Start menu is already open
+closes it. **At boot the menu is open with Terminal selected**, so the reliable
+sequence is simply: **send Enter, then type the command.**
 
-- **Lent bss.** A blob cannot zero its own `.bss`, and real libraries carry
-  function-local statics (micro-flac's `get_metadata_blocks()` holds a static
-  empty vector). The firmware publishes `g_modbss` (256 B), the module's
-  `link.ld` places `.bss` there via `--defsym`, and `modload_zero_bss()` clears
-  it before the first call. Address derived from the ELF.
-- **Map at boot only.** `esp_partition_mmap()` disables the flash cache and PSRAM
-  is reached through it, so a PSRAM-stack task cannot map flash:
-  `assert failed: esp_task_stack_is_sane_cache_disabled()`. `modload_prepare()`
-  runs once from the boot task; every PSRAM-stack task reads the cached result.
+**4. Parse the screen properly.** The mirror sends `ESC[r;cH` + SGR runs. A
+selected row is the text between an SGR containing `48;5;25` and the next ESC.
+`/tmp/raw.py` dumps the escape stream — that is the most useful tool here
+because it shows the whole screen when a window repaints.
 
-## THE NEXT STEP: a second partition for data
+## THE BUG THAT ENDED THE CYCLE, AND ITS FIX
 
-A codec needs `.text` mapped INST and `.rodata` mapped DATA, in two regions:
+A blob was linked against `0x3c27b8fc` while the firmware's table had moved to
+`0x3c27ba74`. The module's `host()` read garbage, every call returned
+`MODCALL_ERROR`, and the ONLY symptom was `verdict -1` — no crash, no log.
 
-1. add e.g. `moddata` (2 MB, data, subtype 0x41) to `partitions.csv`
-2. `esp_partition_mmap(..., ESP_PARTITION_MMAP_DATA, ...)` at boot for it
-3. `--defsym=MODDATA_AT=<address>` so `link.ld` places `.rodata` there
-4. keep `modules` (0xE00000) for `.text`
+**Cause: a `-D` flag does not make an object depend on its VALUE.** Rebuilding
+the app changed the define; make saw unchanged prerequisites and reused the
+stale `.o`.
 
-`storage` (7.87 MB, ~136 KB used) or `modules` (2 MB) has room without touching
-the OTA slots. The loader, the shim and the API table all already exist.
+**Fix: a generated header.** `modules/gen_addr.py` reads `g_modhost_ptr` and
+`g_modbss` from the app ELF into `build/modaddr.h`, and every module object
+depends on it, so a moved address forces a rebuild. Verified: the linked blob's
+entry now loads `l32r a8, ... (3c27ba74)`.
 
-**Until decoding works through the module, the inline micro-flac stays** — so
-`music` still plays and nothing regresses. Deleting `musicdec.cpp` and the
-`micro-flac` component requirement is what frees the 31.7 KB, and that only
-happens when the module path plays audio.
+**This is not re-tested on hardware.** That is the single next action.
+
+## Two more rules from coredumps
+
+- **A PSRAM-stack task may not map flash** — `esp_partition_mmap()` disables the
+  cache PSRAM lives behind: `assert esp_task_stack_is_sane_cache_disabled()`.
+  `modload_prepare()` runs once from the boot task; other tasks only *ask*
+  (`modload_ready()`). A retry that can panic is not a retry.
+- **A PSRAM-stack task may not touch `/fs` either.** littlefs is in SPI flash,
+  so `fopen()` calls `esp_flash_read()`, which disables the same cache. The
+  warning is wider than the mapper. `/sd` is fine (its own bus).
 
 ## Backups — take one after any layout change, the old ones stop matching
 
