@@ -1,3 +1,45 @@
+## 28 COMMIT Unreleased 2026-11-16T15:08:54-07:00
+
+#### Coming From:
+
+Unreleased 77d46ff
+
+#### Purpose:
+
+Move the FLAC decoder out of the app image and into the `modules` partition, to recover the 31.7 KB it costs inline on a board with 24 KB of headroom.
+
+#### Outcome:
+
+THE DECODER BUILDS AND RUNS AS A 28,660-BYTE MODULE AND IS CALLED SUCCESSFULLY, but it does not yet decode: it faults reading its own constant tables. THE COREDUMP IS THE EVIDENCE AND THE FINDING: fault `LoadStoreErrorCause` at `0x42ae6ff0`, which lies inside the module's own `.rodata` (`0x42ae683c` + `0x7b8`), with the trace `play_task` -> module entry -> `0x42ae231f` inside the blob. So the module's code EXECUTES and the boundary works, and what fails is a DATA READ of the module's own read-only data through the instruction mapping. THIS IS THE THIRD VARIANT OF ONE RULE AND IT COMPLETES THE PICTURE: the instruction window at 0x42000000..0x43ffffff serves instruction fetches and nothing else — a header load faulted at `0x42ae0014` in entry 26, and a CRC-table load faulted at `0x42ae6ff0` here, both `exccause 3`; and the data window at 0x3Cxxxxxx is its complement, serving data and faulting on instruction fetch (`exccause 2`, entry 27). THE TWO MAPPINGS ARE COMPLEMENTARY AND CANNOT COEXIST FOR THE SAME BYTES, so a codec blob needs TWO REGIONS — one mapped INST for code and one mapped DATA for `.rodata` — which means a second partition rather than one, a partition-table change and not a code change. That is the natural next step and it is cheap, because the pattern and the loader already exist. WHAT WAS BUILT AND IS KEPT. The module compiles from the vendored decoder with the encoder excluded and Ogg off, and links `-nostdlib` against `link.ld`. `FLAC_MALLOC` and `FLAC_FREE` are redirected to the host table through `flacmalloc.h`, because micro-flac's override is a NAME and every translation unit therefore needs the declaration — a plain `-D` left the decoder's own sources with an undeclared identifier. `abs()` and `labs()` are supplied by the shim because `lpc.cpp` calls them. Both LPC assembly widths are linked because the decoder references the 64-bit path whether or not a file needs it. A LENT BSS is new and general: real library code carries function-local statics — micro-flac's `get_metadata_blocks()` holds a static empty vector, 20 bytes plus a guard variable — and a blob cannot zero its own `.bss`, so the firmware publishes `g_modbss` (256 bytes), the module's `link.ld` places `.bss` there via `--defsym`, and `modload_zero_bss()` clears it before the first call; the address is derived from the ELF exactly as the API table's is. A SECOND COREDUMP FIXED A REAL TRAP: mapping the partition from a PSRAM-stack task panics with `assert failed: spi_flash_disable_interrupts_caches_and_other_cpu (esp_task_stack_is_sane_cache_disabled())`, because `esp_partition_mmap()` disables the flash cache and PSRAM is reached through that cache; `modload_prepare()` now maps and reads the header ONCE at boot from the boot task, whose stack is internal, and every PSRAM-stack task reads the cached result. That is the same rule entry 26 recorded about PSRAM stacks and flash APIs, arriving from a new direction. The app image was NOT reduced this cycle: micro-flac is still linked inline for the `music` command, so headroom fell to 22 KB rather than rising to 56 KB, and that stays true until the module path replaces the inline one. Build PASS at 0x2ea9b0 bytes.
+
+#### Next Steps:
+
+THE NEXT STEP IS A SECOND PARTITION, and the shape is already clear. A codec blob needs `.text` mapped as INSTRUCTIONS and `.rodata` mapped as DATA, at two addresses, in two regions; the module's linker script then places sections into both, and the loader maps both at boot from the boot task. That is one more entry in `partitions.csv`, one more `esp_partition_mmap(MAP_DATA)` call, and a `--defsym` for the data address, and the 9.87 MB `storage` or the 2 MB `modules` has room without touching the OTA slots. UNTIL THEN the inline micro-flac stays, so nothing regresses: `music` still plays, and `modflac` exists as the module path under test. Once decoding works through the module, deleting `musicdec.cpp` and the component requirement frees 31.7 KB, which is the point of the whole exercise. Three things to carry: the `__assert_func` stub in the shim reports through the table and returns rather than halting, so a decoder error surfaces as a return code — but that path has not been exercised, only reviewed; the module's entry signature grew a `state`/`state_size` pair so the caller lends the decoder object a home, and the decoder handle is padded to 32 bytes so the placement-new lands 8-byte aligned, which is worth checking if odd faults appear; and the diagnostic the module writes to `/fs/root/modflac.txt` did not appear on the last run, which is unexplained and should be understood before trusting any future module diagnostic — the crash happened first, so this is probably just the crash, but it is not proven.
+
+#### Files Modified:
+
+- ports/twatchultra/main/modflac.c
+- ports/twatchultra/main/modflac.h
+- ports/twatchultra/main/modload.c
+- ports/twatchultra/main/modload.h
+- ports/twatchultra/main/modhost.c
+- ports/twatchultra/main/modhost.h
+- ports/twatchultra/main/link_twatch.c
+- ports/twatchultra/main/CMakeLists.txt
+- ports/twatchultra/modules/Makefile
+- ports/twatchultra/modules/link.ld
+- ports/twatchultra/modules/src/modshim.c
+- ports/twatchultra/modules/src/flacmalloc.h
+- ports/twatchultra/modules/src/flacmod.cpp
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: NOT RUN
+
+---
+
 ## 27 COMMIT Unreleased 2026-11-16T14:28:35-07:00
 
 #### Coming From:
