@@ -1,3 +1,49 @@
+## 20 COMMIT Unreleased 2026-11-15T20:43:53-07:00
+
+#### Coming From:
+
+Unreleased 26175d7
+
+#### Purpose:
+
+Integrate USB audio into the desktop with a USB page in Settings that switches the USB-C port between Normal and OTG host mode and enables a USB-C DAC in host mode, as the first of three planned cycles, and hand off at the operator's request before it was finished.
+
+#### Outcome:
+
+STOPPED FOR A HANDOFF WITH THE LAST FIX BUILT AND NOT FLASHED, through fork commit `872eb4b` on `t-watch-ultra`. THE OPERATOR'S DESIGN, agreed before any code: one device-wide volume, a restart to change the USB mode, audio routed to the DAC automatically when it is attached and the speaker otherwise, delivered in three cycles. This is the first: the mode page, one owner for the host stack, and the DAC opening by itself. Routing and a global volume through the `sound_stream_*` sink are the second, and a resampler for the emulators the third. WHAT WAS BUILT. Settings gained a `USB...` button that opens `apps/usbset.c`. The page shows the port's role, Normal or OTG host, and a "USB-C DAC" checkbox that is drawn in the theme's dim colour and refuses presses while Normal is selected, since the widget set has no disabled state. The page reaches the board only through a new `td_usb_ops_t` in `td_sysinfo`, installed by a weak `board_usb_ops()`, so other boards show no page. The choices are saved as the board keys `usb.host` and `usb.dac`, device-wide, and applied at restart, and the page shows saved against running with a Restart button when they differ. `usbhost.c` is now the only code that installs the host stack and runs the library loop, and `uac2.c` uses it. With both keys set, boot starts the DAC driver in automatic mode: it takes the stream's transfers and a DMA reserve for the interface claim before any SD file is open, the reserve being two 512-byte, 512-aligned blocks, the shape of the HCD's isochronous descriptor lists (USB-005), and a worker opens the DAC when it is plugged in and forgets it when it goes. WHAT WORKED ON HARDWARE, by the operator and over BLE. The page rendered and behaved: OTG host and the DAC ticked, `Running: OTG host`. Normal to OTG and back by restart both behaved, the PC losing the watch and then regaining it at 20:36 as `ttyACM1`. In OTG mode the DAC opened by itself, logged at 3.3 s after boot, with the page reporting "USB-C DAC: KM-HIFI-384KHZ" and no `uac2 open` typed. WHAT FAILED: THE SHELL DOES NOT START IN OTG MODE. The Log Viewer, which needs no shell, showed `tdsh_bridge: cannot create the shell task` at 2919 ms. The shell's task is created at boot, just after this port's init, with a 24 KB internal-RAM stack (`TDSH_SHELL_TASK_STACK`), and the USB setup had taken that RAM first. In earlier cycles `uac2 open` ran after the shell already existed, which is why this never showed. A 25 KB block held across the USB setup and released at its end did not help, because the telnet server started at 2910 ms, between the release and the shell, and almost certainly split the hole. That is an inference: the Log Viewer keeps only 128 lines and cuts each at 38 columns, so the heap figures logged during boot were lost. The fix, which holds the block until a new weak hook `board_shell_task_prepare()` that the shell bridge calls immediately before creating the task, is built and not deployed. Build PASS for that last build at 0x2e07f0 bytes with 2 percent of the app partition free, sha256 fe0516cac4cec10d. The watch is RUNNING the previous build, sha256 1e9aa43698e8225c, flashed with `Hash of data verified`, IN OTG MODE with `usb.host = 1` and `usb.dac = 1`, so it is invisible to the PC and has no working shell. THE ONLY WAY BACK TO NORMAL IS THE USB PAGE ON THE GLASS, Settings, `USB...`, Normal, `Restart now`, because `board set usb.host 0` needs the shell; the page can also be driven over BLE with xterm mouse clicks, as was done to open it. Host suite 43 of 43: the API snapshot was re-recorded as an additive change, and `board_keys` passes again after `display2.transport`, unrecorded since entry 14, was recorded and described in the README with `usb.host` and `usb.dac`. No backup was taken this cycle; `working-2026-11-15-2002.bin` from entry 19 holds the last passed firmware. The required core-syntax audit was run before commit and passed, with `.ai/core.md` confirmed unchanged and `.ai/core-log.md` the only `.ai/` file touched; no reference record changed, because the shell's stack size and boot order are this project's own facts.
+
+#### Next Steps:
+
+FIRST, RETURN THE WATCH TO NORMAL MODE through Settings, `USB...`, Normal, `Restart now`, and flash `fe0516cac4cec10d`, rebuilding from `872eb4b` if needed. Then switch to OTG with the DAC, restart, and check that the Terminal gives a prompt. If it does, run `heap` and record the free and largest internal figures in OTG mode, then `uac2 play /sd/media/audio/clip10.wav` without `uac2 open`, which is the acceptance test of this cycle. If the shell still fails, read the Log Viewer before anything else: `usbhost: before USB`, `after USB` and `shell hole released` each log the internal free, largest and DMA-largest figures. If even holding the block until the shell is created leaves too little for the telnet server or another task, shrink the USB tasks' 4 KB stacks or create the shell task before the USB setup, rather than putting stacks in PSRAM, which SOC-005 warns against. The Log Viewer's 128-line limit lost this boot's heap lines, so a future diagnostic of boot memory should log late, or to the SD card, rather than rely on it. After acceptance, cycle 2 is the router and the global volume through `sound_stream_*`, scaling the samples rather than using the DAC's weak hardware volume (USB-006), and cycle 3 is the emulators' resampler. The open items of entries 17 to 19 stand.
+
+#### Files Modified:
+
+- CMakeLists.txt
+- README.md
+- api/board_keys.txt
+- api/tinydesk.api
+- apps/settings.c
+- apps/td_apps.h
+- apps/usbset.c
+- include/tinydesk/td_sysinfo.h
+- ports/esp_idf/app/main.c
+- ports/esp_idf/app/tdsh_bridge_esp.c
+- ports/esp_idf/components/tinydesk/CMakeLists.txt
+- ports/twatchultra/main/CMakeLists.txt
+- ports/twatchultra/main/link_twatch.c
+- ports/twatchultra/main/uac2.c
+- ports/twatchultra/main/uac2.h
+- ports/twatchultra/main/usbhost.c
+- ports/twatchultra/main/usbhost.h
+
+#### Status:
+
+- Build: PASS
+- Deployment: NOT RUN
+- User Test: NOT RUN
+
+---
+
 ## 19 COMMIT Unreleased 2026-11-15T20:07:47-07:00
 
 #### Coming From:
