@@ -1,14 +1,73 @@
-# Handoff — Escapement / TinyDesk on T-Watch Ultra, 2026-11-16T11:31
+# Handoff — Escapement / TinyDesk on T-Watch Ultra, 2026-11-16T12:50
 
 Orientation, not authority. **Verify before acting on it.** The files, the
 coredump partition and the board are the fact; this file is a claim.
 
 ## One line
 
-**`.wav` playback over the USB-C DAC is QUALIFIED and a full backup exists — this
-is the project baseline. Audio plays on the first stream after a plug, the volume
-is uniform in dB, and the boot loop is gone. Cycle 2's other half (routing) is
-not started.**
+**FLAC plays on the watch from the SD card out of the built-in speaker, decoded
+on the S3 itself — 0 errors, 0 short writes, real time. `.wav` over the USB-C DAC
+is still the qualified baseline. The next structural question is where a second
+codec would live, because the app image has 27.5 KB left and the first one cost
+31.7 KB.**
+
+## What plays, and with what
+
+```
+command    music <file.flac>   |   music stop   |   music   (status)
+decoder    micro-flac v0.3.0, Apache-2.0, vendored unmodified
+           ports/twatchultra/components/micro-flac (+ micro-ogg-demuxer, MIT)
+sink       built-in MAX98357A over I2S, via sound_stream_write_stereo_wait()
+```
+
+Measured: 352800 frames for an 8 s 44.1 kHz tone, 192000 for a 4 s 48 kHz one,
+both exact; a 5:58 track at `0 errors, 0 short writes` with the frame counter
+advancing in step with wall-clock time; heap back to its starting figure after
+the task ends.
+
+**The DAC is out of scope by the operator's instruction** — the speaker is
+proven, `uac2` stays as entry 23 left it. Do not re-add the DAC path to the
+player without being asked.
+
+## The decoder decision, and why it is not the obvious one
+
+```
+                          Rockbox flac.c      dr_flac       micro-flac
+internal SRAM, static     190 KB (7ch x       0             0
+                          4608 x 4 + 64 KB)
+working buffer            static, worst-case  heap, 41 KB   heap, file-sized,
+                                                             PSRAM-first
+Xtensa LPC assembly       no                  no            yes
+flash                     ~14 KB (RISC-V)      13 KB src     31.7 KB LINKED
+licence                   GPL-2.0-or-later    MIT-0/PD      Apache-2.0
+```
+
+**The disqualifier is the 190 KB of static internal SRAM**, not the licence —
+this board has ~18 KB free with the desktop running.
+
+**A correction worth remembering:** the firmware **already ships wolfSSH and
+wolfSSL under GPLv3**, so it is GPLv3 as a whole already. Rockbox's GPL would
+have cost nothing legally. Don't repeat my earlier claim that GPL is the reason
+to avoid it; memory is the reason.
+
+**How to measure a future codec:** build the real decode path and diff the image
+against an empty app. micro-flac's `.a` is 76 KB but only **31.7 KB** survives
+link-time GC, because the archive contains an encoder nobody calls. A size read
+off the archive is wrong by 2.4x.
+
+## THE BASELINE IS STALE — read this before restoring anything
+
+`~/twatch-backup/baseline-2026-11-16.bin` restores the **entry 23** firmware
+(`abaa8528e1b35c5d`, no FLAC player). The board now runs a newer build and **no
+backup of it exists yet**. Taking one is owed.
+
+## Memory, as it stands
+
+```
+flash     app 0x2e9450 (3,083,344 B)   27.5 KB free in ota_1   <- thin
+internal  ~18 KB free during playback; the player's own buffers are PSRAM
+PSRAM     7.4 MB free — the resource nobody is spending
+```
 
 ## The baseline, on disk
 
