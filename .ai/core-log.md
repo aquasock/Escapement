@@ -1,3 +1,34 @@
+## 18 COMMIT Unreleased 2026-11-15T17:37:51-07:00
+
+#### Coming From:
+
+Unreleased c47a6ed
+
+#### Purpose:
+
+Remove the scratch the operator heard in entry 17's DAC test tone, measuring it from the DAC's line output on the PC rather than judging it by ear alone.
+
+#### Outcome:
+
+The operator passed the tone as perfect on headphones, through fork commit `4267dca` on `t-watch-ultra`, but the cause is only half established and the cycle shipped one known defect. THE MEASUREMENT CAME FIRST. With the DAC's output on the PC's line-in, a 440 Hz capture once the PC's capture gain had been lowered enough not to clip showed the scratch as a discontinuity every 16 ms: sidebands at 440 plus or minus multiples of 62.5 Hz at -36 dB each, and a phase step of about 0.18 rad, about 3 samples, every 16 ms -- one per 16-packet isochronous transfer. TWO REAL BUFFERING FAULTS WERE FOUND AND FIXED, AND THEY WERE NOT THE SCRATCH. `xfer_done()` read the ring once, and a byte ring stops at its wrap point, so fills came back short and were zero-padded without being counted, because only an empty ring incremented `underruns`; it now reads across the wrap and counts every short fill as `short`. `uac2 tone` paced itself with a fixed 2 ms delay and ran slightly behind the DAC; it now blocks on ring space through a new `uac2_write_wait()`, and `uac2_write()` no longer returns `pdTRUE` as a byte count (TOL-004). The proof that these were not the cause is the next capture: with the watch reporting `short=0 underruns=0` the sidebands were unchanged at -36 dB and the phase steps were still there. So the glitch is at the transfer boundary in the host path, recorded as USB-004 with status INFERRED because its mechanism is unknown. Halving the transfer to 8 packets, one constant and nothing else, gave a tone the operator heard as perfect. That result rests on ears alone: every line-in capture on the 8-packet build came back as digital silence while the watch reported a clean stream, so the 125 Hz sideband spacing that would prove the per-transfer mechanism was never measured. THE UNPLUG RECOVERY ADDED THIS CYCLE CRASHES, AND IT SHIPPED. A capture at 17:04 was silent because the DAC had dropped off the bus mid-stream, with status 7 `NO_DEVICE`, and the driver kept writing into a dead stream; `forget_gone_device()` was added so the next `uac2 open` would recover. The coredump of the third black-screen hang names it: `assert failed: tlsf_free tlsf.c:1201 (!block_is_free(block) && "block already marked as free")`, in `usb_host_transfer_free()` called from `forget_gone_device()` at `uac2.c:610`, freeing `s_xfer[1]` after `s_xfer[0]` freed cleanly. It is reached because inserting or removing the DAC's 3.5 mm plug makes the DAC re-enumerate (USB-003), which three jack changes during a stream each turned into a panic on the next `uac2` command; the core holds only task stacks, so whether this is a double free or a damaged heap header is not established. A `reboot` sent over BLE at 17:05 while the stream was stuck on the dead device also left the watch not booting until the operator power-cycled it. Builds: sha256 bf2d56cc69cfa873 with the buffering fixes, flashed and confirmed by `verify OK (digest matched)`; then sha256 41bdc420d0ccb3cd with 8 packets per transfer, flashed with `Hash of data verified`, which is the one passed. A rebuild after a comment-only edit differs from it in 68 bytes, all in the app descriptor's build time and the trailing image hash. The PC's line-in was set to 5 percent for the captures and restored to 86 percent, which is ALSA `Capture` 63 and `Line Boost` 2. No 16 MiB backup was taken. The required core-syntax audit was run before commit and passed, with `.ai/core.md` confirmed unchanged and `.ai/core-log.md` and `.ai/core-reference.md` the only `.ai/` files touched; USB-003 was revised and USB-004 added with its index and routing rows.
+
+#### Next Steps:
+
+THE UNPLUG CRASH IS FIRST, because a jack change is an ordinary user action and it takes the watch down. Until it is fixed, do not move the DAC's plug while a stream is open. The approach proposed and not yet approved is to stop freeing transfers on that path: allocate the three isochronous transfers once, reuse them on reopen against the new device handle, and log each transfer's pointer, buffer and status at DEV_GONE and at reopen, so that heap damage, if that is what this is, shows up in a log rather than as another silent panic. Test it by moving the jack mid-stream, then `uac2 open` and `uac2 tone`. Next, USB-004 needs its measurement: a line-in capture at 8 packets, with the capture's peak checked before any analysis, which is the step that would have caught the empty captures at once. Two of them were empty while the PC detected a plug in its line-in jack, so the DAC end of that cable is suspect. Then the audio objective proper: a resampler from each emulator's rate to 48 kHz, gnuboy's 43,691 Hz first. `bleuart fetch`, `usb_hid.c`'s `ESP_INTR_FLAG_LEVEL1`, the `coredump` partition, the owed backup and entry 1's wrong fork path stand as entry 17 left them.
+
+#### Files Modified:
+
+- ports/twatchultra/main/uac2.c
+- ports/twatchultra/main/uac2.h
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: PASS
+
+---
+
 ## 17 COMMIT Unreleased 2026-11-15T17:01:08-07:00
 
 #### Coming From:
