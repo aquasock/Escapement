@@ -1,15 +1,83 @@
-# Handoff — Escapement / TinyDesk on T-Watch Ultra, 2026-11-16T12:50
+# Handoff — Escapement / TinyDesk on T-Watch Ultra, 2026-11-16T13:30
 
 Orientation, not authority. **Verify before acting on it.** The files, the
 coredump partition and the board are the fact; this file is a claim.
 
 ## One line
 
-**FLAC plays on the watch from the SD card out of the built-in speaker, decoded
-on the S3 itself — 0 errors, 0 short writes, real time. `.wav` over the USB-C DAC
-is still the qualified baseline. The next structural question is where a second
-codec would live, because the app image has 27.5 KB left and the first one cost
-31.7 KB.**
+**FLAC plays on the watch from the SD card out of the built-in speaker. The flash
+now carries a 2 MB raw `modules` partition at 0xE00000, funded by shrinking
+`storage` to 7.87 MB with every file migrated and verified. The partition is a
+room with nothing in it: nothing loads from it yet, and whether a blob can be
+called across the Xtensa windowed ABI is unproven.**
+
+## Backups — take one after any layout change, the old ones stop matching
+
+```
+modules-2026-11-16-1320.bin   16,777,216 B
+   sha256 34a9d33688e18e0940bf2f0ef7642143f8e0b871f3d3a2a040cbc4e86064262b
+   THE CURRENT LAYOUT. App at 0x10000 = 7af3e9c2aa9cae89 (verified).
+   sha256sum -c clean.
+
+music-2026-11-16-1259.bin     pre-modules layout, kept for the entry 24 build
+   sha256 7a308611b75adaad6546c833282b18b7feefb20d9b63a0d33774bc725d6c0a45
+
+baseline-2026-11-16.bin       entry 23 build, PRE-FLAC. Do not restore over
+                              the current layout expecting a working board.
+```
+
+**A digest read before a rebuild will not match one read after** — the app
+descriptor's build time moves, as entry 20 and entry 25 both record. Compare
+app regions against the build that was actually flashed.
+
+## The partition table, live on the board
+
+```
+nvs       0x9000    24K
+phy_init  0xf000     4K
+ota_0     0x10000    3M      app
+ota_1     0x310000 3008K     app (OTA target, the real size budget)
+coredump  0x600000   64K
+otadata   0x610000    8K
+storage   0x620000 8064K     littlefs at / (NOT /fs)
+modules   0xe00000    2M     data, subtype 0x40 — raw, all 0xFF
+```
+
+`storage` is mounted at **`/`** (`/etc`, `/home`, `/root`, `/sd`, `/shared`,
+`/tmp`), not `/fs`. `/sd` is the SD card.
+
+## The modules partition — what it is for and what is missing
+
+Xtensa executes from flash natively (everything ESP-IDF runs is XIP-mapped), so
+a blob at 0xE00000 can be `esp_partition_mmap()`-ed as **instructions** and
+called, costing **no internal SRAM** — the pool this board is short of. 2 MB
+against 704 KB for all eleven Rockbox codecs.
+
+**Nothing loads from it.** Before porting anything, prove one tiny
+position-independent blob can be mapped and called across the Xtensa windowed
+ABI. If that fails, give the room back to `storage`; the alternative is trimming
+the app image (MicroPython, wolfSSH, wolfSSL dominate it).
+
+## THE LESSON THAT COST A SCARE: a byte census is not a filesystem census
+
+Counting non-0xFF bytes said `storage` held 4.2 MB with 1.1 MB above the new
+boundary — "shrinking destroys data". Mounting it with `littlefs-python` showed
+**25 files, 11 dirs, 22,244 bytes, 34 blocks**. The rest was stale blocks
+awaiting GC.
+
+**To measure a littlefs partition, mount it:**
+
+```bash
+/tmp/lfsvenv/bin/python -c "
+import littlefs
+ctx = littlefs.UserContextFile('/tmp/storage.img')
+fs = littlefs.LittleFS(ctx, mount=False, block_size=4096, block_count=N)
+fs.mount()   # mount=False is essential: the ctor FORMATS on failure otherwise
+"
+```
+
+Extract the partition from a backup image at 0x620000. Migration was done by
+extraction and rebuild, never truncation.
 
 ## What plays, and with what
 
