@@ -26,6 +26,7 @@ record_kinds:
   - FLASH       # 16 MiB partition layout and image formats
   - JFFS2       # the firmware's jffs2 reader and Linux-written files
   - BLE         # ESP32-S3 NimBLE as a HID host
+  - USB         # the ESP32-S3 USB OTG port as a host, and devices attached to it
   - NETWORK     # esp-hosted WiFi over shmem
   - TOOLCHAIN   # crosstool-NG Xtensa/uClibc, ESP-IDF, esptool
   - EXTERNAL    # interface contracts owned by other projects
@@ -129,6 +130,10 @@ Topic IDs are the `record_id` prefix. An entry reserves a name; it does not clai
 - topic_id: EMU
   name: "SPLB32 Tamagotchi emulator"
   description: "The interpreter measured on this board: what one emulated instruction costs, why PSRAM latency and the absence of a cache set the floor, and which of the two cores the work runs on."
+
+- topic_id: USB
+  name: "ESP32-S3 USB host"
+  description: "The OTG port acting as a host under ESP-IDF 5.3.1: the FIFO split that bounds endpoint sizes, the event loops the host library requires, and the devices measured on it."
 ```
 
 ---
@@ -230,6 +235,10 @@ Topic IDs are the `record_id` prefix. An entry reserves a name; it does not clai
 | Boot protocol or report protocol? | BLE | BLE-003 |
 | Why does the board reset-loop when Bluetooth scans? | BLE | BLE-004 |
 | How can a PC reach the watch with no USB or WiFi? | BLE | BLE-008 |
+| Why did the BLE console stream ~24 KB/s and show only the top 10 rows? | TOL | TOL-004 |
+| Why does the host refuse an isochronous endpoint over 128 bytes? | USB | USB-001 |
+| Why does an attached USB device never enumerate, or a transfer never complete? | USB | USB-002 |
+| What does the USB-C DAC offer, and which alternate plays 16-bit stereo? | USB | USB-003 |
 | Why does an unattended reboot miss the keyboard entirely? | BLE | BLE-004 |
 | Why does the keyboard connect but type nothing? | BLE | BLE-003 |
 | Why does a saved bond never come back at boot? | BLE | BLE-006 |
@@ -335,6 +344,7 @@ NET-003: "The firmware fork added ESP_LOG_IF = 6 for its diagnostics, so its ESP
 TOL-001: "Without XTENSA_GNU_CONFIG pointing at esp32s3.so the compiler emits BIG-ENDIAN objects and the link fails with 'file in wrong format' naming libc or libgcc, which reads as a broken toolchain"
 TOL-002: "crosstool-NG xtensa-esp32s3-linux-uclibcfdpic, GCC 14.1.0, uClibc-ng; binaries are dynamically linked to libc.so.0 with interpreter /lib/ld-uClibc.so.0, and -static needs -mfdpic"
 TOL-003: "A patch loop globbing patches/kernel/*.patch does not recurse, and 'git apply || true' hides the failure; both are how entire patch series disappeared from a build without an error"
+TOL-004: "ESP-IDF's xRingbufferSend() returns BaseType_t pdTRUE/pdFALSE, NOT a byte count, and on a RINGBUF_TYPE_BYTEBUF it is all-or-nothing; returning it as a count made every BLE console write report 1 byte, so the renderer resent shifted copies until the ring filled and then repainted the whole screen for ever"
 
 EXT-001: "The SPLB32 Tamagotchi core runs at 4.05x realtime headless on this board, and 1.00x while painting 320x400 at 4 fps from the flash-resident ROM; the display path is the bottleneck"
 EXT-002: "The linear flash window 0x42000000 is readable from userspace, so a 512 KB ROM at 0x42480000 costs zero RAM -- the fix for contiguity on NOMMU; file mmap costs 2x the file and MAP_SHARED fails ENODEV"
@@ -398,6 +408,9 @@ SOC-006: "tdsh's SSH server draws about 19,400 bytes of internal DRAM merely by 
 SOC-005: "The ESP32-S3 Wi-Fi driver takes its RX and TX buffers from INTERNAL DMA-capable RAM, never PSRAM, at esp_wifi_init() whether or not a network is ever joined -- each is 1600 bytes and the IDF default pair (16 static RX + 16 static TX) holds 51,200 bytes for the life of the firmware, which on this board was 30,160 bytes more than the desktop needed"
 BLE-007: "The operator's Xbox Wireless Controller is BLE HID, not Bluetooth Classic -- it connected to the ESP32-S3 on the first try -- and hid_mouse_parse() accepts its descriptor because a gamepad declares Generic Desktop X and Y for its left stick, which is why it moved the desktop cursor; the discriminator is the top-level collection usage (Game Pad 0x05, Joystick 0x04, Mouse 0x02, Keyboard 0x06) and the gamepad parser must be asked FIRST, or the mouse claims the device and the gamepad path is never reached"
 BLE-008: "NimBLE can run central and peripheral at once, so the watch keeps its BLE keyboard AND offers a Nordic-UART serial console for a PC; GATT services must be registered BEFORE nimble_port_freertos_init (ble_svc_gap_init asserts SYSINIT_ASSERT_ACTIVE) and only advertising after the sync, and the name must be in the advertisement itself or a scan-by-name finds nothing"
+USB-001: "ESP-IDF 5.3.1 splits the S3's one host FIFO by CONFIG_USB_HOST_HW_BUFFER_BIAS: at Balanced, periodic TX is OTG_DFIFO_DEPTH/8 = 32 words and the HCD refuses any isochronous OUT endpoint above 128 bytes (the Kconfig help says 192; the code and the board say 128); PERIODIC_OUT is required for USB audio and leaves IN endpoints at 128"
+USB-002: "ESP-IDF 5.3.1's host needs TWO event loops: usb_host_lib_handle_events() or nothing enumerates, and usb_host_client_handle_events() or no transfer completes; control submits do not block, completion callbacks are called unconditionally (NULL is a jump to 0), and is_synchronous must be false"
+USB-003: "The TTGK KM-HIFI-384KHZ DAC (3302:3366) enumerates on the S3 at full speed as UAC2: playback interface 1, ep 0x01 isochronous synchronous OUT, interval 1, alt 1 = 2 ch S16 mps 384, alt 2 = S24 576, alt 3 = S32 768; clock 9 via input terminal 1, RANGE 8000/16000/32000/44100/48000/96000 Hz; it played a 48 kHz S16 tone on both channels"
 ```
 
 ---
@@ -2227,6 +2240,62 @@ BLE-008: "NimBLE can run central and peripheral at once, so the watch keeps its 
     - "DSP-001 for ownership, and DSP-005 for the single-writer rule the flush obeys"
   verification: "Verified on hardware 2026-11-12: the operator saw the pet over the console before the change, and reported the cleared screen as looking great after it. The build was clean with 0 warnings, binary 0x28b510, and a status read during the run showed frames=160 blits=20 at 10 s of guest time, so the clear did not disturb the 16 Hz cadence or the dirty-row skip ratio. The claim that the margins are outside s_fb is verified by reading the geometry constants and the init-time paint calls, not by a before/after photograph of the margins with an app up."
 
+- record_id: TOL-004
+  kind: TOOLCHAIN
+  topic_id: TOL
+  status: VERIFIED
+  verified_date: 2026-11-15
+  title: "xRingbufferSend() returns pdTRUE/pdFALSE, not a byte count, and is all-or-nothing on a byte buffer"
+  statement: "ESP-IDF 5.3.1 declares BaseType_t xRingbufferSend(RingbufHandle_t, const void *pvItem, size_t xItemSize, TickType_t xTicksToWait) and documents its return as 'pdTRUE if succeeded, pdFALSE on time out or if the data is larger than the maximum permissible size of the buffer'. On a RINGBUF_TYPE_BYTEBUF the item is copied whole or not at all; xRingbufferGetCurFreeSize() reports how much would fit."
+  consequence: "Any wrapper that promises a write() contract -- 'returns the number of bytes accepted' -- must translate the flag, not pass it through. bleuart_write() passed it through, so every successful write reported ONE byte to td_render_flush(), which resent out+1, out+2, ... each accepted in full until the 4 KB TX ring was full; the next write returned 0, the renderer dropped the frame, marked the link down and repainted the whole screen TD_LINK_RETRY_MS (500 ms) later, for ever. It presented as a continuous ~24 KB/s stream on an idle desktop, a screen that never showed below about row 10, corrupted rows, and a `fetch` that duplicated data -- all one fault. The fix sends min(len, free) and returns exactly that; the blocking variant returns len on pdTRUE."
+  sources:
+    - "ESP-IDF 5.3.1 components/esp_ringbuf/include/freertos/ringbuf.h:133-140, xRingbufferSend() and its @return"
+    - "tinydesk-twatch ports/twatchultra/main/bleuart.c: bleuart_write(), bleuart_write_wait()"
+    - "tinydesk-twatch src/render.c:26-44 td_render_flush(), src/td.c:623-635 link-down handling"
+  verification: "Verified on hardware 2026-11-15 (core-log entry 17). Before the fix, one captured BLE repaint was exactly 4,090 bytes and decomposed byte for byte into a 1,024-byte render buffer followed by that buffer from offsets 1, 2 and 3; 118,610 bytes arrived in 5 s with nothing typed. After the fix, 240 bytes arrived in 5 idle seconds (frame markers only, as on USB) and a full redraw was 3,557 bytes rendering all 26 rows cleanly."
+
+- record_id: USB-001
+  kind: USB
+  topic_id: USB
+  status: VERIFIED
+  verified_date: 2026-11-15
+  title: "The host FIFO bias sets the largest endpoint the HCD accepts, and isochronous OUT is 128 bytes at the default"
+  statement: "The ESP32-S3's DWC OTG controller has one data FIFO (OTG_DFIFO_DEPTH 256, soc/esp32s3/include/soc/usb_dwc_cfg.h:44; the line count actually used is read from GHWCFG3 at runtime) split into RX, non-periodic TX and periodic TX. usb_dwc_hal_set_fifo_bias() sizes the split from CONFIG_USB_HOST_HW_BUFFER_BIAS: at BALANCED, periodic TX = OTG_DFIFO_DEPTH/8 lines and non-periodic TX = OTG_DFIFO_DEPTH/4; at PERIODIC_OUT, RX = OTG_DFIFO_DEPTH/8 + 2, non-periodic TX = OTG_DFIFO_DEPTH/16 and periodic TX takes the remainder. usb_dwc_hal_get_mps_limits() turns lines into bytes (x4), and the HCD refuses to open a pipe whose wMaxPacketSize exceeds the limit for its direction and type. The Kconfig help quotes Balanced periodic OUT as 192 bytes and Periodic OUT as 600."
+  consequence: "At the default the limit is 32 lines = 128 bytes, which is below every playback alternate a UAC2 DAC is likely to offer (48 kHz stereo 16-bit alone is 192 bytes per 1 ms frame), so USB audio REQUIRES CONFIG_USB_HOST_HW_BUFFER_BIAS_PERIODIC_OUT=y; it is set in ports/twatchultra/sdkconfig.defaults. The cost is IN endpoints capped at (RX lines - 2) x 4 = 128 bytes and non-periodic OUT at 64, which still covers HID keyboards and mice, control endpoint 0, and the DAC's 64-byte interrupt endpoint. The Kconfig help's 192 for Balanced disagrees with the code and with the board; the code is authoritative. This is an ESP-IDF configuration limit, not a USB or hardware limit."
+  sources:
+    - "ESP-IDF 5.3.1 components/hal/usb_dwc_hal.c:184-246, usb_dwc_hal_set_fifo_bias() and usb_dwc_hal_get_mps_limits()"
+    - "ESP-IDF 5.3.1 components/usb/hcd_dwc.c:1640-1667, the MPS check and its 'EP MPS (%d) exceeds supported limit (%d)' message"
+    - "ESP-IDF 5.3.1 components/usb/Kconfig:14-48, USB_HOST_HW_BUFFER_BIAS and its help text"
+  verification: "Verified on hardware 2026-11-15 (core-log entry 17). At BALANCED, claiming the DAC's 768-byte alternate failed with 'E HCD DWC: EP MPS (768) exceeds supported limit (128)'. With PERIODIC_OUT the 384-byte alternate was claimed and streamed with errors=0 missed=0. The PERIODIC_OUT periodic-TX ceiling itself (600 per Kconfig, up to 824 computed if GHWCFG3 reports 256 lines) was not measured, because the 384-byte alternate was the one needed."
+
+- record_id: USB-002
+  kind: USB
+  topic_id: USB
+  status: VERIFIED
+  verified_date: 2026-11-15
+  title: "The host library and each client need their own event loop, and control transfers are asynchronous"
+  statement: "ESP-IDF 5.3.1's USB Host Library processes device attach, enumeration and detach only inside usb_host_lib_handle_events(), and delivers a client's transfer completions and client events only inside usb_host_client_handle_events() (usb_host.h:487: 'On completion, the transfer's callback will be called from the client's usb_host_client_handle_events() function'). usb_host_transfer_submit_control() queues the URB and returns (usb_host.c:1446-1467); the completion callback is invoked unconditionally (usb_host.c:798). usb_host_client_config_t.is_synchronous is documented 'Set to false for now', and async.client_event_callback is invoked on every queued event whatever is_synchronous says (usb_host.c:809)."
+  consequence: "A driver must run a task looping on usb_host_lib_handle_events() (freeing devices on NO_CLIENTS, as usb_hid.c does) and a task looping on usb_host_client_handle_events() for its client; without the first usb_host_device_addr_list_fill() stays empty with a device plugged in, and without the second no control transfer completes and no isochronous transfer is refilled. A synchronous-looking control helper must set a callback that signals the caller and wait on it -- never from the client task itself, which is the one delivering the completion. A NULL transfer callback or NULL client event callback is a jump to address zero the moment the event arrives. Separately observed: while the host is installed the S3's USB-Serial-JTAG device does not appear on a PC even with the PC cable plugged back in; a reboot restores it, which on this board is done over the BLE console (BLE-008) with `reboot`."
+  sources:
+    - "ESP-IDF 5.3.1 components/usb/include/usb/usb_host.h:118-125 (is_synchronous), 483-499 (transfer submit semantics)"
+    - "ESP-IDF 5.3.1 components/usb/usb_host.c:667-668, 798, 809, 1446-1467"
+    - "tinydesk-twatch ports/twatchultra/main/uac2.c: lib_task(), client_task(), ctrl()/ctrl_cb(); ports/esp_idf/app/usb_hid.c:153-162 usb_lib_task()"
+  verification: "Verified on hardware 2026-11-15 (core-log entry 17). With no library task, `uac2` reported dev=0 with the DAC attached while `usbdiag` -- which runs the loop -- enumerated it at address 1. With both loops and the async ctrl(), `uac2 open` found the DAC on its first call, the RANGE and SET_CUR control requests completed, and isochronous transfers streamed for over 95 s with errors=0. The USB-Serial-JTAG absence was observed after `uac2 open`: no kernel enumeration from 16:47 until a `reboot` sent over BLE at 16:54, after which it enumerated immediately."
+
+- record_id: USB-003
+  kind: USB
+  topic_id: USB
+  status: VERIFIED
+  verified_date: 2026-11-15
+  title: "The TTGK KM-HIFI-384KHZ USB-C DAC as the S3 sees it"
+  statement: "The DAC (USB id 3302:3366, product 'KM-HIFI-384KHZ', bcdUSB 0x0201, device class 239/2/1) enumerates on the ESP32-S3 host at FULL speed (12 Mbit/s), EP0 max 64, one configuration of 422 bytes. It is UAC2 (protocol 0x20). Playback is interface 1, isochronous synchronous OUT endpoint 0x01, bInterval 1, with three alternates: alt 1 = 2 channels, 2-byte subslot, 16 bits, wMaxPacketSize 384; alt 2 = 3-byte, 24 bits, 576; alt 3 = 4-byte, 32 bits, 768. Interface 2 is isochronous synchronous IN on 0x81 (192 and 288 byte alternates); interface 3 is an interrupt IN on 0x83, 64 bytes, interval 8. The playback alternate's terminal link is input terminal 1, whose clock source is entity 9; a SAM_FREQ RANGE request on clock 9 returns 8000, 16000, 32000, 44100, 48000 and 96000 Hz."
+  consequence: "The 384 in the product name is not a rate this host can use: at full speed the largest alternate is 768 bytes per 1 ms frame. 48 kHz stereo 16-bit (192 bytes per frame) uses alt 1, which needs the PERIODIC_OUT FIFO bias (USB-001). Being synchronous, it has no feedback endpoint; the host sends a fixed 192 bytes every frame. The configuration is 422 bytes, which is why CONFIG_USB_HOST_CONTROL_TRANSFER_MAX_SIZE is 512. Entity requests address wIndex = (entity << 8) | AudioControl interface 0. The `usbdiag` log prints 'AC header: bcdADC' for AudioStreaming descriptors too, so its 0x0001 and 0x0501 values are not the device's audio class revision."
+  sources:
+    - "on the watch, /sd/diag/usbdiag.log from `usbdiag 30`, 2026-11-15"
+    - "on the watch, `uac2 open` log lines after the parser rewrite, 2026-11-15"
+    - "USB Audio Device Class 2.0 spec 4.7.2.1 (clock source), 4.7.2.4 (input terminal), 4.9.2 (AS general), 5.2.2 (control request addressing); Frmts 2.0 2.3.1.6 (Type I format)"
+  verification: "Verified on hardware 2026-11-15 (core-log entry 17): enumerated by `usbdiag` (speed, ids, endpoints, '# done: 1 device(s) enumerated in 30 s') and by `uac2 open` (per-alternate formats, clock 9, RANGE rates). `uac2 tone` with set_rate(48000) -> ESP_OK on alt 1 produced a 440 Hz tone the operator heard on both channels, described as scratchy; the scratchiness is unexplained and is not attributed to the device."
+
 ```
 
 ---
@@ -2235,7 +2304,7 @@ BLE-008: "NimBLE can run central and peripheral at once, so the watch keeps its 
 
 ```yaml
 - record_id: <TOPIC>-<NNN>
-  kind: SOC | BOARD | DISPLAY | PMU | RTC | KERNEL | FLASH | JFFS2 | BLE | NETWORK | TOOLCHAIN | EXTERNAL | EMU
+  kind: SOC | BOARD | DISPLAY | PMU | RTC | KERNEL | FLASH | JFFS2 | BLE | USB | NETWORK | TOOLCHAIN | EXTERNAL | EMU
   topic_id: <TOPIC>
   title: "Short noun phrase"
   status: VERIFIED | SOURCED | INFERRED

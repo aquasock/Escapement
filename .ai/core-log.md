@@ -1,3 +1,35 @@
+## 17 COMMIT Unreleased 2026-11-15T17:01:08-07:00
+
+#### Coming From:
+
+Unreleased 8f5a81a
+
+#### Purpose:
+
+Make the BLE console a usable serial terminal and get the USB-C DAC to play sound, after both had been chased through custom clients and screen scraping without a measurement of either.
+
+#### Outcome:
+
+Both landed on hardware and the operator passed the tone: a 440 Hz sine out of the TTGK DAC on both channels, described as scratchy, through fork commit `e437aaf` on `t-watch-ultra`, pushed to `aquasock/tinydesk`. ENTRY 16'S DIAGNOSIS IS SUPERSEDED: there was no shell wedge and no truncated argument. The `fetch /r` it read as a mutilated path was the 40-column Terminal window clipping the line, repeated 3,483 times in its capture, and the operator had in fact seen 4 KB move both ways. THE BLE STREAM WAS ONE BUG IN ONE RETURN VALUE (TOL-004). `bleuart_write()` returned `xRingbufferSend()`'s `pdTRUE` as a byte count, so every write reported one byte and `td_render_flush()` resent the buffer shifted by one byte at a time until the 4 KB ring filled; the failing write then made the renderer drop the frame and repaint the whole screen 500 ms later, for ever. A captured repaint decomposed byte for byte into one 1,024-byte render buffer plus its copies from offsets 1, 2 and 3, 4,090 bytes, and that single fault explained the 24 KB/s idle stream, a screen that never arrived below row 10, the corrupted rows and `fetch`'s duplication. After the fix an idle link carries 240 bytes in 5 s against 118,610 before, and a full redraw is 3,557 bytes rendering all 26 rows. THE DAC NEEDED FOUR THINGS AND NONE WAS ITS FAULT. `usbdiag 30` showed first that the hardware path works: the dongle enumerates at full speed as UAC2 with playback alternates of 384, 576 and 768 bytes (USB-003), and the watch stayed up with the host running. `uac2` could not see it because no task ran `usb_host_lib_handle_events()`, and it could not have streamed or completed a control request because no task ran `usb_host_client_handle_events()`, its control helper passed a NULL callback to a submit that does not block, and the client was registered synchronous against IDF's own instruction (USB-002); those are now two event tasks and a semaphore-waited `ctrl()`. With that fixed, claiming the endpoint failed with `EP MPS (768) exceeds supported limit (128)`, which is IDF's default FIFO split rather than hardware (USB-001), so `CONFIG_USB_HOST_HW_BUFFER_BIAS_PERIODIC_OUT=y` went into `sdkconfig.defaults`. And the descriptor parser read UAC2 with UAC1 offsets: it rejected the 8-byte clock source with a `>= 9` test, misread format descriptors, chose the last alternate whatever its format, and had `set_rate()`'s `wIndex` bytes swapped. It now records every alternate, picks alt 1 (2 ch S16, 384 bytes), follows terminal 1 to clock 9, lists 8 to 96 kHz with a RANGE request and sets 48 kHz with `ESP_OK`; the stream then ran over 95 s with `errors=0 missed=0`. THE METHOD IS THE OTHER RESULT. The watch's USB port is a plain serial line driven with `stty`, `cat` and `printf`, `ESC[5000~` is TinyDesk's own full-redraw request and F10 opens Start; BLE now goes through the stock `ble-serial` tool installed in `~/.venvs/ble-serial`, which presents `/tmp/ttyBLE` for minicom, after a transient `cons.service` left by an earlier session had been auto-reconnecting and was stopped. One self-inflicted reset is recorded: a pyserial open that cleared DTR then RTS passed through RTS-high DTR-low and reset the chip. Build PASS at 0x2de5e0 bytes with 2 percent of the app partition free, sha256 aecb5ed4c98f3a51, deployed by app-only flash to 0x10000 with `Hash of data verified`; a rebuild after comment-only header edits differs from the flashed image only in the app descriptor's build time and the trailing image hash, 67 bytes and no code. The earlier build with only the BLE fix and the event loops, sha256 dff4d72e6b247a6e, was flashed and tested first. No 16 MiB backup was taken this cycle. The required core-syntax audit was run before commit and passed, with `.ai/core.md` confirmed unchanged and `.ai/core-log.md` and `.ai/core-reference.md` the only `.ai/` files touched; the reference gained the USB topic and kind, TOL-004 and USB-001 to USB-003 with index and routing rows, and holds 134 records with no duplicate ids.
+
+#### Next Steps:
+
+THE TONE IS SCRATCHY AND THAT IS THE NEXT THING TO MEASURE. `uac2 tone` fills the ring in 96-frame slices with a fixed 2 ms delay rather than against ring space, and the underrun counter rose while it played, so gaps of silence inside the tone are the first suspect; count underruns across a tone alone, then pace the generator by `uac2_write()`'s accepted count, before suspecting the device. After that, real audio needs a resampler from each emulator's rate to 48 kHz, gnuboy's 43,691 Hz first. `uac2 stop` and a second `uac2 open` after a stop are unexercised, and `usbdiag` cannot run once `uac2` has installed the host until a reboot. The watch's USB stays in host mode after any audio test and only `reboot`, sent over BLE, returns it to the PC for a flash. `ble-serial` does not reconnect after a watch reboot and leaves a stale `/tmp/ttyBLE` when killed; `ble-autoconnect` is its companion if that becomes tiresome. `bleuart fetch` from `8798688` is in the build and untested now that its write path is correct. `usb_hid.c` still carries `ESP_INTR_FLAG_LEVEL1`, the `coredump` partition still holds, a full-flash backup is owed, and entry 1's fork path is wrong: the fork is `/run/media/vash/GIT/tinydesk-twatch`, not `~/GIT`. The wider backlog is as entry 15 left it.
+
+#### Files Modified:
+
+- ports/twatchultra/main/bleuart.c
+- ports/twatchultra/main/uac2.c
+- ports/twatchultra/sdkconfig.defaults
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: PASS
+
+---
+
 ## 16 COMMIT Unreleased 2026-11-15T16:05:00-07:00
 
 #### Coming From:
