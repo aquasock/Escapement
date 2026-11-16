@@ -1,116 +1,75 @@
 ## One line
 
-**CODE IN THE `modules` PARTITION RUNS. A blob mapped as instructions at
-0x42ae0000 was called across a partition boundary and returned 42, at zero
-internal SRAM cost. FLAC plays on the built-in speaker. The room is proven and
-empty — putting a real codec in it is the next task.**
+**FLAC plays on the built-in speaker (inline decoder). The `modules` partition
+runs code and the API table works. A FLAC decoder now BUILDS AND RUNS as a
+28,660-byte module but faults reading its own `.rodata` — the last piece is a
+second partition for data. Nothing regressed: the inline path still plays.**
 
-## The modules partition — PROVEN, and the API table works
+## THE RULE THAT NOW COMPLETES ITSELF — read before touching modules
 
-```
-map    esp_partition_mmap(p, 0, p->size, ESP_PARTITION_MMAP_INST, &base, &h)
-       -> 0x42ae0000 (instruction window 0x42000000..0x43ffffff)
-read   esp_partition_read() into a stack struct — NEVER through the mapped ptr
-call   ((mod_entry_fn)(inst_base + entry_offset))(&call)
-```
-
-**A 730-byte blob allocates, copies and writes into a caller buffer through the
-API table and returns 42.** Verified on hardware.
-
-**Three constraints, each from a coredump or a link error:**
-
-1. **No data loads through the instruction pointer** — `exccause 3,
-   excvaddr 0x42ae0014`. Instruction-bus bytes are not data.
-2. **One mapping only** — mapping twice (DATA then INST) returned `0x3cae0000`
-   (PSRAM) and the call faulted with `exccause 2 (InstructionFetchErrorCause)`.
-3. **No writable state in a blob** — the partition is read-only flash and no
-   loader zeroes `.bss`, so `link.ld` discards `.data`/`.bss`. A `static char
-   msg[120]` in the shim failed to link with "`.bss` referenced in section
-   `.text`".
-
-**The API table** (`main/modhost.h`, ABI-versioned): currently carries `malloc`,
-`free`, `malloc_prefer_psram`, `memcpy`, `memset`, `log`.
-
-**How a blob finds it.** The firmware publishes `g_modhost_ptr`; the blob build
-reads that symbol's **address** from the app ELF with `nm` and passes it as
-`-DMODHOST_PTR_AT`. Derived, never typed — measured drift within one cycle:
-`0x3c27b630` → `0x3c27b650`. **A blob belongs to the firmware build that
-produced it.**
-
-**Build facts that cost time** (all in `modules/Makefile` with reasons):
-- compile **hosted** — libstdc++ refuses `-ffreestanding`; enforce at link with
-  `-nostdlib`
-- **separate C and C++ flags** — gcc rejects `-std=gnu++17`, `-fno-rtti`,
-  `-fno-threadsafe-statics` on C input
-- `g_modhost_ptr` needs `__attribute__((used))` **and** a real reference, or
-  `--gc-sections` collects it
+Three coredumps, one rule, and the third variant is the one that blocks a codec:
 
 ```
-build   cd ports/twatchultra/modules && make    (needs the app built first)
-flash   esptool write_flash 0xE00000 build/modtest.bin
-run     modtest call      (writes /fs/root/modresult.txt)
-read    extract storage at 0x620000, mount with littlefs-python
+0x42000000..0x43ffffff   INSTRUCTION window  -- fetch YES, data NO
+0x3C000000..0x3DFFFFFF   DATA window         -- data YES, fetch NO
 ```
 
-## Moving a codec into the partition — measured, ready to do
+- header load through INST → `exccause 3, excvaddr 0x42ae0014` (entry 26)
+- executing a DATA mapping    → `exccause 2, excvaddr 0x3cae0028` (entry 27)
+- **CRC table read through INST → `exccause 3, excvaddr 0x42ae6ff0`** (entry 28)
 
-micro-flac built as a **blob** (encoder excluded, `MICRO_FLAC_DISABLE_OGG=1`,
-`-fno-exceptions -fno-rtti -fno-threadsafe-statics`) links to:
+**The two windows are complementary and cannot coexist for the same bytes.** A
+blob with `.text` AND `.rodata` therefore needs **two mappings of two regions**.
 
-```
-text 26,257 B    data 0 B    bss 20 B
-```
-
-**26 KB of code and 20 bytes of writable RAM.** That is the whole problem, and
-20 bytes is reserve-able at a fixed address — the classic codec-buffer trick.
-Against the 31.7 KB the component costs inline, this frees the app image.
-
-**True externals needing a shim** (everything else resolves inside the blob):
+## What exists and works
 
 ```
-memcpy  memset  malloc  free          -> must reach the host
-_Znwj   _ZdlPvj                       -> operator new / operator delete
-__assert_func  atexit                 -> one-line stubs
-_ZSt20__throw_length_errorPKc         -> stub (vector OOM; no exceptions)
-__ashldi3  __ashrdi3                  -> libgcc, self-contained, link -lgcc
+main/modhost.h|c    API table (ABI 1): malloc free malloc_prefer_psram
+                    memcpy memset log + reserved[4]
+main/modload.c|h    map, prepare (boot), zero_bss, read_header, entry
+main/modflac.c|h    `modflac <file.flac>` -- decodes through the module
+modules/            Makefile, link.ld, patch_header.py
+  src/modtest.c     API-table proof (returns 42)
+  src/modshim.c     routes malloc/new/memcpy/abs/assert through the table
+  src/flacmod.cpp   micro-flac entry (constructs the decoder in caller state)
+  src/flacmalloc.h  FLAC_MALLOC/FLAC_FREE -> shim (must be -include'd)
 ```
 
-`-fno-threadsafe-statics` removes `__cxa_guard_*`; that is why it is in the flag
-list.
+```
+build   cd ports/twatchultra/modules
+        make          -> modtest.bin   (API-table proof)
+        make flac     -> flac.bin      (28,660 B, runs, faults on rodata)
+flash   esptool write_flash 0xE00000 build/<name>.bin
+```
 
-**THE OPEN DESIGN FORK, and it should be decided before coding:**
+**Two mechanisms that were built here and should be reused:**
 
-- **(a) API table** — the loader passes a struct of function pointers; the blob's
-  shim calls through it. Portable, blobs survive an app rebuild, but every shim
-  function needs the table and the blob therefore needs writable state to hold
-  it (the 20 bytes, or more).
-- **(b) Direct symbol binding** — link the blob with `--defsym malloc=<app
-  address>`. No table, no writable state beyond the 20 bytes, but **blob
-  addresses break every time the app is rebuilt**, which defeats shipping a
-  codec separately.
+- **Lent bss.** A blob cannot zero its own `.bss`, and real libraries carry
+  function-local statics (micro-flac's `get_metadata_blocks()` holds a static
+  empty vector). The firmware publishes `g_modbss` (256 B), the module's
+  `link.ld` places `.bss` there via `--defsym`, and `modload_zero_bss()` clears
+  it before the first call. Address derived from the ELF.
+- **Map at boot only.** `esp_partition_mmap()` disables the flash cache and PSRAM
+  is reached through it, so a PSRAM-stack task cannot map flash:
+  `assert failed: esp_task_stack_is_sane_cache_disabled()`. `modload_prepare()`
+  runs once from the boot task; every PSRAM-stack task reads the cached result.
 
-(a) is the one worth building; (b) is a faster proof if (a) gets awkward.
+## THE NEXT STEP: a second partition for data
 
-**Two things must not be forgotten in the build:** compile HOSTED (not
-`-ffreestanding` — `<vector>` refuses freestanding), and the blob must be
-re-measured for its link address after any partition-table change.
+A codec needs `.text` mapped INST and `.rodata` mapped DATA, in two regions:
 
-## Reporting a result — the thing that ate this cycle
+1. add e.g. `moddata` (2 MB, data, subtype 0x41) to `partitions.csv`
+2. `esp_partition_mmap(..., ESP_PARTITION_MMAP_DATA, ...)` at boot for it
+3. `--defsym=MODDATA_AT=<address>` so `link.ld` places `.rodata` there
+4. keep `modules` (0xE00000) for `.text`
 
-The watch's console cannot be trusted for a one-line answer:
+`storage` (7.87 MB, ~136 KB used) or `modules` (2 MB) has room without touching
+the OTA slots. The loader, the shim and the API table all already exist.
 
-- **The display mirror sends only CHANGED cells**, so a capture attaches with an
-  incomplete grid. `repaint` re-pushes it.
-- **A restored window (Log Viewer) holds focus at boot** and eats keystrokes
-  meant for Terminal. Check the highlight (SGR `48;5;25`) before Enter.
-- **`esp_partition_write()` refuses a mapped partition** — unmap first.
-- **USB console goes silent after a few seconds**; a fresh `esptool ... chip_id
-  --after hard_reset` restores it. BLE is the fallback but drops mid-command
-  sometimes.
-- esptool leaves the port at its own baud; the console needs 115200.
-
-Best channel found: **write the answer to flash and read it with esptool.**
-No display, no focus, no timing.
+**Until decoding works through the module, the inline micro-flac stays** — so
+`music` still plays and nothing regresses. Deleting `musicdec.cpp` and the
+`micro-flac` component requirement is what frees the 31.7 KB, and that only
+happens when the module path plays audio.
 
 ## Backups — take one after any layout change, the old ones stop matching
 
