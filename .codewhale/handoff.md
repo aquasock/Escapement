@@ -5,39 +5,52 @@
 internal SRAM cost. FLAC plays on the built-in speaker. The room is proven and
 empty — putting a real codec in it is the next task.**
 
-## The modules partition — PROVEN, and the two rules that make it work
+## The modules partition — PROVEN, and the API table works
 
 ```
 map    esp_partition_mmap(p, 0, p->size, ESP_PARTITION_MMAP_INST, &base, &h)
-       -> 0x42ae0000, the ESP32-S3 instruction window
-read   esp_partition_read() into a stack struct -- NEVER through the mapped ptr
-call   ((entry_t)(inst_base + entry_offset))(args...)
+       -> 0x42ae0000 (instruction window 0x42000000..0x43ffffff)
+read   esp_partition_read() into a stack struct — NEVER through the mapped ptr
+call   ((mod_entry_fn)(inst_base + entry_offset))(&call)
 ```
 
-**Rule 1: one mapping only.** Two coredumps prove it.
-- Reading through the instruction-mapped pointer faults: `exccause 3
-  (LoadStoreErrorCause), excvaddr 0x42ae0014` in `memcpy`. The magic at +0 read
-  fine, the string at +0x10 did not. Instruction-bus bytes are not data.
-- Mapping the same partition twice (DATA then INST) does **not** give two
-  windows. The second came back at `0x3cae0000` — PSRAM — and the call faulted
-  with `exccause 2 (InstructionFetchErrorCause)`.
+**A 730-byte blob allocates, copies and writes into a caller buffer through the
+API table and returns 42.** Verified on hardware.
 
-**Rule 2: a blob may not use libc, initialised globals, or any external
-symbol** — each needs a relocation the blob cannot resolve. `modules/Makefile`
-builds `-nostdlib`; `link.ld` discards `.data`/`.bss` and pins the measured
-address.
+**Three constraints, each from a coredump or a link error:**
+
+1. **No data loads through the instruction pointer** — `exccause 3,
+   excvaddr 0x42ae0014`. Instruction-bus bytes are not data.
+2. **One mapping only** — mapping twice (DATA then INST) returned `0x3cae0000`
+   (PSRAM) and the call faulted with `exccause 2 (InstructionFetchErrorCause)`.
+3. **No writable state in a blob** — the partition is read-only flash and no
+   loader zeroes `.bss`, so `link.ld` discards `.data`/`.bss`. A `static char
+   msg[120]` in the shim failed to link with "`.bss` referenced in section
+   `.text`".
+
+**The API table** (`main/modhost.h`, ABI-versioned): currently carries `malloc`,
+`free`, `malloc_prefer_psram`, `memcpy`, `memset`, `log`.
+
+**How a blob finds it.** The firmware publishes `g_modhost_ptr`; the blob build
+reads that symbol's **address** from the app ELF with `nm` and passes it as
+`-DMODHOST_PTR_AT`. Derived, never typed — measured drift within one cycle:
+`0x3c27b630` → `0x3c27b650`. **A blob belongs to the firmware build that
+produced it.**
+
+**Build facts that cost time** (all in `modules/Makefile` with reasons):
+- compile **hosted** — libstdc++ refuses `-ffreestanding`; enforce at link with
+  `-nostdlib`
+- **separate C and C++ flags** — gcc rejects `-std=gnu++17`, `-fno-rtti`,
+  `-fno-threadsafe-statics` on C input
+- `g_modhost_ptr` needs `__attribute__((used))` **and** a real reference, or
+  `--gc-sections` collects it
 
 ```
-build   cd ports/twatchultra/modules && make
+build   cd ports/twatchultra/modules && make    (needs the app built first)
 flash   esptool write_flash 0xE00000 build/modtest.bin
-read    esptool read_flash 0xFFF000 0x30   (result sector: 0xE00000+0x1FF000)
+run     modtest call      (writes /fs/root/modresult.txt)
+read    extract storage at 0x620000, mount with littlefs-python
 ```
-
-**The result sector at partition offset 0x1FF000 / absolute 0xFFF000 is taken by
-the diagnostic. A real codec blob must avoid it or the diagnostic must move.**
-
-**Diagnostic still on:** `MODTEST_AT_BOOT=1` in `ports/twatchultra/main/CMakeLists.txt`
-runs the experiment every boot. Remove it when it stops being useful.
 
 ## Moving a codec into the partition — measured, ready to do
 
