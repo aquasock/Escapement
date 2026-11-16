@@ -1,3 +1,42 @@
+## 24 COMMIT Unreleased 2026-11-16T12:44:22-07:00
+
+#### Coming From:
+
+Unreleased 800f32c
+
+#### Purpose:
+
+Give the watch a music player that decodes FLAC on its own CPU and plays it through the built-in speaker, choosing the decoder on measured memory cost rather than reputation.
+
+#### Outcome:
+
+FLAC PLAYS ON THE WATCH FROM THE SD CARD OUT OF THE BUILT-IN SPEAKER, decoded on the S3 itself, with 0 errors and 0 short writes; the operator heard a 5:58 44.1 kHz stereo track through the MAX98357A. The decoder chosen is esphome-libs/micro-flac v0.3.0 (Apache-2.0), vendored unmodified in `ports/twatchultra/components/micro-flac` with its micro-ogg-demuxer submodule (MIT) and a `README.vendored.md` recording provenance. THE DECISION WAS MADE BY MEASURING THREE CANDIDATES, AND MEMORY WAS THE DECIDING AXIS. Rockbox's flac.c reserves 7 x MAX_BLOCKSIZE x 4 bytes of channel buffer -- 126 KB at its 4608 default and 229 KB at 8192 -- as STATIC IBSS_ATTR arrays because it supports multichannel FLAC, plus a 64 KB MAX_FRAMESIZE input buffer, which is about 190 KB of internal SRAM held regardless of the file; this board has roughly 18 KB free with the desktop running, so Rockbox cannot run here at all without patching the statics out of its own GPL sources. dr_flac is 41 KB of relocatable heap and free of any host layer, but it is generic desktop C with no ESP32 tuning and no project found using it on this platform. micro-flac sizes ONE working buffer from the file's own STREAMINFO (32 KB for a 4096-block stereo track), allocates it through heap_caps_malloc_prefer with PSRAM first, and ships Xtensa assembly for the LPC prediction restore loop. The ecosystem check is the part worth carrying: the 1,730-star standard for this task, schreibfaul1/ESP32-audioI2S, is GPL-3.0 and uses its own purpose-built ESP32 decoders with a documented 24576-byte block limit and 1-2 channel restriction, so the established practice on this chip is to write a decoder for the chip rather than to port a desktop one. THE LICENCE QUESTION RESOLVED THE OTHER WAY FROM WHAT WAS ASSUMED, and the correction is recorded because it changes what is available later: this firmware ALREADY ships wolfSSH and wolfSSL under GPLv3 and is therefore distributed as GPLv3 as a whole, so Rockbox's GPL-2.0-or-later would have cost nothing legally and the argument against it had to be made on memory alone. Measured on the board, micro-flac costs 31.7 KB of flash -- obtained by building the real decode path for xtensa-esp32s3 and diffing the image against an empty app, not by reading its README -- while its own archive is 76 KB because it contains the encoder, which link-time garbage collection drops entirely. WHAT WAS BUILT. `sound.c` gained `sound_stream_write_stereo_wait()`: the existing `sound_stream_write()` drops samples on a full ring by design because its caller is an emulator frame loop with a millisecond of slack, and a player is the opposite case, so the new call blocks on the I2S DMA, which paces the decoder to the output rate for free and lets the ring absorb SD stalls. `musicdec.cpp` confines the whole of micro-flac's C++ surface behind the C API in `musicdec.h`, because the port is C and the decoder is touched only through its documented streaming API. `music.c` is the player task: read a 16 KB window, decode what it yields, write the PCM, carry the partial frame to the front of the next window; it runs on a PSRAM stack and never touches flash. Verified in numbers: 352800 frames for an 8 s 44.1 kHz tone and 192000 for a 4 s 48 kHz one, both exact; a 5:58 track at 0 errors and 0 short writes with the counter advancing 548352 frames over an interval that matched wall-clock time; and internal RAM back to its starting figure after the task ends, so the allocate-free cycle does not leak. The build was 0x2e9450 bytes, 63,472 more than the baseline, leaving 27.5 KB of OTA headroom -- enough for no further decoder of this size, which is why the `modules` partition design is the next structural question rather than another inline component. The SD card was seeded with the two test tones in `/sd/media/audio/` and 74 real FLAC files totalling 1.8 GB in `/sd/ROCKBOX/Audio/`, a path reserved for the wider codec set. Build PASS, flashed app-only to 0x10000 with `Hash of data verified`; no backup was taken this cycle because the partition layout is unchanged and the baseline image of entry 23 still restores the previous app. The required core-syntax audit was run before commit and passed, with `.ai/core.md` unchanged and `.ai/core-log.md` and `.ai/core-reference.md` the only `.ai/` files touched.
+
+#### Next Steps:
+
+THE NEXT STRUCTURAL QUESTION IS WHERE A THIRD DECODER WOULD LIVE, and the answer is not the app image: 27.5 KB of OTA headroom remains and micro-flac alone cost 31.7 KB, so a second codec of that size does not fit. The `modules` partition design recorded in this cycle's planning is the candidate -- a raw flash region memory-mapped as instructions through esp_partition_mmap(), which costs zero RAM because Xtensa executes from flash, with `storage` shrunk from 9.88 MB to fund it while the two 3 MB OTA slots stay as they are. That design is unproven here: the ABI match between Rockbox-style codec blobs and the Xtensa windowed ABI is the real research risk, and nothing about it has been measured. The cheaper step before it is to measure how much of the app image is actually needed, since 27.5 KB is thin for any further work at all. Three smaller items stand. `music` is a shell command with no app window, deliberately, because the smallest thing that answers "does a decoded sample reach the speaker" was the goal; a Start-menu player needs a picker, a progress line and a stop button. The player has no seek, no resume and no queue, and it refuses Ogg-FLAC in practice pending a test of the path that micro-flac enables but which has never been exercised. And the DAC remains out of scope by the operator's instruction: the built-in speaker is proven, and `uac2` playback stays as entry 23 left it.
+
+#### Files Modified:
+
+- ports/twatchultra/main/music.c
+- ports/twatchultra/main/music.h
+- ports/twatchultra/main/musicdec.cpp
+- ports/twatchultra/main/musicdec.h
+- ports/twatchultra/main/sound.c
+- ports/twatchultra/main/sound.h
+- ports/twatchultra/main/CMakeLists.txt
+- ports/twatchultra/main/link_twatch.c
+- ports/twatchultra/components/micro-flac
+- README.md
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: PASS
+
+---
+
 ## 23 COMMIT Unreleased 2026-11-16T11:31:12-07:00
 
 #### Coming From:

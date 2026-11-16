@@ -136,8 +136,8 @@ Topic IDs are the `record_id` prefix. An entry reserves a name; it does not clai
   description: "The OTG port acting as a host under ESP-IDF 5.3.1: the FIFO split that bounds endpoint sizes, the event loops the host library requires, and the devices measured on it."
 
 - topic_id: AUD
-  name: "Audio playback and volume"
-  description: "How a sample reaches the DAC's analog output and what happens to it on the way: volume as a taper law rather than a percentage, the perceptual and hardware conventions behind those laws, and the resolution cost of attenuating in the samples."
+  name: "Audio playback, decoding and volume"
+  description: "How a sample reaches the speaker or the DAC's analog output and what happens to it on the way: compressed-audio decoding on this CPU and the memory cost that decides which decoder fits, volume as a taper law rather than a percentage, the perceptual and hardware conventions behind those laws, and the resolution cost of attenuating in the samples."
 ```
 
 ---
@@ -247,6 +247,7 @@ Topic IDs are the `record_id` prefix. An entry reserves a name; it does not clai
 | Why does starting the USB stream from the file player panic? | USB | USB-005 |
 | Why is the DAC silent when the watch says it is streaming? | USB | USB-006 |
 | What should a volume control's taper law be? | AUD | AUD-001 |
+| Which FLAC decoder fits on this board, and why? | AUD | AUD-002 |
 | Why does an unattended reboot miss the keyboard entirely? | BLE | BLE-004 |
 | Why does the keyboard connect but type nothing? | BLE | BLE-003 |
 | Why does a saved bond never come back at boot? | BLE | BLE-006 |
@@ -422,6 +423,7 @@ USB-003: "The TTGK KM-HIFI-384KHZ DAC (3302:3366) enumerates on the S3 at full s
 USB-004: "Isochronous OUT through IDF 5.3.1 at 16 packets per transfer puts a few-sample discontinuity at every transfer boundary (440 Hz tone sidebands at +/- n x 62.5 Hz, -36 dB) even with every packet full and on time; at 8 packets it is gone (sidebands -107 dB, THD+N -62 dB); mechanism unknown"
 USB-005: "Claiming a USB interface allocates DMA descriptor lists and IDF 5.3.1 PANICS (hcd_dwc.c:1059 assert) when it cannot; the internal DMA pool is what runs out (open SD files and 4 KB task stacks both draw on it), so all USB audio DMA allocation happens once in `uac2 open` and the USB tasks now run on PSRAM stacks"
 AUD-001: "A volume percentage is a loudness scale, not an amplitude, and the three conventions differ: -10 dB at half is the psychoacoustic half-loudness result, -18 dB at half is what a 15A audio-taper pot and VLC's cubic law both give, and linear-in-dB spends an even 3.6 dB per 10% over a 36 dB range; a power law is accurate at one point and inverts the feel"
+AUD-002: "FLAC decoding fits because micro-flac (Apache-2.0) sizes one PSRAM working buffer from the file's own STREAMINFO and has Xtensa LPC assembly, costing 31.7 KB of flash; Rockbox's decoder cannot run here at all because it reserves ~190 KB of internal SRAM as static 7-channel buffers"
 USB-006: "VERIFIED: the USB-C DAC's playback FU MUTE refuses SET_CUR with a STALL, so its silent first stream cannot be unmuted from the host; a streaming alternate-setting cycle (dac_wake(), `uac2 wake`) re-arms it, and its hardware volume barely changes loudness on headphones"
 ```
 
@@ -2362,6 +2364,22 @@ USB-006: "VERIFIED: the USB-C DAC's playback FU MUTE refuses SET_CUR with a STAL
     - "audio-taper potentiometer resistance laws: 15A and 10A tapers, approximately 15 percent and 10 percent of resistance at half rotation"
     - "tinydesk-twatch ports/twatchultra/main/uac2.c: vol_db256(), apply_volume(), UAC2_VOL_RANGE_DB, dac_flat()"
   verification: "Verified on hardware 2026-11-16 (core-log entry 23) at the DAC's analog line output, captured on a PC line input with its capture gain at -15 dB and Line Boost at 0 dB -- both required, because at the default +20 dB boost the codec limited the signal and every reading above about 70 percent flattened to the same level, which produced a false 'the curve is wrong at the top' conclusion that cost a round trip. With the capture chain clean, a five-point sweep of the -10 dB-at-half power law matched the predicted curve to within 0.02 dB (100, 75, 50, 25 and 10 percent measured -28.61, -32.76, -38.61, -48.59 and -61.82 dBFS), so the law was implemented correctly and its rejection was a matter of shape, not error. The linear-in-dB replacement was verified in the firmware's own arithmetic: 3.60 dB per 10 percent of travel at every step, monotonic over 1..100, 50 percent at exactly -18.00 dB, and 100 percent at unity with the multiply skipped."
+
+- record_id: AUD-002
+  kind: AUD
+  topic_id: AUD
+  status: VERIFIED
+  verified_date: 2026-11-16
+  title: "A FLAC decoder fits on the ESP32-S3 only if its working set comes from PSRAM sized by the file: micro-flac costs 31.7 KB of flash, Rockbox's needs ~190 KB of internal SRAM"
+  statement: "Three FLAC decoders were measured for this board, and the axis that decides is internal RAM, not licence or popularity. Rockbox lib/rbcodec/codecs/flac.c declares its channel buffers as `static int32_t decoded0..6[MAX_BLOCKSIZE]` with IBSS_ATTR, that is seven channels' worth in internal IRAM sized for the worst case whether or not the file needs it -- 7 x 4608 x 4 = 126 KB at Rockbox's default MAX_BLOCKSIZE of 4608, 229 KB at 8192 -- plus a 64 KB input buffer from `ci->request_buffer(&buff_size, MAX_FRAMESIZE+16)`. dr_libs dr_flac keeps a 4,512-byte decoder state (including a 4 KB input cache) and allocates one PCM buffer per block through DRFLAC_MALLOC, roughly 41 KB for a 4608-block stereo file, with no host layer. esphome-libs micro-flac (Apache-2.0, v0.3.0) keeps a ~290-byte decoder object and allocates one block-samples buffer of `max_block_size x channels x 4`, which is typically 16-64 KB, through heap_caps_malloc_prefer with PSRAM first; it also ships Xtensa assembly for LPC prediction restore (src/xtensa/lpc_32_xtensa.S and lpc_64_xtensa.S) selected by CONFIG_MICRO_FLAC_ENABLE_XTENSA_ASM, which defaults on for the ESP32-S3. The wider ecosystem points the same way: the most-used ESP32 audio library, schreibfaul1/ESP32-audioI2S (about 1,730 stars), is GPL-3.0 and uses its own purpose-built decoders with a documented limit of 24576-byte blocks and 1-2 channels, and requires PSRAM; no ESP32 project using dr_flac was found."
+  consequence: "With roughly 18 KB of internal SRAM free while the desktop runs, a decoder that statically reserves 190 KB cannot run on this board at all -- Rockbox's would have to have its static arrays patched out of GPL source first, which is a different and larger job than vendoring it. The usable shape is a decoder whose working buffer is (a) sized from the file's STREAMINFO rather than from a worst case and (b) allocated in PSRAM, which is what micro-flac does and why it was chosen. Its measured cost on this board is 31.7 KB of FLASH -- the component's own .a is 76 KB because it also contains the encoder, which link-time garbage collection drops entirely, so a size read off the archive is misleading. A future codec should be judged the same way: measure in PSRAM, never in internal IRAM, and measure the linked image rather than the archive."
+  sources:
+    - "Rockbox lib/rbcodec/codecs/flac.c (decoded0..6 with IBSS_ATTR, request_buffer MAX_FRAMESIZE), lib/rbcodec/codecs/libffmpegFLAC/decoder.h (MAX_BLOCKSIZE 4608, MAX_FRAMESIZE 65536)"
+    - "mackron/dr_libs dr_flac.h (drflac struct, DR_FLAC_BUFFER_SIZE 4096, drflac__resize_decoded_samples)"
+    - "esphome-libs/micro-flac v0.3.0: include/micro_flac/flac_decoder.h, src/alloc.h, src/flac_decoder.cpp, src/xtensa/, Kconfig"
+    - "schreibfaul1/ESP32-audioI2S: src/flac_decoder/flac_decoder.h (block and channel limits), README (PSRAM required)"
+    - "tinydesk-twatch ports/twatchultra/main/musicdec.cpp, components/micro-flac/CMakeLists.txt and README.vendored.md"
+  verification: "Measured on hardware 2026-11-16 (core-log entry 24). Flash: the real decode path was compiled for xtensa-esp32s3 into both an empty ESP-IDF app and the watch's firmware, and the image grew 31.7 KB in isolation (206,576 to 239,008 bytes) with 55 micro_flac symbols in the final ELF and no FLACEncoder symbol, confirming the encoder is dropped. RAM: sizeof(drflac) was measured at 4,512 bytes on the host; micro-flac's buffer arithmetic was checked against its source (max_block_size x channels x sizeof(int32_t) in decode_frame). Behaviour on the watch: 352800 frames for an 8 s 44.1 kHz stereo tone and 192000 for a 4 s 48 kHz one, both exact, and a 5:58 track played with 0 errors and 0 short writes while the frame counter advanced 548352 frames over an interval matching wall-clock time; internal RAM returned to its starting figure after the task ended. Rockbox's figures are read from its source rather than measured on this board, because its static reservation is what makes it unbuildable here."
 
 ```
 
