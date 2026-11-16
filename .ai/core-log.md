@@ -1,3 +1,36 @@
+## 22 COMMIT Unreleased 2026-11-16T09:53:32-07:00
+
+#### Coming From:
+
+Unreleased 66cac80
+
+#### Purpose:
+
+Make audio actually play on the USB-C DAC in OTG host mode: fix the boot loop that returned when the DAC was attached, and fix the silent first stream.
+
+#### Outcome:
+
+AUDIO PLAYS ON THE DAC IN OTG MODE, ON THE FIRST STREAM AFTER A PLUG, WITH NO HEADPHONE REPLUG, and the boot loop is gone; the operator confirmed sound on headphones with `uac2 play` reporting `frames` climbing, `short=0`, `underruns=0`, `errors=0` at 44.1 kHz. THE ROOT CAUSE WAS THE INTERNAL DMA POOL, NOT THE ORDERING OR RESERVATION OF ANY ALLOCATION. Claiming the streaming interface needs two 512-byte, 512-ALIGNED descriptor lists and the small `calloc`s IDF interleaves between them (pipe_t 96 bytes, the channel object and block headers 20 each, measured from DWARF), so each list must skip up to 511 bytes for alignment and a single contiguous region of about 1.6 KB is required -- not two 512-byte holes. In OTG mode the pool could not supply that: the coredump showed `assert failed: transfer_descriptor_list_alloc hcd_dwc.c:1059 (ret == ESP_OK)` and the refusal that preceded it read `dma free=5215 largest=2432`, plenty of bytes and no region of that shape. Three separate attempts to work around it failed ON HARDWARE and are recorded so they are not repeated: allocating the stream's transfers before the claim failed because they consumed the pool; a reserve freed immediately before the claim failed because the claim's own two `calloc()`s took the freed hole first, leaving nothing aligned; the same reserve held across the claim wasted 1024 bytes the claim could not use; and a 2048-byte block taken at boot STARVED ENUMERATION, which the coredump named as task `usb_lib` at `usb_lib -> usb_host_lib_handle_events -> hub_process -> root_port_handle_events -> usbh_devs_add -> device_alloc -> hcd_pipe_alloc -> transfer_descriptor_list_alloc`, proving the shortage is general to the pool rather than particular to the claim. THE FIX IS TO STOP SPENDING THE POOL: `CONFIG_SPIRAM_ALLOW_STACK_EXTERNAL_MEMORY` is already enabled for this board, so `usb_lib`, the uac2 client task and the uac2 worker task are now created with `xTaskCreateWithCaps(MALLOC_CAP_SPIRAM)`, returning 12 KB of internal RAM. Measured on the same board in the same OTG mode: the pool read `dma=6359/4096 int=13887/7168` before and `dma=18675/10752 int=26203/10752` after, and the claim then succeeded with `last open: dma free=17543 largest=8704`. None of those three tasks touches flash, which is the constraint a PSRAM stack carries, and OTA runs on the shell's internal-stack task. With the pool fixed, every workaround was deleted: there is no reserve, no boot hold and no special ordering, only a check that refuses with a logged reason rather than asserting when the pool is ever too small, and a bounded retry of 3 attempts on a 2 s step so a fault retrying cannot fix can never become a loop. THE SILENT FIRST STREAM IS A SECOND, UNRELATED DEFECT AND IT IS NOW FIXED TOO. `uac2 fu set` reports `ctrl 21/01 status 4` -- USB_TRANSFER_STATUS_STALL -- so the DAC REFUSES the Feature Unit's MUTE SET_CUR and the host cannot unmute it; a headphone replug worked because it is a jack-detect event inside the dongle whose own firmware re-arms the output stage. A SET_INTERFACE round trip reproduces that lever: `uac2_start_rate()` now calls `dac_wake()`, which selects alternate 0, returns to the streaming alternate and re-asserts the volume, and `uac2 wake` exposes the same recovery by command. THE CYCLE ALSO CLOSED THE HALF-OPEN STATE that entry 21 left: `s_opened` (set only at the successful end) now defines an open, `open_fail()` releases the claim, closes the device and clears the state on every failure after the device is opened, transfers and the PSRAM ring are kept because freeing transfers on a teardown path is entry 18's panic, an open mutex serialises the worker against a typed `uac2 open`, the ring drain in `uac2_start_rate()` returns ESP_ERR_INVALID_STATE through `note_start_err` unless `s_opened && s_claimed && s_ring`, and the automatic open waits on `board_shell_task_ready()` -- called after `xTaskCreate` has taken the shell's stack -- rather than on the hold's release, which would race the shell for the freed block. Build PASS at 0x2e0f20 bytes with 2 percent of the app partition free, sha256 `d2231d74ddb02044`, flashed app-only to 0x10000 with `Hash of data verified`. Two instrument lessons are worth carrying: the ELF of a crashed image must be copied out BEFORE the next build or its coredump cannot be decoded because symbol addresses move, and after the watch resets, a BLE client left holding the old link reports failures for every command while the board is healthy, so the session must be torn down and reopened rather than reused. Reference USB-005 and USB-006 were both revised from this cycle, USB-006 from INFERRED to VERIFIED for the refusal and the recovery. The required core-syntax audit was run before commit and passed, with `.ai/core.md` confirmed unchanged and `.ai/core-log.md` and `.ai/core-reference.md` the only `.ai/` files touched, this entry carrying all six sections in template order and Status values from the permitted set.
+
+#### Next Steps:
+
+CYCLE 1 IS COMPLETE AND CYCLE 2 IS ROUTING AND A GLOBAL VOLUME. `uac2 vol` currently writes the DAC's own Feature Unit Volume, which is what USB-006 says is not a usable control on headphones, so volume should move back to scaling samples through `sound_stream_*` with the DAC held at 0 dB, in fixed decibel steps that match hearing, confirmed by ear and by a line-in capture with the PC input near 5 percent. Routing is the other half: the emulators and `uac2 play` both feed one sink and there is no selector. Three smaller items stand. The DAC's output stage latches a state the host cannot clear and `dac_wake()` is a mitigation reproducing the lever a headphone replug pulls, not an established understanding of what the dongle latches, so the next time a first stream is silent check whether the alternate-setting cycle ran rather than assuming it did. The BLE shell input path still drops multi-byte writes, which needs its own cycle. And `bleuart fetch` is still in the build and still untested now that TOL-004's write path is correct. Cycle 3 remains the emulators' resampler, because gnuboy emits 43,691 Hz and the DAC takes discrete rates -- `uac2` refuses a rate the clock's RANGE does not list rather than converting it, which is correct and is why the resampler is needed.
+
+#### Files Modified:
+
+- ports/twatchultra/main/uac2.c
+- ports/twatchultra/main/usbhost.c
+- ports/twatchultra/main/usbhost.h
+- ports/esp_idf/app/tdsh_bridge_esp.c
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: PASS
+
+---
+
 ## 21 COMMIT Unreleased 2026-11-15T22:43:12-07:00
 
 #### Coming From:
