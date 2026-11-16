@@ -39,6 +39,49 @@ the diagnostic. A real codec blob must avoid it or the diagnostic must move.**
 **Diagnostic still on:** `MODTEST_AT_BOOT=1` in `ports/twatchultra/main/CMakeLists.txt`
 runs the experiment every boot. Remove it when it stops being useful.
 
+## Moving a codec into the partition — measured, ready to do
+
+micro-flac built as a **blob** (encoder excluded, `MICRO_FLAC_DISABLE_OGG=1`,
+`-fno-exceptions -fno-rtti -fno-threadsafe-statics`) links to:
+
+```
+text 26,257 B    data 0 B    bss 20 B
+```
+
+**26 KB of code and 20 bytes of writable RAM.** That is the whole problem, and
+20 bytes is reserve-able at a fixed address — the classic codec-buffer trick.
+Against the 31.7 KB the component costs inline, this frees the app image.
+
+**True externals needing a shim** (everything else resolves inside the blob):
+
+```
+memcpy  memset  malloc  free          -> must reach the host
+_Znwj   _ZdlPvj                       -> operator new / operator delete
+__assert_func  atexit                 -> one-line stubs
+_ZSt20__throw_length_errorPKc         -> stub (vector OOM; no exceptions)
+__ashldi3  __ashrdi3                  -> libgcc, self-contained, link -lgcc
+```
+
+`-fno-threadsafe-statics` removes `__cxa_guard_*`; that is why it is in the flag
+list.
+
+**THE OPEN DESIGN FORK, and it should be decided before coding:**
+
+- **(a) API table** — the loader passes a struct of function pointers; the blob's
+  shim calls through it. Portable, blobs survive an app rebuild, but every shim
+  function needs the table and the blob therefore needs writable state to hold
+  it (the 20 bytes, or more).
+- **(b) Direct symbol binding** — link the blob with `--defsym malloc=<app
+  address>`. No table, no writable state beyond the 20 bytes, but **blob
+  addresses break every time the app is rebuilt**, which defeats shipping a
+  codec separately.
+
+(a) is the one worth building; (b) is a faster proof if (a) gets awkward.
+
+**Two things must not be forgotten in the build:** compile HOSTED (not
+`-ffreestanding` — `<vector>` refuses freestanding), and the blob must be
+re-measured for its link address after any partition-table change.
+
 ## Reporting a result — the thing that ate this cycle
 
 The watch's console cannot be trusted for a one-line answer:
