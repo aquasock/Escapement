@@ -1,4 +1,4 @@
-# Handoff — Escapement / TinyDesk on T-Watch Ultra, 2026-11-16T19:26
+# Handoff — Escapement / TinyDesk on T-Watch Ultra, 2026-11-16T19:47
 
 Orientation, not authority. **Verify before acting on it.** The files, the
 coredump partition and the board are the fact; this file is a claim.
@@ -11,15 +11,15 @@ recovered. A 5:58 track decoded at 15792504 frames, 0 errors, 0 short writes.**
 
 ## Where things live
 
-- Project-control repo: `/run/media/vash/GIT/Escapement`, `main`, at `1fbcb94`
-  (core-log **entry 33**). `.ai/core.md` is RESTRICTED — do not edit without an
+- Project-control repo: `/run/media/vash/GIT/Escapement`, `main`, at `541ecf4`
+  (core-log **entry 34**). `.ai/core.md` is RESTRICTED — do not edit without an
   explicit request. Reference records live in `.ai/core-reference.md`.
 - **`.ai/core.md`'s Purpose line is stale and deliberately untouched.** It says
   "Escapement is a port of linux". The project is TinyDesk; the Linux line
   closed 2026-11-11. Fixing it needs the operator's word, because that file may
   only be edited when asked.
 - **Active code is the fork: `/run/media/vash/GIT/tinydesk-twatch`, branch
-  `t-watch-ultra`, clean at `69cb2c9`.** Push to `fork`
+  `t-watch-ultra`, clean at `0644fef`.** Push to `fork`
   (`aquasock/tinydesk`) only — **never** `origin` (upstream
   `tinydesk-project/tinydesk`).
 - `/run/media/vash/ROCKBOX` is the operator's source backup. **Never write to it
@@ -159,6 +159,24 @@ and the current desktop is laid out inside it.
 - **This repository has no `LICENSE` file.** The old README claimed GPLv3; the
   firmware fork is MIT. Unresolved, recorded as a decision owed.
 
+## Game Boy now starts from a shell — and a backup is OWED
+
+`gb start` (no argument; the ROM default is Zelda DX) failed with
+**`gb: no guest task`** once the desktop was up with a Terminal open. The 8 KB
+guest stack was internal DRAM, and internal free was 25,395 with the largest
+block 9,728 — it does not fit. **Moved to PSRAM** via
+`xTaskCreatePinnedToCoreWithCaps`, safe because that task only runs gnuboy: no
+file, no partition map, so it never disables the cache a PSRAM stack lives
+behind. Deleted with `vTaskDeleteWithCaps()`.
+
+Verified: `running=1 frames=1068 blits=1066 dropped=0 audio=on 43691Hz`, save
+restored from `/sd/saves/gbc/...`, operator played it and passed it.
+
+**NO BACKUP WAS TAKEN THIS CYCLE.** The board re-enumerated to `/dev/ttyACM0`
+and a 16 MiB read needs a reset that would have ended the game. The archived
+image `music-ui-2026-11-16-1921.bin` (`e7bc1c62`) holds everything except this
+one app change, which is one call in `gb.c`. **Take a backup at the next reset.**
+
 ## THE TWO LEAKS THAT KILLED PLAYBACK — fixed, measured flat
 
 The operator's "stopped after 4-5 songs with error: no amplifier" was memory,
@@ -249,6 +267,19 @@ grep MODHOST_PTR_AT ports/twatchultra/modules/build/modaddr.h
 ```
 
 They must match. Extending `modload_prepare()` to check this too is owed.
+
+### Driving the desktop: what actually works
+
+- **The Start menu is open at boot**, and `Enter` does open the selected app.
+  The screen mirror sends only CHANGED cells, so a frame captured immediately
+  after Enter still shows the menu — do not read that as "the key did not land".
+  A Terminal that looks absent may be open and focused.
+- **A command typed into a just-opened Terminal is lost.** The pause must be
+  long enough for the window to take focus, not merely for the frame to paint.
+  Roughly: F10, wait ~1.5 s, Enter, wait ~2.5 s, then type.
+- After `gb start` the panel shows pixels, so `gb status` written to the
+  Terminal is invisible until the emulator stops. Check pixels-vs-text: a few
+  hundred idle bytes means a picture.
 
 ### The console mirror cannot be trusted — use a file
 
