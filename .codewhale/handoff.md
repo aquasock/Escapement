@@ -1,4 +1,4 @@
-# Handoff — Escapement / TinyDesk on T-Watch Ultra, 2026-11-16T19:47
+# Handoff — Escapement / TinyDesk on T-Watch Ultra, 2026-11-16T19:57
 
 Orientation, not authority. **Verify before acting on it.** The files, the
 coredump partition and the board are the fact; this file is a claim.
@@ -11,15 +11,15 @@ recovered. A 5:58 track decoded at 15792504 frames, 0 errors, 0 short writes.**
 
 ## Where things live
 
-- Project-control repo: `/run/media/vash/GIT/Escapement`, `main`, at `541ecf4`
-  (core-log **entry 34**). `.ai/core.md` is RESTRICTED — do not edit without an
+- Project-control repo: `/run/media/vash/GIT/Escapement`, `main`, at `df7d665`
+  (core-log **entry 35**). `.ai/core.md` is RESTRICTED — do not edit without an
   explicit request. Reference records live in `.ai/core-reference.md`.
 - **`.ai/core.md`'s Purpose line is stale and deliberately untouched.** It says
   "Escapement is a port of linux". The project is TinyDesk; the Linux line
   closed 2026-11-11. Fixing it needs the operator's word, because that file may
   only be edited when asked.
 - **Active code is the fork: `/run/media/vash/GIT/tinydesk-twatch`, branch
-  `t-watch-ultra`, clean at `0644fef`.** Push to `fork`
+  `t-watch-ultra`, clean at `5021959`.** Push to `fork`
   (`aquasock/tinydesk`) only — **never** `origin` (upstream
   `tinydesk-project/tinydesk`).
 - `/run/media/vash/ROCKBOX` is the operator's source backup. **Never write to it
@@ -159,7 +159,45 @@ and the current desktop is laid out inside it.
 - **This repository has no `LICENSE` file.** The old README claimed GPLv3; the
   firmware fork is MIT. Unresolved, recorded as a decision owed.
 
-## Game Boy now starts from a shell — and a backup is OWED
+## GUEST STACKS BELONG ON PSRAM — a class, not two coincidences
+
+`gb start` and then `pm start` both failed with **"no task"**. `GB` was 8 KB and
+`PM_STACK` 10,240 B of internal DRAM, against a largest free internal block of
+**9,728** with the desktop up and a Terminal open. Both moved to PSRAM with
+`xTaskCreatePinnedToCoreWithCaps(..., MALLOC_CAP_SPIRAM)` and both delete with
+`vTaskDeleteWithCaps()`.
+
+Safe for a specific reason, not by luck: those tasks run the emulator and
+nothing else — the ROM is loaded on the caller's task, buffers are already
+PSRAM, and they open no file and map no partition, so they never disable the
+cache a PSRAM stack lives behind.
+
+**Two instances means a class.** Still on internal stacks and worth a sweep:
+`tama.c`, `nes.c`, `gbcbench.c`, `pmbench.c`. `nes.c` fits today, but that is a
+measurement about one game and one ROM.
+
+## Backup taken and verified
+
+```
+pinball-gb-music-2026-11-16-1952.bin   16,777,216 B
+   sha256 e7cd9c68d9274fa7
+   app 0x10000  = b6f1ce70   module text 0xE00000 = 2ef7b97a
+   module rodata 0xF00000    = ff665897
+   all three byte-identical to the build
+```
+
+## THE HARNESS BUG THAT MISLED ME FOR A WHOLE STRETCH
+
+Escape sequences were written **one byte per 100 ms**, and the parser gives up on
+a lone `ESC` after a few tens of milliseconds. So every `F10` arrived as
+**Escape (which CLOSES the menu) followed by the literal text `[21~`**. That is
+why menus kept closing, why one was found scrolled to the bottom, and why I
+concluded several times that Enter did not work. **Enter always worked.**
+One `os.write()` per sequence, and: F10 → wait 1.5 s → Enter → wait 3 s.
+
+Also: **the display mirror is not a frame counter.** It sent 32 bytes per 2 s
+while Pokemon Pinball was visibly running, because an emulator blits straight to
+the framebuffer and never touches the text-cell model.
 
 `gb start` (no argument; the ROM default is Zelda DX) failed with
 **`gb: no guest task`** once the desktop was up with a Terminal open. The 8 KB
@@ -172,10 +210,7 @@ behind. Deleted with `vTaskDeleteWithCaps()`.
 Verified: `running=1 frames=1068 blits=1066 dropped=0 audio=on 43691Hz`, save
 restored from `/sd/saves/gbc/...`, operator played it and passed it.
 
-**NO BACKUP WAS TAKEN THIS CYCLE.** The board re-enumerated to `/dev/ttyACM0`
-and a 16 MiB read needs a reset that would have ended the game. The archived
-image `music-ui-2026-11-16-1921.bin` (`e7bc1c62`) holds everything except this
-one app change, which is one call in `gb.c`. **Take a backup at the next reset.**
+Backup taken in entry 35, below, and verified region by region.
 
 ## THE TWO LEAKS THAT KILLED PLAYBACK — fixed, measured flat
 
