@@ -1,3 +1,33 @@
+## 57 COMMIT Unreleased 2026-11-18T01:30:00-07:00
+
+#### Coming From:
+
+Unreleased dc4e424
+
+#### Purpose:
+
+Finish the sine feeder entry 56 left wedging the shell, and answer the operator's actual question: what is needed to feed a perfect waveform into the AI engine, on the reasoning that "idc at all about the imu functions."
+
+#### Outcome:
+
+THE ARCHITECTURE IS THE FINDING, AND IT TOOK THREE IMAGES TO SEE IT. A DataInject firmware is an ALGORITHM PLUS INJECTION, not a way to fake an accelerometer. Bosch's own example says so in its second line: `#define CUSTOM_SENSOR_ID BHY2_SENSOR_ID_SWIM` -- sensor 114, a swimming-detection algorithm -- and it loads `firmware/bhi260ap_swim/DataInject_nobsx.fw`, a different folder from the plain `bhi260ap/DataInject.fw` this port had been using. Injected data replaces the ALGORITHM'S input and the algorithm then runs on it. Measured, all three, on this board: `bhi260ap/DataInject.fw` (95,960 B) boots with sensors 4 and 6 and NO algorithm; `bhi260ap_swim/DataInject_nobsx.fw` (104,700 B) boots with sensors 3, 8, 12, 17 and **114**; `bhi260ap_klio/` (123,696 B) boots with KLIO but no injection. THAT EXPLAINS EVERY DISAPPOINTING RESULT IN THIS SESSION AT ONCE. On the plain DataInject image there was no algorithm to consume injected bytes, so the part accepted them, emitted one event per injection -- 199 to 299 events for 200 to 300 injections, exactly one for one, which looked like success -- and filled every payload with the constant `00 08 00 01 00 00 00`. Identical for event id 4, for Bosch's ACCEL_INJECT_ID 55 and for ACC_COR_INJECT_DRIVER_ID 76. The count was the part pacing itself off host data; the values were the part's own, because nothing downstream needed ours. SO THE OPERATOR'S IDEA IS PROVEN TO WORK ON THIS SILICON, WITH A DIFFERENT ALGORITHM. `DataInject_SWIM.fw` boots here and carries algorithm 114: host sine in, algorithm consumes it, answer out. That is the pipeline they asked for, demonstrated with Bosch's own shipping parts. WHAT DOES NOT EXIST IS A KLIO + DATAINJECT IMAGE, publicly. Bosch publishes KLIO alone and injection builds carrying SWIM or nothing; combining them is a toolchain build rather than a download. That is the honest boundary and it is the same boundary entry 56 named, now sharpened from "maybe" to "this specific image does not exist". THREE INSTRUMENT BUGS WERE FIXED AND EACH HAD BEEN COSTING HARD RESETS. THE FIRST IS THE IMPORTANT ONE AND IT WAS A REAL DEFECT IN VENDORED CODE: `parse_fifo()` in `bhy2.c` spins for ever when a sensor id's `event_size` is 0, because `read_pos += 0` never advances -- no I2C traffic, no output, no crash, indistinguishable from a hang. It is now skipped a byte at a time, because a packet of unknown length can only be stepped over. That is what killed `imu feed` and every `imu raw` before it. THE SECOND: `imu raw` read a FOUR-byte header from a DATA fifo, which has a TWO-byte length; only the status channel uses the four-byte form. An empty FIFO therefore reported "251 bytes waiting" and a dump of it returned zeros -- the number 251 was the first payload bytes misread as a length. THE THIRD: `imu raw` capped partial FIFO reads, which leaves the remainder queued and starts every later read mid-packet; one such read made the header claim 64,768 bytes waiting. It now refuses to read a FIFO larger than its buffer and says so. `imu feed <seconds> <hz> <amp> <mode> <event id>` is the instrument that resulted, and it no longer wedges: 200 to 300 samples in, 199 to 299 events back, no hard reset. Its round-trip comparison is what made the constant-payload finding visible rather than another round of "it does not work". NOTHING REGRESSED, AND ONE THING DID AND WAS CAUGHT: after several app-only reflashes `music` failed with the loader's stale-link message, because the module had not been relinked for the new app size -- the entry-53 guard did its job by refusing rather than playing garbage, and `make modaddr && make flac` plus a reflash of both module regions restored it to 352800 frames and 0 errors. The sequence in the handoff is not optional and this is the second demonstration of what skipping it costs.
+
+#### Next Steps:
+
+THE SWIM IMAGE IS THE DEMO THAT EXISTS TODAY and it should be the next thing built if the operator wants to see the idea work on hardware: `DataInject_SWIM.fw` boots, carries sensor 114, and Bosch's `swim_data_injection.c` documents the whole protocol -- a 6-byte full timestamp injected separately, then a 17-byte event whose first byte is sensor id 114, with `bhy2_set_virt_sensor_cfg(114, rate, latency)` set first and a drain between injections. Reading SWIM's output while injecting a synthesised motion is exactly the operator's experiment with an algorithm that is not KLIO. WHETHER KLIO CAN BE FED is a question for Bosch rather than for this repo: the image would have to be built with their Application Board / Development Desktop toolchain, and the right question to ask them is whether a DataInject variant of the `bhi260ap_klio` build exists or can be produced. THE PAYLOAD FORMAT FOR SWIM IS DOCUMENTED IN THEIR EXAMPLE and should not be guessed: SENSOR_DATA_SIZE is 17 and TIMESTAMP_LENGTH is 6, and the field-trial log is hex text with 52 characters per line. UNCHANGED AND STILL OPEN: KLIO patterns do not survive a reboot, KLIO has no UI and none of its four knobs are tuned, `klio save` and `klio compare` are built and have never been run against a real pattern, the guest stacks are internal DRAM, `update.url` is unset, and `.ai/core.md`'s Purpose line still calls this a port of Linux.
+
+#### Files Modified:
+
+None in this repository; the fork carries the work at e48940e (ports/twatchultra/components/bhy2/bhy2.c, components/imu/{DataInject_SWIM.fw,README.md}, main/imu.c, modules/moddata.at).
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: N/A (an architectural finding; the demo it enables is not built)
+
+---
+
 ## 56 COMMIT Unreleased 2026-11-17T23:30:00-07:00
 
 #### Coming From:

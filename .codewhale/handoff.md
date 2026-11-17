@@ -1,4 +1,4 @@
-# Handoff — Escapement / TinyDesk on T-Watch Ultra, 2026-11-17T23:45
+# Handoff — Escapement / TinyDesk on T-Watch Ultra, 2026-11-18T01:45
 
 Orientation, not authority. **Verify before acting on it.** The files, the
 coredump partition and the board are the fact; this file is a claim.
@@ -17,15 +17,15 @@ are equal, and **the app is at 0x20000, not 0x10000**. The flash is four equal
 
 ## Where things live
 
-- Project-control repo: `/run/media/vash/GIT/Escapement`, `main`, at `f6d7152`
-  (core-log **entry 56**). `.ai/core.md` is RESTRICTED — do not edit without an
+- Project-control repo: `/run/media/vash/GIT/Escapement`, `main`, at `dc4e424`
+  (core-log **entry 57**). `.ai/core.md` is RESTRICTED — do not edit without an
   explicit request. Reference records live in `.ai/core-reference.md`.
 - **`.ai/core.md`'s Purpose line is stale and deliberately untouched.** It says
   "Escapement is a port of linux". The project is TinyDesk; the Linux line
   closed 2026-11-11. Fixing it needs the operator's word, because that file may
   only be edited when asked.
 - **Active code is the fork: `/run/media/vash/GIT/tinydesk-twatch`, branch
-  `t-watch-ultra`, clean at `f28ad6a`.** Push to `fork`
+  `t-watch-ultra`, clean at `e48940e`.** Push to `fork`
   (`aquasock/tinydesk`) only — **never** `origin` (upstream
   `tinydesk-project/tinydesk`).
 - `/run/media/vash/ROCKBOX` is the operator's source backup. **Never write to it
@@ -408,6 +408,53 @@ than the two packed structs account for — log all 11, not the first 6.
 
 **Patterns are volatile.** The firmware is uploaded to RAM each boot, so LEARN AND
 DETECT MUST HAPPEN IN THE SAME BOOT.
+
+## DATA INJECTION — THE ARCHITECTURE, AND IT IS AN ALGORITHM PLUS INJECTION (entry 57)
+
+**A DataInject image is an algorithm + injection. It is NOT a way to fake an
+accelerometer.** Bosch's example says so in its second line:
+
+```c
+#define CUSTOM_SENSOR_ID  BHY2_SENSOR_ID_SWIM     /* 114, an algorithm */
+firmware/bhi260ap_swim/DataInject_nobsx.fw        /* a different folder */
+```
+
+Injected data replaces the **algorithm's** input; the algorithm runs on it.
+Feeding a physical sensor's output is not what this family is for.
+
+```
+bhi260ap/DataInject.fw             95,960 B   boots   sensors 4 6      no algo
+bhi260ap_swim/DataInject_nobsx.fw 104,700 B   boots   sensors 3 8 12 17 **114**
+bhi260ap_klio/...                 123,696 B   boots   KLIO, no injection
+```
+
+**`components/imu/DataInject_SWIM.fw` boots here and carries algorithm 114.**
+That is the operator's pipeline proven on this silicon — with SWIM, not KLIO.
+
+**No public KLIO + DataInject image exists.** That is a toolchain build.
+
+### Why every earlier result looked the way it did
+
+On the plain DataInject image there was no algorithm to consume injected bytes.
+The part accepted them and emitted **one event per injection** (199-299 for
+200-300) — which reads as success — with every payload the constant
+`00 08 00 01 00 00 00`, identically for ids 4, 55 and 76. The count was the part
+pacing off host data; the values were its own, because nothing wanted ours.
+
+### Three instrument bugs fixed (each had been costing hard resets)
+
+1. **`bhy2.c parse_fifo()` spins for ever when `event_size == 0`** —
+   `read_pos += 0` never advances: no I2C, no output, no crash, indistinguishable
+   from a hang. **This is what wedged `imu feed`.** Now skips a byte.
+2. **`imu raw` read a 4-byte header from DATA fifos**, which use 2. Only the
+   status channel is 4. An empty FIFO reported "251 bytes waiting".
+3. **`imu raw` capped partial FIFO reads**, desyncing the stream for ever after
+   (a header then claimed 64,768 bytes). It refuses rather than reads short.
+
+`imu feed <seconds> <hz> <amp> <mode> <event id>` now injects and round-trips
+without wedging. Its payload comparison is what made the constant value visible.
+
+## SUPERSEDED — entry 56's images, still correct as far as they go
 
 ## DATA INJECTION — SOLVED IN PRINCIPLE: BOSCH SHIPS A DIAGNOSTIC FIRMWARE (entry 56)
 
@@ -818,7 +865,14 @@ measurement about one game and one ROM.
 ## Backups taken and verified
 
 ```
-inject-settled-2026-11-17-1507.bin   16,777,216 B   THE CURRENT BOARD
+inject-swim-2026-11-17-1653.bin      16,777,216 B   THE CURRENT BOARD
+   sha256 38ecbce7b445347b9f718ab1ab9d99a344b7247c426dd3bfee106828aef3cb9c
+   app 0x20000 = 9103bec7ed8f344f, module text 0xC00000 = af5c5ca5d5f07345,
+   module data, IMU fw -- all four byte-identical to the build.
+   verify OK, board came back. Has the parse_fifo fix, the FIFO-header fix,
+   `imu feed`, `imu boot`, `klio save`/`compare`. KLIO image loaded, music ok.
+
+inject-settled-2026-11-17-1507.bin   STALE -- seven app reflashes behind
    sha256 a47f365950338e61e78f5987e8030781a9992fac887db3f26bfb7b134d71fe21
    app 0x20000 = fda18b2a0e661f79, module text 0xC00000 = 6da1645b4b962ccc,
    module data 0xE00000, IMU fw 0xE10000 -- all four byte-identical to the build.
