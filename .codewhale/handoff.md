@@ -1,4 +1,4 @@
-# Handoff — Escapement / TinyDesk on T-Watch Ultra, 2026-11-17T13:00
+# Handoff — Escapement / TinyDesk on T-Watch Ultra, 2026-11-17T13:30
 
 Orientation, not authority. **Verify before acting on it.** The files, the
 coredump partition and the board are the fact; this file is a claim.
@@ -13,8 +13,8 @@ says what holds it and what the real constraint is.
 
 ## Where things live
 
-- Project-control repo: `/run/media/vash/GIT/Escapement`, `main`, at `3033f26`
-  (core-log **entry 47**). `.ai/core.md` is RESTRICTED — do not edit without an
+- Project-control repo: `/run/media/vash/GIT/Escapement`, `main`, at `cfcb43c`
+  (core-log **entry 48**). `.ai/core.md` is RESTRICTED — do not edit without an
   explicit request. Reference records live in `.ai/core-reference.md`.
 - **`.ai/core.md`'s Purpose line is stale and deliberately untouched.** It says
   "Escapement is a port of linux". The project is TinyDesk; the Linux line
@@ -410,6 +410,18 @@ has never changed. `/tmp/drive3.py` does it: it clears the screen before each
 command, because the display mirror accumulates and old scroll reads as new
 output.
 
+**THE OPERATOR'S RULE, AND IT IS THE FIRST THING TO TRY: when in doubt, reboot,
+F10, Enter — that always lands in the Terminal.** It works because the Start menu
+opens with **Terminal already selected**, so a bare Enter after F10 is enough. No
+screen inspection, no type-ahead, no arrow counting. This has now cost three
+sessions:
+- **type-ahead resets after ~2 s**, so `i` `i` searches twice *from the top* and
+  lands on Image Viewer both times;
+- an arrow count of 18 overshot into Users.
+
+**Launching a specific app from serial is the least reliable part of this
+workflow. Two reliable routes: the operator's finger, or a shell command.**
+
 - **Ctrl+Q is `0x11` = XON** and is swallowed by the line discipline unless
   `IXON|IXOFF|IXANY` are cleared. Every serial helper must clear them.
 - `tdsh` is **not bash**: no `wc`, `head -4` fails (`head <file> [-l lines]`),
@@ -520,7 +532,12 @@ measurement about one game and one ROM.
 ## Backups taken and verified
 
 ```
-quad4m-2026-11-17-1030.bin           16,777,216 B   CURRENT LAYOUT (quad)
+imu-window-2026-11-17-1315.bin       16,777,216 B   CURRENT
+   sha256 1325c673bb8dca1be00b98a1772f0b4dc79491b7c6423538f9090f8ddea97557
+   app 0x20000, module text 0xC00000, module data 0xE00000 -- all byte-identical
+   verify OK with the board in the stub; board came back. IMU window + firmware.
+
+quad4m-2026-11-17-1030.bin           16,777,216 B   quad layout, pre-IMU
    sha256 535776ecbcdaa0462cf98ce5c06db596bf3667c8eac00651d1f034c5664b8dac
    app 0x20000 = 987b7852   module text 0xC00000 = ea99cb70
    module data 0xE00000 = 9b47992b -- all three byte-identical to the build

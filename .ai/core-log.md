@@ -1,3 +1,33 @@
+## 48 COMMIT Unreleased 2026-11-17T13:30:00-07:00
+
+#### Coming From:
+
+Unreleased cfcb43c
+
+#### Purpose:
+
+Record the operator's verdict on the IMU window, verify the reopen fix that entry 47 left unproven, and take the backup for the current layout.
+
+#### Outcome:
+
+THE IMU WINDOW IS ACCEPTED BY THE OPERATOR: "face up, edge down states work perfect." That is the user test entry 47 could not supply, and it is the reading that matters -- the window now says in one word which way the watch is pointing, and the words are correct when the watch is turned. THE REOPEN FIX WAS VERIFIED AT THE COMMAND LEVEL, which is as far as this harness can reach. Three consecutive `imu accel` runs on one boot each produced live readings -- `x -0.01 y -0.07 z +1.03` flat, fifteen, then twenty-nine, then forty-two samples -- and each run stops the sensor on the way out, so every one of those runs began with a `start()` after a `stop()`. That is the same path the window's reopen takes, and the bug entry 47 fixed was purely that the window called it once and never again. The window-level test itself still needs a tap: close IMU, open it, and confirm it streams. A CORRECTION TO MY OWN WORK: entry 47's status line said the reopen fix was unexercised, and it still is at the window level, so this entry does not upgrade that claim -- it narrows what is untested from "start after stop" to "the window re-invoking start", which are not the same thing even though they share a code path. THE OPERATOR'S NAVIGATION RULE IS NOW THE FIRST THING TO TRY AND BELONGS IN THE HARNESS NOTES PROPERLY, because it has cost three sessions: WHEN IN DOUBT, REBOOT, F10, ENTER -- that always lands in the Terminal. It is exact, it needs no inspection of the screen, and it removes the two failures that kept appearing: type-ahead resetting after about two seconds so that `i` `i` searches twice from the top and lands on Image Viewer both times, and an arrow count overshooting into whichever entry happened to be there. The rule works because the Start menu opens with Terminal as the first entry already selected, so a bare Enter after F10 is enough. THE BACKUP IS TAKEN AND ITS THREE CODE REGIONS VERIFY. `imu-window-2026-11-17-1315.bin`, 16,777,216 bytes, sha256 `1325c673bb8dca1b`, read at 633.5 kbit/s with the board held in the stub and `verify OK (digest matched)`, board back up afterwards. The app at 0x20000, the module text at 0xC00000 and the module data at 0xE00000 each compare byte-identical to the build. A NOTE ON THE VERIFICATION ITSELF, because it nearly produced a false failure: the first comparison used a hardcoded app length of 3,060,160 bytes and reported MISMATCH, which is exactly what a real regression would look like. The build is 3,046,880 bytes. A hardcoded length in a verification command is a stale constant waiting to lie, and the check was redone reading the size from the file. That is worth keeping: verify by comparing against the artifact, not against a remembered number.
+
+#### Next Steps:
+
+VERIFY THE WINDOW REOPEN with a tap -- open IMU, close it, open it again, and confirm the readings return rather than the window sitting on "waiting for the first sample". HEADING REMAINS THE ONE DASHED FIELD and is the next real piece of work: both orientation sensors are subscribed, neither has delivered, and if a nudge of the watch does not produce a value then `on_ori()`'s payload layout is the thing to question -- it assumes four int16 quaternion at 2^14 followed by three int16 Euler at 2^8, taken from the driver rather than from Bosch's documentation. THE GESTURE SENSORS ARE UNCHANGED IN REACH AND STILL THE PRIZE: 61 pickup-gesture, 67 wrist-tilt-gesture, 75 stationary and 77 motion all run on the Fuser core, so a wrist-raise-to-wake or a shake costs the ESP32 nothing. NOTHING REGRESSED. The app is 0x2e7de0 with 1,000 KB free in its slot, both Bluetooth pairings are present, the four-region layout from entry 43 stands, `music` still decodes through the module, and `imu`, `imu accel` and `imu rate` all work. Carried forward unchanged from entries 40 to 47: `update.url` is unset, `third_party/tdsh` is pinned, the launchers have no installer, the Music progress bar still needs `total_samples`, `modload` still holds one blob, the guest stacks are still internal DRAM, the first IMU start blocks the desktop for about 3.3 s while the firmware uploads, and `.ai/core.md`'s Purpose line still calls this a port of Linux.
+
+#### Files Modified:
+
+None. This entry records a verification, a backup and the navigation rule.
+
+#### Status:
+
+- Build: N/A
+- Deployment: N/A
+- User Test: PASS (the operator confirms FACE UP and EDGE DOWN behave correctly)
+
+---
+
 ## 47 COMMIT Unreleased 2026-11-17T13:00:00-07:00
 
 #### Coming From:
