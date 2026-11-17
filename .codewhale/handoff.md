@@ -556,9 +556,12 @@ did NOT work from the harness; `Esc`, F10 and typed commands did.
    halting. Reviewed, **never exercised**.
 5. **No picker, queue, seek or progress display.** `music` takes a path.
 
-6. **The app image is at 0x2e3fc0, 48.1 KB free** in the smaller OTA slot. Two
-   upstream bug fixes cost 352 bytes; the partition change is the only thing
-   that buys real headroom back.
+6. **The app image is at 0x2e4c40, 46,016 B (44.9 KB, 1.5%) free** in the OTA
+   slot. That is FLASH for the image, not RAM. Both slots are 0x2F0000 so this
+   is the budget either way. There is also a **24,576 B gap at
+   0x1A000-0x20000** that is unused on purpose (the app offset is kept 64 KB
+   aligned); dropping that alignment to 0x1A000 would make 70,592 B available,
+   and ESP-IDF only asks for 4 KB there without secure boot.
 7. **Decide the NVS question** (see the NVS section): grow to 64 KB now and
    re-pair, or wait until something forces a full-image flash anyway.
 8. **`update.url` is unset** in `board.example.conf` and the device's
