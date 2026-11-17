@@ -1,3 +1,33 @@
+## 50 COMMIT Unreleased 2026-11-17T14:40:00-07:00
+
+#### Coming From:
+
+Unreleased 2490285
+
+#### Purpose:
+
+Investigate the BHI260AP's on-chip learning engine, which the operator suspected and was right about, and determine whether arbitrary IMU data can be fed to it.
+
+#### Outcome:
+
+KLIO IS A REAL ON-DEVICE LEARNING CLASSIFIER AND IT LEARNED A GESTURE ON THE GLASS. It is not pattern matching against a fixed list: the wearer repeats a motion, the engine reports progress 0 to 100 percent as it accumulates repetitions, and at 100 it announces a new pattern index. VERIFIED four times on the hardware, patterns 0 through 4, with the progress trace visible each run. `klio status` reports algorithm version 3.0.2 (Sep 26 2021), 25 pattern slots and a 157-byte pattern blob; `klio learn`, `klio detect` and `klio reset` drive it. THE FRAME FORMAT WAS DETERMINED EMPIRICALLY because the SDK does not document it: 11 bytes beginning {instance, learn_index, progress, change_reason} followed by the recognition block, with -1 meaning "nothing new learnt" and 0xff meaning "nothing recognised". That is one byte longer than the two packed structs in `bhy2_klio_defs.h` account for, which is why every byte is now logged rather than the first six. RECOGNITION DOES NOT WORK YET AND THIS ENTRY DOES NOT CLAIM IT DOES. With learning off and a pattern enabled the engine emits NO frames at all -- not frames saying "no match", but silence -- and with learning on it emits frames while continuing to learn, with the recognition index never leaving 0xff. Four bugs were found on the way and three were mine. First, KLIO is an ALGORITHM, not a sensor: enabling it without the accelerometer and gyroscope gave zero frames for a full minute of a human waving at it, because it had nothing to learn from. Second, a learnt pattern is DISABLED and must be enabled with `bhy2_klio_set_pattern_states()` before recognition will use it. Third, and this is the one that produced a sensor error, `recognition_reset = 1` DELETES THE PATTERN: the header says "Writing 1 to the reset fields resets all internal algorithm state and removes any patterns loaded for recognition", and the flag's name reads as an action when it means a wipe. Fourth, the probe itself lied once -- `learn_index` zero-initialises to 0 and the success test `>= 0` announced a learnt pattern in under a second with no gesture, which is the kind of confident false positive a diagnostic must never produce. ARBITRARY DATA INJECTION: THE COMMANDS EXIST AND ARE ACCEPTED, BUT DO NOT TAKE EFFECT. `bhy2_set_data_injection_mode()` and `bhy2_inject_data()` both return 0, and the SDK exposes three modes including real-time and step-by-step injection, so the protocol path is real. But there is NO payload struct anywhere in `bhy2_defs.h`, and injecting +2.50 g on z -- a value gravity cannot physically produce -- leaves the reading at the real sensor's +1.03 g. So the command is accepted and ignored. TWO HYPOTHESES ARE WORTH THE NEXT SESSION, in order: that the payload needs a timestamp field or a different header order than the datasheet prose suggests, and that this firmware variant needs the injection command issued per-sample in step-by-step mode rather than once. IF THAT IS SOLVED, the consequence is large: a classifier on the Fuser core could be trained from a FILE -- from recorded motion, or from synthesised motion that never happened -- rather than only from a hand. That is the piece of this the operator is interested in.
+
+#### Next Steps:
+
+RECOGNITION IS THE OPEN PROBLEM and the next session should start there, with the frame log already in place. The most likely explanations, in order: that recognition frames are only emitted when a pattern actually matches, so silence is a NEGATIVE result and the gesture needs to be more repeatable than the training was; that the pattern must be written back with `bhy2_klio_write_pattern()` to be usable rather than living only in the engine's volatile state; and that a boot wipes the pattern table, which it almost certainly does since the firmware is uploaded to RAM on every start -- so learn and detect MUST happen in the same boot, which the current probe does. THE OPERATOR'S WILD IDEA WAS NOT DISCLOSED, but the injection question was asked in preparation for it, and the answer so far is "the API says yes, the implementation says no". THE OPERATOR ALSO ASKED TO STOP ADDING FEATURES AND TEST FIRST, so this entry is an instrument and nothing else: `klio` is a diagnostic command, its only destructive operation is `learn` (which resets the pattern table deliberately), and nothing was built on top of it. A RESTART CAUTION: the board went silent twice after a flash in this cycle and needed an `esptool chip_id --after hard_reset` before it would talk. No crash was captured, it did not recur on the same build, and the trigger is unknown -- but a silent board after flashing is not necessarily a dead board, and the reset is one command. NOTHING REGRESSED: the app is 0x2e9570 with 1,000 KB free, both Bluetooth pairings present, the four-region layout from entry 43 stands, `music` decodes through the module, `imu`/`imu accel`/`imu rate` all work, and the posture vocabulary from entry 49 is unchanged and still pinned by its host test. Carried forward unchanged: `update.url` is unset, `third_party/tdsh` is pinned, the launchers have no installer, the Music progress bar needs `total_samples`, `modload` holds one blob, the guest stacks are internal DRAM, `.ai/core.md`'s Purpose line still calls this a port of Linux, and the newest backup `imu-window-2026-11-17-1315.bin` is now two changes stale.
+
+#### Files Modified:
+
+None in this repository; the fork carries the work at a6f0913 (ports/twatchultra/main/klio.c|h, imu.c|h, link_twatch.c, main/CMakeLists.txt).
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: PARTIAL (learning verified on the glass by the operator; recognition not working)
+
+---
+
 ## 49 COMMIT Unreleased 2026-11-17T13:55:00-07:00
 
 #### Coming From:

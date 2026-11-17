@@ -1,4 +1,4 @@
-# Handoff — Escapement / TinyDesk on T-Watch Ultra, 2026-11-17T13:55
+# Handoff — Escapement / TinyDesk on T-Watch Ultra, 2026-11-17T14:40
 
 Orientation, not authority. **Verify before acting on it.** The files, the
 coredump partition and the board are the fact; this file is a claim.
@@ -13,15 +13,15 @@ says what holds it and what the real constraint is.
 
 ## Where things live
 
-- Project-control repo: `/run/media/vash/GIT/Escapement`, `main`, at `9f8285a`
-  (core-log **entry 49**). `.ai/core.md` is RESTRICTED — do not edit without an
+- Project-control repo: `/run/media/vash/GIT/Escapement`, `main`, at `2490285`
+  (core-log **entry 50**). `.ai/core.md` is RESTRICTED — do not edit without an
   explicit request. Reference records live in `.ai/core-reference.md`.
 - **`.ai/core.md`'s Purpose line is stale and deliberately untouched.** It says
   "Escapement is a port of linux". The project is TinyDesk; the Linux line
   closed 2026-11-11. Fixing it needs the operator's word, because that file may
   only be edited when asked.
 - **Active code is the fork: `/run/media/vash/GIT/tinydesk-twatch`, branch
-  `t-watch-ultra`, clean at `f14626e`.** Push to `fork`
+  `t-watch-ultra`, clean at `a6f0913`.** Push to `fork`
   (`aquasock/tinydesk`) only — **never** `origin` (upstream
   `tinydesk-project/tinydesk`).
 - `/run/media/vash/ROCKBOX` is the operator's source backup. **Never write to it
@@ -304,6 +304,63 @@ components/imu/fetch.sh    # regenerates that image from SensorLib
    `HOST_FW_VERIFY_ERROR` (boot status 0x78). Use the whole-image call.
 3. `bus_delay_us` flooring sub-ms to a whole tick (1 kHz) made handshakes crawl.
    `read_write_len = 0` is NOT the fix — it breaks the upload with (-2).
+
+## KLIO — THE ON-CHIP LEARNING ENGINE (entry 50)
+
+```
+klio           algorithm version, state, 25 pattern slots, 157-byte blobs
+klio learn     reset, enable learning, print progress 0..100 live
+klio detect    enable recognition, print what it matches
+klio reset     clear patterns
+```
+
+**LEARNING WORKS, verified four times on the glass.** Repeat a gesture and the
+engine's own progress climbs 0/20/40/60/80/100%, then it assigns a pattern index.
+
+**RECOGNITION DOES NOT WORK YET.** Learning off + pattern enabled = **zero frames**
+(silence, not "no match"). Learning on = frames, but it keeps learning and the
+recognition byte stays `0xff`.
+
+**Four bugs found, three of them mine:**
+1. **KLIO is an ALGORITHM, not a sensor.** It consumes accel + gyro. Without them:
+   zero frames for a minute of waving. Enabling them at 100 Hz is the prerequisite.
+2. **A learnt pattern is DISABLED** — needs `bhy2_klio_set_pattern_states()`.
+3. **`recognition_reset = 1` DELETES the pattern.** The header says so; the flag
+   name reads as an action but means a wipe. It produced `meta 11 SENSOR ERROR`.
+4. The probe once lied: `learn_index` zero-initialises to 0 and `>= 0` read as
+   "learnt". Now requires a real frame **and** progress 100.
+
+**Frame format, determined empirically** (the SDK does not document it): **11
+bytes**, `{instance, learn_index, progress, change_reason}` then the recognition
+block. `-1` = nothing new learnt, `0xff` = nothing recognised. One byte longer
+than the two packed structs account for — log all 11, not the first 6.
+
+**Patterns are volatile.** The firmware is uploaded to RAM each boot, so LEARN AND
+DETECT MUST HAPPEN IN THE SAME BOOT.
+
+## DATA INJECTION — API says yes, implementation says no (entry 50)
+
+```
+bhy2_set_data_injection_mode()   NORMAL / REAL_TIME / STEP_BY_STEP   returns 0
+bhy2_inject_data()                                                   returns 0
+```
+
+Both **accepted**; injecting `+2.50 g` on z — impossible for gravity — left the
+reading at the real sensor's `+1.03 g`. **No payload struct exists anywhere in
+`bhy2_defs.h`**, so the layout used (uint16 sensor id, then the sensor's fields)
+is from datasheet prose and is wrong or incomplete.
+
+Next hypotheses, in order: (a) the payload needs a timestamp or a different
+header order; (b) step-by-step needs one command per sample, not one command.
+
+**If this is solved, a classifier on the Fuser core could be trained from a FILE**
+— recorded or synthesised motion — not only from a hand.
+
+## RESTART CAUTION
+
+The board went **silent twice** after a flash this cycle and needed
+`esptool chip_id --after hard_reset`. No crash captured, did not recur on the same
+build, trigger unknown. **A silent board after flashing is not a dead board.**
 
 ## THE FLASH: FOUR EQUAL 4 MiB REGIONS (entry 43, 2026-11-17)
 
