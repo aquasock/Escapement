@@ -1,4 +1,4 @@
-# Handoff — Escapement / TinyDesk on T-Watch Ultra, 2026-11-16T18:26
+# Handoff — Escapement / TinyDesk on T-Watch Ultra, 2026-11-16T19:26
 
 Orientation, not authority. **Verify before acting on it.** The files, the
 coredump partition and the board are the fact; this file is a claim.
@@ -11,15 +11,15 @@ recovered. A 5:58 track decoded at 15792504 frames, 0 errors, 0 short writes.**
 
 ## Where things live
 
-- Project-control repo: `/run/media/vash/GIT/Escapement`, `main`, at `8818fde`
-  (core-log **entry 32**). `.ai/core.md` is RESTRICTED — do not edit without an
+- Project-control repo: `/run/media/vash/GIT/Escapement`, `main`, at `1fbcb94`
+  (core-log **entry 33**). `.ai/core.md` is RESTRICTED — do not edit without an
   explicit request. Reference records live in `.ai/core-reference.md`.
 - **`.ai/core.md`'s Purpose line is stale and deliberately untouched.** It says
   "Escapement is a port of linux". The project is TinyDesk; the Linux line
   closed 2026-11-11. Fixing it needs the operator's word, because that file may
   only be edited when asked.
 - **Active code is the fork: `/run/media/vash/GIT/tinydesk-twatch`, branch
-  `t-watch-ultra`, clean at `df9de5b`.** Push to `fork`
+  `t-watch-ultra`, clean at `69cb2c9`.** Push to `fork`
   (`aquasock/tinydesk`) only — **never** `origin` (upstream
   `tinydesk-project/tinydesk`).
 - `/run/media/vash/ROCKBOX` is the operator's source backup. **Never write to it
@@ -159,6 +159,50 @@ and the current desktop is laid out inside it.
 - **This repository has no `LICENSE` file.** The old README claimed GPLv3; the
   firmware fork is MIT. Unresolved, recorded as a decision owed.
 
+## THE TWO LEAKS THAT KILLED PLAYBACK — fixed, measured flat
+
+The operator's "stopped after 4-5 songs with error: no amplifier" was memory,
+not audio. Both leaks were found by counting allocations, and the numbers are
+what identified them:
+
+```
+decoder working buffer  never freed — nothing called ~FLACDecoder()
+                        41 KB PSRAM + 356 B internal PER TRACK
+player task              deleted with vTaskDelete() instead of
+                        vTaskDeleteWithCaps() — the caps-aware API's PSRAM
+                        stack is not freed by the idle task
+                        8,196 B PSRAM + 356 B internal PER TRACK
+```
+
+- **The module contract has a TEARDOWN now** (`MODLOAD_ABI_VERSION` 3): a call
+  with `in == NULL, in_len == 0` destroys what the module built and frees what
+  it allocated. `music_player.c` makes that call before freeing the state block.
+- **`vTaskDeleteWithCaps(NULL)`**, not `vTaskDelete(NULL)`. `idf_additions.h`
+  says so explicitly. `uac2.c` and `usbhost.c` also use `xTaskCreateWithCaps`
+  and do not self-delete — safe today, but anyone adding a self-delete there
+  must use the caps-aware call.
+- **After both: PSRAM returns to 7,786,392 every track, internal delta 0,
+  module 0/0.** Measured over eight consecutive tracks.
+
+`MUSIC_UI_SELFTEST` (commented out in `main/CMakeLists.txt`) is the instrument:
+it runs a series of tracks and writes PSRAM, internal RAM and the module's live
+allocation count after each. `modhost.c` counts those allocations with
+`heap_caps_get_allocated_size()`.
+
+### THE THIRD MOVING ADDRESS — now checked
+
+`g_modhost_ptr` moved four times in one afternoon: `0x3c26b8c8`, `0x3c26b99c`,
+`0x3c26ba78`, `0x3c26bb50`. A blob holding a stale one does **not** fault; every
+call returns `MODCALL_ERROR` and the only symptom is "decode error". The header
+now carries `linked_host`, `modload_prepare()` compares it, and
+`patch_header.py` reads it from `modaddr.h` at patch time (a parse-time Makefile
+read produced `host=0x0` once, which the patcher now refuses).
+
+### "no amplifier" is gone
+
+`sound.c` records the exact failing call and its `esp_err_t`, so the message
+now names disable/clock/slot/enable/allocation rather than one catch-all.
+
 ## The Music window — built, proven by file, NOT yet seen
 
 `Music` is in the Start menu. A playlist of the SD card's tracks with a
@@ -176,9 +220,15 @@ stopped=running:0 state:0
 after_next=running:0 sel=1
 ```
 
-**Not proven: that the window looks right.** Nobody has seen it on the glass or
-heard a track started by the Play button. Do not call this done from the file
-above — it proves the handlers, not the pixels.
+**The operator has now used it**: opened it, played a few songs, heard them.
+The window works. What remains unproven is only that playback now survives many
+tracks — the leaks are measurably gone, but the failure itself was never
+deliberately reproduced, so read it as "cause removed".
+
+**Music is no longer first in the Start menu.** A weak `board_apps_register()`
+in `ports/esp_idf/app/main.c` runs after `td_apps_register_all()`, so port apps
+register last and sit at the bottom of the menu, next to the user's emulator
+`.tdlink` entries.
 
 ### THE HOST-TABLE ADDRESS IS A SECOND MOVING TARGET
 
