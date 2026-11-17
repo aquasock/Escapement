@@ -1,4 +1,4 @@
-# Handoff — Escapement / TinyDesk on T-Watch Ultra, 2026-11-16T17:30
+# Handoff — Escapement / TinyDesk on T-Watch Ultra, 2026-11-16T18:26
 
 Orientation, not authority. **Verify before acting on it.** The files, the
 coredump partition and the board are the fact; this file is a claim.
@@ -11,15 +11,15 @@ recovered. A 5:58 track decoded at 15792504 frames, 0 errors, 0 short writes.**
 
 ## Where things live
 
-- Project-control repo: `/run/media/vash/GIT/Escapement`, `main`, at `1fbcbb2`
-  (core-log **entry 31**). `.ai/core.md` is RESTRICTED — do not edit without an
+- Project-control repo: `/run/media/vash/GIT/Escapement`, `main`, at `8818fde`
+  (core-log **entry 32**). `.ai/core.md` is RESTRICTED — do not edit without an
   explicit request. Reference records live in `.ai/core-reference.md`.
 - **`.ai/core.md`'s Purpose line is stale and deliberately untouched.** It says
   "Escapement is a port of linux". The project is TinyDesk; the Linux line
   closed 2026-11-11. Fixing it needs the operator's word, because that file may
   only be edited when asked.
 - **Active code is the fork: `/run/media/vash/GIT/tinydesk-twatch`, branch
-  `t-watch-ultra`, clean at `a043a9d`.** Push to `fork`
+  `t-watch-ultra`, clean at `df9de5b`.** Push to `fork`
   (`aquasock/tinydesk`) only — **never** `origin` (upstream
   `tinydesk-project/tinydesk`).
 - `/run/media/vash/ROCKBOX` is the operator's source backup. **Never write to it
@@ -158,6 +158,56 @@ and the current desktop is laid out inside it.
   if `build/` is deleted.
 - **This repository has no `LICENSE` file.** The old README claimed GPLv3; the
   firmware fork is MIT. Unresolved, recorded as a decision owed.
+
+## The Music window — built, proven by file, NOT yet seen
+
+`Music` is in the Start menu. A playlist of the SD card's tracks with a
+Play/Stop/Prev/Next row, on TinyPhosphor's layout. It is a VIEW onto the one
+playback task: `music_player.c` owns the amplifier, the shell's `music` command
+and the window both drive it.
+
+**Proven on the device by `MUSIC_UI_SELFTEST`** (commented out in
+`main/CMakeLists.txt`; uncomment, flash, and read `/fs/root/musicboot.txt`):
+
+```
+window=1  tracks=74  dir=/sd/ROCKBOX/Audio
+play=running:1 state:1 frames:253440 rate:44100 secs:5 err:0 short:0
+stopped=running:0 state:0
+after_next=running:0 sel=1
+```
+
+**Not proven: that the window looks right.** Nobody has seen it on the glass or
+heard a track started by the Play button. Do not call this done from the file
+above — it proves the handlers, not the pixels.
+
+### THE HOST-TABLE ADDRESS IS A SECOND MOVING TARGET
+
+Entry 30's guard compares the two **mmap bases** only. `g_modhost_ptr` — the
+address the blob reads the API table from — moves on nearly every build:
+
+```
+0x3c26b8c8 -> 0x3c26b99c -> 0x3c26ba78 -> 0x3c26b9a4
+```
+
+A stale one does not fault; it surfaces as **"decode error"** in the status
+line. `make modaddr && make flac` after EVERY app build, then flash all three
+regions. To check before flashing:
+
+```bash
+xtensa-esp32s3-elf-nm ports/twatchultra/build/tinydesk.elf | grep g_modhost_ptr
+grep MODHOST_PTR_AT ports/twatchultra/modules/build/modaddr.h
+```
+
+They must match. Extending `modload_prepare()` to check this too is owed.
+
+### The console mirror cannot be trusted — use a file
+
+It sends only CHANGED cells, attaches stale, and repeatedly replayed old
+scroll as new output. It twice made `░` wallpaper look like a stuck shadow and
+produced a wrong diagnosis. When a display or input question must be answered,
+either write the answer to flash (`MUSIC_UI_SELFTEST`, `modload_selftest`) or
+have the operator look. Enter and synthetic SGR mouse clicks on the Start menu
+did NOT work from the harness; `Esc`, F10 and typed commands did.
 
 ## Next steps
 
