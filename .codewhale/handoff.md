@@ -1,4 +1,4 @@
-# Handoff — Escapement / TinyDesk on T-Watch Ultra, 2026-11-16T19:57
+# Handoff — Escapement / TinyDesk on T-Watch Ultra, 2026-11-16T20:12
 
 Orientation, not authority. **Verify before acting on it.** The files, the
 coredump partition and the board are the fact; this file is a claim.
@@ -11,8 +11,8 @@ recovered. A 5:58 track decoded at 15792504 frames, 0 errors, 0 short writes.**
 
 ## Where things live
 
-- Project-control repo: `/run/media/vash/GIT/Escapement`, `main`, at `df7d665`
-  (core-log **entry 35**). `.ai/core.md` is RESTRICTED — do not edit without an
+- Project-control repo: `/run/media/vash/GIT/Escapement`, `main`, at `1e3ed9f`
+  (core-log **entry 36**). `.ai/core.md` is RESTRICTED — do not edit without an
   explicit request. Reference records live in `.ai/core-reference.md`.
 - **`.ai/core.md`'s Purpose line is stale and deliberately untouched.** It says
   "Escapement is a port of linux". The project is TinyDesk; the Linux line
@@ -158,6 +158,30 @@ and the current desktop is laid out inside it.
   if `build/` is deleted.
 - **This repository has no `LICENSE` file.** The old README claimed GPLv3; the
   firmware fork is MIT. Unresolved, recorded as a decision owed.
+
+## START-MENU LAUNCHERS — one missing import, and both are versioned now
+
+`py` is MicroPython with a `tinydesk` module **registered but not auto-imported**.
+`/root/Apps/pm.py` called `tinydesk.shell(...)` without `import tinydesk`, so
+every launch of **Pokémon Mini** from the Start menu printed a `NameError`
+traceback. **`tama.py` already had the import and was never broken** — the two
+failures looked identical from outside.
+
+Both launchers now live in `scripts/apps/` (they were in no repository, and a
+full-image flash would have lost them) with the install commands, and both use
+the firmware's default ROM path instead of carrying a long path with spaces:
+
+```
+pm.py     import tinydesk / tinydesk.shell("pm start")
+tama.py   import tinydesk / tinydesk.shell("tama")
+```
+
+Verified **from the Start menu** — the path that failed — at 71.8 fps.
+
+**Navigating the menu:** `td_type_ahead` steps to the *next* match, so `p` selects
+Pixels and a second `p` reaches Pokémon Mini; `t` reaches Task Manager before
+Tamagotchi. `End` goes to the very bottom, which is the users section and
+"Sign out", not the app list.
 
 ## GUEST STACKS BELONG ON PSRAM — a class, not two coincidences
 
