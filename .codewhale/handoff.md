@@ -1,4 +1,4 @@
-# Handoff — Escapement / TinyDesk on T-Watch Ultra, 2026-11-17T15:20
+# Handoff — Escapement / TinyDesk on T-Watch Ultra, 2026-11-17T16:05
 
 Orientation, not authority. **Verify before acting on it.** The files, the
 coredump partition and the board are the fact; this file is a claim.
@@ -13,15 +13,15 @@ says what holds it and what the real constraint is.
 
 ## Where things live
 
-- Project-control repo: `/run/media/vash/GIT/Escapement`, `main`, at `4393aa4`
-  (core-log **entry 51**). `.ai/core.md` is RESTRICTED — do not edit without an
+- Project-control repo: `/run/media/vash/GIT/Escapement`, `main`, at `1b50d77`
+  (core-log **entry 52**). `.ai/core.md` is RESTRICTED — do not edit without an
   explicit request. Reference records live in `.ai/core-reference.md`.
 - **`.ai/core.md`'s Purpose line is stale and deliberately untouched.** It says
   "Escapement is a port of linux". The project is TinyDesk; the Linux line
   closed 2026-11-11. Fixing it needs the operator's word, because that file may
   only be edited when asked.
 - **Active code is the fork: `/run/media/vash/GIT/tinydesk-twatch`, branch
-  `t-watch-ultra`, clean at `86eb891`.** Push to `fork`
+  `t-watch-ultra`, clean at `a8e64d4`.** Push to `fork`
   (`aquasock/tinydesk`) only — **never** `origin` (upstream
   `tinydesk-project/tinydesk`).
 - `/run/media/vash/ROCKBOX` is the operator's source backup. **Never write to it
@@ -317,18 +317,46 @@ klio reset     clear patterns
 **LEARNING WORKS, verified four times on the glass.** Repeat a gesture and the
 engine's own progress climbs 0/20/40/60/80/100%, then it assigns a pattern index.
 
-**RECOGNITION DOES NOT WORK YET.** Learning off + pattern enabled = **zero frames**
-(silence, not "no match"). Learning on = frames, but it keeps learning and the
-recognition byte stays `0xff`.
+**RECOGNITION WORKS (entry 52).** Train by hand, `klio detect`, perform it again:
 
-**Four bugs found, three of them mine:**
-1. **KLIO is an ALGORITHM, not a sensor.** It consumes accel + gyro. Without them:
-   zero frames for a minute of waving. Enabling them at 100 Hz is the prerequisite.
-2. **A learnt pattern is DISABLED** — needs `bhy2_klio_set_pattern_states()`.
-3. **`recognition_reset = 1` DELETES the pattern.** The header says so; the flag
-   name reads as an action but means a wipe. It produced `meta 11 SENSOR ERROR`.
-4. The probe once lied: `learn_index` zero-initialises to 0 and `>= 0` read as
-   "learnt". Now requires a real frame **and** progress 100.
+```
+RECOGNISED pattern 0, count 5.1
+RECOGNISED pattern 0, count 5.5     45 frames over one run
+```
+
+**THE FIVE-STEP LIFECYCLE — the third step was missing for two cycles:**
+
+```
+1  learn                              engine signals a new pattern
+2  read_pattern(0)   -> 157 bytes     pull it OUT of the engine
+3  write_pattern(0)                   into the RECOGNITION table
+4  set_pattern_states(ENABLE, {0})    a written pattern is disabled by default
+5  recognition on, learning OFF, BOTH reset fields 0
+```
+
+**A learnt pattern lives INSIDE the algorithm, never in the host table** —
+`bhy2_klio.h` on `read_pattern`: *"After learning of a new pattern has been
+signaled by a sensor data event, call this function to retrieve the learnt
+pattern."* Enabling an empty slot is why detect had nothing to match.
+
+**The pattern id is 0, not the index the engine reports.** That index numbers the
+engine's internal slot; the header says *"only 0 supported now"* for the
+recognition table.
+
+**FIFO overflow was hiding it too.** Setup is several blocking I2C calls while
+accel+gyro stream 100 Hz ≈ 2.6 KB/s; `meta 12 fifo overflow` mid-setup drops KLIO
+frames, and a dropped frame is indistinguishable from no match. Recognition runs
+its inputs at **50 Hz**, watermark **32**, drains between setup steps, polls 5 ms.
+
+**Five bugs total across the two cycles, four of them mine:**
+1. **KLIO is an ALGORITHM, not a sensor** — it consumes accel + gyro.
+2. **A learnt pattern is DISABLED** — needs `set_pattern_states()`.
+3. **`recognition_reset = 1` DELETES the pattern** — name reads as action, means wipe.
+4. The probe once lied: `learn_index` zero-inits to 0 and `>= 0` read as "learnt".
+5. **A pattern must be read out and written back** before recognition sees it.
+
+**Frame decode, verified against raw bytes:** `d[5]` = pattern index,
+`d[6..9]` = little-endian float repetition count.
 
 **Frame format, determined empirically** (the SDK does not document it): **11
 bytes**, `{instance, learn_index, progress, change_reason}` then the recognition

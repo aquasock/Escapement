@@ -1,3 +1,33 @@
+## 52 COMMIT Unreleased 2026-11-17T16:05:00-07:00
+
+#### Coming From:
+
+Unreleased 1b50d77
+
+#### Purpose:
+
+Get KLIO recognition working, which entry 50 left as the one open technical problem: learning worked and detection produced no frames at all.
+
+#### Outcome:
+
+IT WORKS, AND THE WHOLE LOOP IS PROVEN ON THE GLASS: train a gesture by hand, run `klio detect`, perform it again, and the engine answers. `RECOGNISED pattern 0, count 5.1` then `RECOGNISED pattern 0, count 5.5`, with 45 KLIO frames over one run. A classifier on the Fuser core now learns a motion from the operator's hand and recognises fuzzy repetitions of it, and the ESP32 does nothing but move bytes. THE MISSING STEP WAS WRITTEN IN THE HEADER I HAD ALREADY READ. `bhy2_klio.h`, on `read_pattern`: "After learning of a new pattern has been signaled by a sensor data event, CALL THIS FUNCTION TO RETRIEVE THE LEARNT PATTERN." Learning leaves the pattern INSIDE the algorithm; it never enters the host's recognition table, so `set_pattern_states(ENABLE)` was switching on an empty slot and the engine had nothing to compare against. That single omission explains every symptom entry 50 recorded -- zero frames with learning off, and frames that kept learning when it was on -- because in neither case was there a pattern in the table being searched. THE REAL LIFECYCLE IS FIVE STEPS and all five are now in order, each printing its own result so a future failure names itself: learn (the engine signals a new pattern); `read_pattern(0)` (157 bytes into host memory); `write_pattern(0)` (into the recognition table); `set_pattern_states(ENABLE, {0})` (a written pattern is disabled by default); then recognition on with learning OFF and BOTH reset fields 0 (the reset fields delete the table). THE PATTERN ID IS 0, NOT THE INDEX THE ENGINE REPORTS. The index announced while learning numbers the engine's internal slot; the header says "only 0 supported now" for the recognition table, which is why enabling index 4 -- the number the engine had just given -- could never have worked. SECOND FIX, AND IT WAS HIDING THE FIRST: THE FIFO OVERFLOW WAS DROPPING THE FRAMES. Setup is several blocking I2C calls -- read, write, enable -- during which nothing drains, while accel and gyro streamed at 100 Hz each, about 2.6 KB a second. That produced `meta 12 fifo overflow` in the middle of setup, and a KLIO frame dropped during recognition is INDISTINGUISHABLE FROM NO MATCH. Recognition now runs its inputs at 50 Hz rather than 100, sets a 32-byte watermark so interrupts come early, drains between each setup step, and polls every 5 ms instead of 10. The rate matters less than it sounds: KLIO works on motion envelopes, not sample-accurate waveforms. THE FRAME WAS DECODED AGAINST THE RAW BYTES rather than trusted from the struct layout: `d[5]` is the pattern index and `d[6..9]` is a little-endian float repetition count, confirmed on three consecutive frames reading 4.752, 4.858 and 4.962. That is the check that makes the count a measurement rather than a plausible number -- the previous cycle's own printed values (5.1, 5.5) came from later frames in the same stream, so the decode had to be verified independently of what the display showed.
+
+#### Next Steps:
+
+THE HONEST STATUS IS THAT THIS IS A WORKING DEMONSTRATION AND NOT YET A FEATURE. What it proves: the part learns a motion, stores a 157-byte fingerprint, and matches fuzzy repetitions of it, entirely on-chip. What it does not yet have: a way to keep a pattern across a reboot (the firmware is uploaded to RAM at every start, so the pattern table is rebuilt empty -- persisting it means reading the pattern out and storing it on littlefs, which the API supports via `read_pattern`/`write_pattern` and is the obvious next piece), any UI (it is a shell command), and any tuning of the four knobs that decide how forgiving the match is -- `RECOGNITION_SENSITIVITY`, `RECOGNITION_RESPONSIVNESS`, `LEARNING_SPEED` and `LEARNING_SIMILARITY_THRESHOLD`. THE OPERATOR'S ORIGINAL AMBITION REMAINS OUT OF REACH ON THIS FIRMWARE: feeding arbitrary IMU data in so the classifier can be trained from a file was tested across six payload shapes in entry 51 and the path is inert. So the demo is the version with the sensors as the input, which is the version that works. NOTHING REGRESSED: the app is 0x2e9a20 with 1,000 KB free, both Bluetooth pairings present, the four-region layout from entry 43 stands, `music` decodes through the module, and `imu`, `imu accel`, `imu rate`, `imu scan` and `klio` (status/learn/detect/stop/reset) all work. The posture vocabulary from entry 49 is unchanged and still pinned by its host test. Carried forward unchanged: `update.url` is unset, `third_party/tdsh` is pinned, the launchers have no installer, the Music progress bar needs `total_samples`, `modload` holds one blob, the guest stacks are internal DRAM, `.ai/core.md`'s Purpose line still calls this a port of Linux, and the newest backup `imu-window-2026-11-17-1315.bin` is now four changes stale.
+
+#### Files Modified:
+
+None in this repository; the fork carries the work at a8e64d4 (ports/twatchultra/main/klio.c).
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: PASS (the operator saw recognition fire on the glass)
+
+---
+
 ## 51 COMMIT Unreleased 2026-11-17T15:20:00-07:00
 
 #### Coming From:
