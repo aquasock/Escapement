@@ -1,4 +1,4 @@
-# Handoff — Escapement / TinyDesk on T-Watch Ultra, 2026-11-17T13:30
+# Handoff — Escapement / TinyDesk on T-Watch Ultra, 2026-11-17T13:55
 
 Orientation, not authority. **Verify before acting on it.** The files, the
 coredump partition and the board are the fact; this file is a claim.
@@ -13,15 +13,15 @@ says what holds it and what the real constraint is.
 
 ## Where things live
 
-- Project-control repo: `/run/media/vash/GIT/Escapement`, `main`, at `cfcb43c`
-  (core-log **entry 48**). `.ai/core.md` is RESTRICTED — do not edit without an
+- Project-control repo: `/run/media/vash/GIT/Escapement`, `main`, at `9f8285a`
+  (core-log **entry 49**). `.ai/core.md` is RESTRICTED — do not edit without an
   explicit request. Reference records live in `.ai/core-reference.md`.
 - **`.ai/core.md`'s Purpose line is stale and deliberately untouched.** It says
   "Escapement is a port of linux". The project is TinyDesk; the Linux line
   closed 2026-11-11. Fixing it needs the operator's word, because that file may
   only be edited when asked.
 - **Active code is the fork: `/run/media/vash/GIT/tinydesk-twatch`, branch
-  `t-watch-ultra`, clean at `60e6fbc`.** Push to `fork`
+  `t-watch-ultra`, clean at `f14626e`.** Push to `fork`
   (`aquasock/tinydesk`) only — **never** `origin` (upstream
   `tinydesk-project/tinydesk`).
 - `/run/media/vash/ROCKBOX` is the operator's source backup. **Never write to it
@@ -245,10 +245,25 @@ is physical: **an accelerometer cannot see yaw.** Spin the watch flat on a table
 and the readings do not change, because gravity did not. Heading needs a
 magnetometer or the fusion quaternion; it is not a bug.
 
-The window now leads with **FACE UP / FACE DOWN / EDGE / SIDE / TILTED**, and
-shows **tilt in degrees** derived from gravity —
-`pitch = atan2(-x, sqrt(y²+z²))`, `roll = atan2(y, sqrt(x²+z²))`. Checked
-against the operator's own 90° rotation: it gives +90° pitch, 0 roll.
+The window leads with the posture and shows **tilt in degrees** derived from
+gravity — `pitch = atan2(-x, sqrt(y²+z²))`, `roll = atan2(y, sqrt(x²+z²))`.
+Checked against the operator's own 90° rotation: +90° pitch, 0 roll.
+
+**THE VOCABULARY (renamed in entry 49 — it describes what the WEARER did):**
+
+```
+FACE UP      FACE DOWN          flat, glass to the sky or the floor
+TILT UP      TILT DOWN          x axis; TILT UP = tipped forward towards the strap
+TILT LEFT    TILT RIGHT         y axis
+TILTED                          no axis dominant (0.70 = cos 45°)
+```
+
+`EDGE UP/DOWN` and `SIDE UP/DOWN` are gone: geometrically true, useless to a
+wearer. **`imu_posture()` lives in `ports/twatchultra/main/imu_posture.c`, has no
+ESP-IDF dependencies, and is shared by the window and the shell** — so
+`imu accel` printing `posture FACE UP` verifies the vocabulary without opening a
+window. `tests/test_imu_posture.c` pins all of it (14 checks), including the
+sign of x against the operator's measured 90° rotation.
 
 **Heading still reads `--`.** Both 69 (on-change) and 70 (wakeup) are subscribed;
 neither delivered a value yet. If they never do, question `on_ori()`'s payload
@@ -532,7 +547,8 @@ measurement about one game and one ROM.
 ## Backups taken and verified
 
 ```
-imu-window-2026-11-17-1315.bin       16,777,216 B   CURRENT
+imu-window-2026-11-17-1315.bin       16,777,216 B   STALE by one rename
+   (predates entry 49; the image on the board is newer)
    sha256 1325c673bb8dca1be00b98a1772f0b4dc79491b7c6423538f9090f8ddea97557
    app 0x20000, module text 0xC00000, module data 0xE00000 -- all byte-identical
    verify OK with the board in the stub; board came back. IMU window + firmware.

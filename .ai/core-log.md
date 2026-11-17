@@ -1,3 +1,33 @@
+## 49 COMMIT Unreleased 2026-11-17T13:55:00-07:00
+
+#### Coming From:
+
+Unreleased 9f8285a
+
+#### Purpose:
+
+Rename the posture states to describe what the wearer does rather than which edge of the case is low, at the operator's request.
+
+#### Outcome:
+
+EDGE DOWN BECAME TILT UP, EDGE UP BECAME TILT DOWN, SIDE DOWN BECAME TILT LEFT, SIDE UP BECAME TILT RIGHT; FACE UP and FACE DOWN were left alone because they were already right. THE OLD NAMES WERE GEOMETRICALLY TRUE AND USELESS, which is the whole reason for the change: nobody turns their wrist and thinks about which edge of a rectangle is lowest. TILT UP is what the person did -- they tilted the watch up to look at it -- and that is the operator's own phrasing. The axis signs come from measurement rather than from a datasheet: tipping the watch forward towards the top strap 90 degrees reads x -1.00 and must read TILT UP, which is the same data point entry 47 recorded and now has a second job. THE NAMING RULE MOVED OUT OF THE WINDOW INTO ITS OWN FILE, and that is the structural part of this entry. It was a static function in `apps/imu.c`, which meant the only way to check it was to hold a watch at an angle and look; it is now `ports/twatchultra/main/imu_posture.c`, a file with NO ESP-IDF dependencies, for two reasons. It is a pure function of three floats that decides the only text a person reads, so it belongs in a host test that can walk it exhaustively -- and it did not have one, which is how the wrong names survived a release. And it is now SHARED: `imu_posture()` is what the shell's `imu accel` prints and what the window shows, so the two cannot drift apart on what the watch is doing, and the mapping can be checked over the console rather than through the Start menu. THAT LAST PROPERTY EARNED ITS KEEP IMMEDIATELY. The old names could only be verified by opening a window, and driving the Start menu over serial has now cost three sessions; the new vocabulary prints from the shell, so `imu accel` reading `posture FACE UP` on a watch lying flat is the whole check. A HOST TEST NOW PINS THE VOCABULARY: `tests/test_imu_posture.c`, 14 checks, covering the two flat states, the four tilts, the operator's own two measurements exactly as reported (flat `+0.01 -0.07 +1.00` giving FACE UP, tipped forward `-1.00 0.00 0.00` giving TILT UP), the threshold boundary at 0.70 either side, a diagonal watch reading TILTED rather than being forced into the nearest name, and the no-reading case. Its reason for existing is worth stating: a sign flip in this function would otherwise be noticed only by a person turning their wrist and being confused, which is precisely how the wrong names got shipped. THE API GATE FIRED AND WAS SATISFIED BY RECORDING rather than silenced -- `td_imu_t`, `td_imu_ops_t`, the `imu` field in `td_sysinfo_t` and `td_imu_register` in `td_apps.h` are all additions, four lines in the snapshot. The full host suite is now 44 tests and all pass. A build error cost one cycle and is worth recording as a caution about editing: removing the function by slicing from one marker to the next left a DUPLICATED `on_draw()` and a stale comment block, because the slice boundaries were guessed rather than read. The fix was to print the region and cut precisely.
+
+#### Next Steps:
+
+THE NEWEST BACKUP IS NOW STALE: `imu-window-2026-11-17-1315.bin` predates this rename, so the image on the board is newer than the newest backup. Take another before the next risky change; this one was a string table and a file move, so the risk was low and the operator did not ask for one. HEADING REMAINS THE ONE DASHED FIELD on the window and is the next real piece of work: both orientation sensors are subscribed and neither has delivered, so if a nudge of the watch produces nothing, `on_ori()`'s payload layout is what to question -- it assumes four int16 quaternion at 2^14 followed by three int16 Euler at 2^8, taken from the driver rather than from Bosch's documentation. THE GESTURE SENSORS ARE UNCHANGED IN REACH AND STILL THE PRIZE: 61 pickup-gesture, 67 wrist-tilt-gesture, 75 stationary and 77 motion all run on the Fuser core. ONE THING THE POSTURE WORK MAKES EASIER AND IS WORTH NOTICING: a wrist-raise-to-wake needs exactly the vocabulary this entry just put under test -- "is the watch being raised" is a posture question, so the naming is no longer decoration but the beginning of a feature. NOTHING REGRESSED: the app is 0x2e7e90 with 1,000 KB free, both Bluetooth pairings are present, the four-region layout from entry 43 stands, `music` still decodes through the module, and `imu`, `imu accel` and `imu rate` all work. Carried forward unchanged from entries 40 to 48: `update.url` is unset, `third_party/tdsh` is pinned, the launchers have no installer, the Music progress bar still needs `total_samples`, `modload` still holds one blob, the guest stacks are still internal DRAM, the first IMU start blocks the desktop for about 3.3 s while the firmware uploads, and `.ai/core.md`'s Purpose line still calls this a port of Linux.
+
+#### Files Modified:
+
+None in this repository; the fork carries the change at f14626e (apps/imu.c, ports/twatchultra/main/imu_posture.c, imu.c, imu.h, main/CMakeLists.txt, tests/test_imu_posture.c, CMakeLists.txt, include/tinydesk/td_sysinfo.h, api/tinydesk.api).
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: PARTIAL (FACE UP confirmed over the console; the four tilt names are pinned by a host test but have not been seen on the glass since the rename)
+
+---
+
 ## 48 COMMIT Unreleased 2026-11-17T13:30:00-07:00
 
 #### Coming From:
