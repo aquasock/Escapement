@@ -1,3 +1,33 @@
+## 39 COMMIT Unreleased 2026-11-16T23:05:00-07:00
+
+#### Coming From:
+
+Unreleased 98a0b06
+
+#### Purpose:
+
+Check entry 38 on the watch, whose one unverified item was the move itself: a controller paired in the keyboard slot being re-paired into the controller slot, and whether that move survives a reboot.
+
+#### Outcome:
+
+THE MOVE WORKED AND IT SURVIVED A REBOOT, which was the part still open. The operator paired the pad into the Controller slot from the window, and `bt` then read `controller ready, Xbox Wireless Controller 78:86:2E:BB:45:79 (267 reports)`, `paired with Xbox Wireless Controller 78:86:2E:BB:45:79, reconnects by itself`, with the window showing `Controller  ready, Xbox Wireless Controller` and `last: connected:` and the keyboard slot reduced to `idle, not paired`. So the duplicate-slot clear in `ops_pair()` did what it was written to do -- the old slot was emptied, its connection closed, and the bond kept, since the pad came back without being put into pairing mode a second time. THE REBOOT IS THE TEST THAT MATTERS AND IT PASSED: after a hard reset the board reported the same arrangement, `2 stored in the board's NVS`, the keyboard still empty, and the controller not merely remembered but ALREADY RECONNECTED on its own -- `controller ready, ... (29 reports)` within the first half-minute of boot. That exercises the 4-slot NVS blob in both directions at once: written in the new wider format by the move, and read back by `slots_load()` on the next boot, which is the function that would have silently zeroed everything had it kept demanding the old 3-slot size. THE REPORT COUNTER IS THE PROOF OF A LIVE LINK RATHER THAN A REMEMBERED ONE, and it needs a caveat to be honest: it read 267 before the reboot and 29 afterwards, having reset with the connection, and then stopped climbing -- because an idle gamepad sends no reports. Its being greater than zero after a boot shows input arrived; whether it keeps arriving as the pad is used is the operator's to see, and the window's `last:` line is where that shows up. THE WINDOW FITS WITH FOUR SLOTS. Captured on the glass: values start in the column after "Controller" rather than against it, the three paired slots show their buttons and the empty keyboard slot shows only `[ Pair... ]`, and the message line `Xbox Wireless Controlle is ready` sits on row 24 with the frame closing on 25 -- so the recounting of rows in entry 38 was right about the 25-row desktop rather than the 26 first assumed.
+
+#### Next Steps:
+
+Nothing is outstanding from entry 38. Two things carry forward unchanged from entries 37 and 38 and are worth keeping in view rather than repeating in full: the app image has 0xC1A0 bytes free in a 3 MB OTA slot, so the next feature that needs real space has to trade something out, and the guest stacks in `tama.c`, `nes.c`, `gbcbench.c` and `pmbench.c` are still internal DRAM, which has already failed twice for that reason. The controller slot opens one new question and no work: a gamepad now reaches the desktop's input path the same way a keyboard does, and whether the emulators take advantage of it -- the NES and Pokemon Mini draw their own d-pads and the NES already accepts a BLE Xbox pad through `gamepad.c` -- is a separate piece of work from pairing. Nothing about that is needed for the slot to be correct.
+
+#### Files Modified:
+
+None.
+
+#### Status:
+
+- Build: N/A
+- Deployment: N/A
+- User Test: PASS
+
+---
+
 ## 38 COMMIT Unreleased 2026-11-16T22:45:00-07:00
 
 #### Coming From:
