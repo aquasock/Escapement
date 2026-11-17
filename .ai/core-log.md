@@ -1,3 +1,33 @@
+## 35 COMMIT Unreleased 2026-11-16T19:56:37-07:00
+
+#### Coming From:
+
+Unreleased 5021959
+
+#### Purpose:
+
+Launch Pokemon Pinball on the Pokemon Mini emulator, and take the 16 MiB backup owed from entry 34.
+
+#### Outcome:
+
+POKEMON PINBALL RUNS, AND IT NEEDED THE SAME FIX THE GAME BOY DID. `pm start` with no argument is the whole command: the default ROM is `/sd/media/min/homebrew/Pokemon Pinball Mini (USA, Europe).min`, resolved through `sd_media()`. The first attempt printed `pm: no task` -- `PM_STACK` is 10,240 bytes of internal DRAM and the largest internal block measured 9,728 with the desktop up and a Terminal open, so the allocation could not succeed. The identical shape as entry 34, one commit later, which is the useful part: this is a CLASS of failure rather than two coincidences, and the third emulator to gain a task would have hit it too. The task moved to PSRAM with `xTaskCreatePinnedToCoreWithCaps(..., MALLOC_CAP_SPIRAM)` and its exit became `vTaskDeleteWithCaps()`. The safety argument is the same one and is worth keeping specific rather than general: this task runs PokeMini and nothing else, `load_rom()` happens on the caller's task before it starts, the emulator's state and frame buffers are PSRAM, and the save path snapshots here and writes elsewhere -- so the task opens no file and maps no partition, and never disables the cache a PSRAM stack lives behind. Verified on hardware: `pm: running /sd/media/min/homebrew/Pokemon Pinball Mini (USA, Europe).min (524288 bytes)` and the operator confirmed it on the glass. THE MAIN-BRANCH HARNESS BUG OF THIS WHOLE STRETCH WAS FOUND HERE AND IS WORTH RECORDING. Escape sequences were being written one byte per 100 ms, and the desktop's parser gives up on a lone `ESC` after a few tens of milliseconds -- so every "F10" was arriving as Escape (which CLOSES the menu) followed by the literal text `[21~`. That is why the Start menu kept closing instead of opening, why menus were found scrolled to the bottom, and why several earlier conclusions about Enter not working were wrong: Enter works, and the menu was being dismissed before it could be used. The fix is one write per sequence. TWO SMALLER HARNESS FACTS CONFIRMED RATHER THAN ASSUMED: the watch re-enumerates between `ttyACM0` and `ttyACM1` and `usb-...80:45:6B:46:DF:54-if00` identifies it while `/dev/ttyACM0` was the TinyTang CDC; and the display mirror is not a frame counter -- it sent 32 bytes per two-second window while Pokemon Pinball was visibly running, because an emulator blits straight to the framebuffer and never touches the text-cell model, so mirror traffic says nothing about whether a picture is animating. THE OWED BACKUP WAS TAKEN. `pinball-gb-music-2026-11-16-1952.bin`, 16,777,216 bytes, sha256 `e7cd9c68d9274fa7`, and its three code regions were each compared byte-for-byte against the build that produced them: the app at 0x10000 (`b6f1ce70`), the module's text at 0xE00000 (`2ef7b97a`) and its rodata at 0xF00000 (`ff665897`) all match. That closes entry 34's outstanding item.
+
+#### Next Steps:
+
+THE CLASS IS THE THING TO ACT ON, not these two instances. Two emulators have now failed with "no task" because a guest stack was internal DRAM on a board whose internal RAM is the scarce pool, and every other guest task in the port is a candidate: `tama.c`, `nes.c`, `gbcbench.c` and `pmbench.c` should be swept for `xTaskCreatePinnedToCore` with a large stack, and the rule written down is that a task which runs an emulator and touches no file belongs on PSRAM. `nes.c` at least already runs on this board, so its allocations fit today -- but that is a measurement about one game with one ROM, not a guarantee for the next one, and the sweep is cheap. The remaining emulator gaps are unchanged: the Game Boy and Pokemon Mini ports leave their two margin columns unassigned, and the NES is still about 21 fps because its blit makes four passes over PSRAM. Beyond the emulators, three items stand from entries 32 to 34 -- a progress bar needs `total_samples` in the module's handle, `modload` still holds exactly one blob, and `uac2.c` and `usbhost.c` create caps-aware tasks that do not self-delete today but would need `vTaskDeleteWithCaps()` if they ever did.
+
+#### Files Modified:
+
+- ports/twatchultra/main/pm.c
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: PASS
+
+---
+
 ## 34 COMMIT Unreleased 2026-11-16T19:46:24-07:00
 
 #### Coming From:
