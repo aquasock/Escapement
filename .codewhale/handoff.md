@@ -1,4 +1,4 @@
-# Handoff — Escapement / TinyDesk on T-Watch Ultra, 2026-11-17T19:45
+# Handoff — Escapement / TinyDesk on T-Watch Ultra, 2026-11-17T21:45
 
 Orientation, not authority. **Verify before acting on it.** The files, the
 coredump partition and the board are the fact; this file is a claim.
@@ -15,15 +15,15 @@ are equal, and **the app is at 0x20000, not 0x10000**. The flash is four equal
 
 ## Where things live
 
-- Project-control repo: `/run/media/vash/GIT/Escapement`, `main`, at `e5adf45`
-  (core-log **entry 54**). `.ai/core.md` is RESTRICTED — do not edit without an
+- Project-control repo: `/run/media/vash/GIT/Escapement`, `main`, at `6b6775b`
+  (core-log **entry 55**). `.ai/core.md` is RESTRICTED — do not edit without an
   explicit request. Reference records live in `.ai/core-reference.md`.
 - **`.ai/core.md`'s Purpose line is stale and deliberately untouched.** It says
   "Escapement is a port of linux". The project is TinyDesk; the Linux line
   closed 2026-11-11. Fixing it needs the operator's word, because that file may
   only be edited when asked.
 - **Active code is the fork: `/run/media/vash/GIT/tinydesk-twatch`, branch
-  `t-watch-ultra`, clean at `e7571a5`.** Push to `fork`
+  `t-watch-ultra`, clean at `539facd`.** Push to `fork`
   (`aquasock/tinydesk`) only — **never** `origin` (upstream
   `tinydesk-project/tinydesk`).
 - `/run/media/vash/ROCKBOX` is the operator's source backup. **Never write to it
@@ -407,7 +407,38 @@ than the two packed structs account for — log all 11, not the first 6.
 **Patterns are volatile.** The firmware is uploaded to RAM each boot, so LEARN AND
 DETECT MUST HAPPEN IN THE SAME BOOT.
 
-## DATA INJECTION — IMPLEMENTED, ACCEPTS DATA, DOES NOT REACH THE SENSOR (entry 54)
+## DATA INJECTION — SETTLED: IT REACHES NOTHING (entry 55)
+
+**The question is closed. Do not reopen it by guessing another framing.**
+
+```
+imu watch <seconds> <shape>     inject +7.32 g on Z, watch the accelerometer
+```
+
+A value gravity cannot produce, and a RANGE over thousands of samples so a single
+hit would count. Sensor running throughout.
+
+```
+shape 4  driver ids 76/79   971 sent, 762 samples, z 0.89..0.92, 0 above 4 g
+shape 1  floats+timestamp   728 sent, 610 samples, z 0.89..0.90, 0 above 4 g
+shape 2  inject ids 55/58   777 sent, 611 samples, z 0.89..0.89, 0 above 4 g
+```
+
+The sensor keeps delivering, so injection does not suppress it — it simply does
+nothing. **This negative is stronger than the KLIO ones**: KLIO reports a
+summary that can stay at zero for a dozen reasons; the accelerometer reports the
+sample itself, so this is about the data path and nothing else.
+
+**The one explanation left is Bosch's own**: `dinject`'s help says *"Ensure that
+the requisite application specific Data Injection firmware is loaded"*. A
+different image — and it would REPLACE the KLIO image, not add to it. Getting it
+means Bosch's toolchain. **That is a decision for the operator, not a next step.**
+
+**If the goal is only to classify motion**, the ESP32-S3 itself is the honest
+answer: 985 KB of app slot free, vector instructions, six channels already read
+reliably at 97 Hz.
+
+## HOW THE COMMAND PATH ACTUALLY BEHAVES (entry 54, still true)
 
 **Entry 51's "inert" verdict was wrong, and the method was blind.** `bhy2_inject_data()`
 ends at `bhy2_hif_exec_cmd_generic()`, which writes to `CHAN_CMD` and returns
@@ -736,7 +767,14 @@ measurement about one game and one ROM.
 ## Backups taken and verified
 
 ```
-imu-probe-2026-11-17-1401.bin       16,777,216 B   THE CURRENT BOARD
+inject-settled-2026-11-17-1507.bin   16,777,216 B   THE CURRENT BOARD
+   sha256 a47f365950338e61e78f5987e8030781a9992fac887db3f26bfb7b134d71fe21
+   app 0x20000 = fda18b2a0e661f79, module text 0xC00000 = 6da1645b4b962ccc,
+   module data 0xE00000, IMU fw 0xE10000 -- all four byte-identical to the build.
+   verify OK, board came back. Has `imu watch`, `klio inject` with the motion as
+   arguments, and the trace-to-file behaviour.
+
+imu-probe-2026-11-17-1401.bin       STALE -- six app reflashes behind
    sha256 b37985bd95084e9aab08b54bddd299e12e4175d9c79af29be217b8b68317c585
    app 0x20000, module text 0xC00000, module data 0xE00000, IMU fw 0xE10000
    -- all four byte-identical to the build. verify OK, board came back.
@@ -946,14 +984,16 @@ did NOT work from the harness; `Esc`, F10 and typed commands did.
    piece), **a UI** (it is a shell command), and **tuning** the four knobs
    `RECOGNITION_SENSITIVITY`, `RECOGNITION_RESPONSIVNESS`, `LEARNING_SPEED`,
    `LEARNING_SIMILARITY_THRESHOLD`.
-8. **Where does accepted injected data go?** Entry 54 shows `INJECT_DATA` is
-   implemented and accepts a payload silently once step-by-step mode is set —
-   but it does not reach the accelerometer output or the FIFO. **The next probe
-   is whether it reaches the ALGORITHMS**: run KLIO learning while injecting a
-   synthetic motion stream and see whether progress moves with nobody touching
-   the watch. Small experiment, large payoff, and it is the operator's actual
-   use case. If it fails, feeding the AI engine from a file really does need our
-   own code on the Fuser core — say so plainly before anyone plans around it.
+8. **Data injection is SETTLED — it reaches nothing.** Entry 55: +7.32 g
+   injected, three framings, ~2,000 samples watched, not one above 4 g. Not the
+   sensor output and not KLIO. **Do not reopen this by guessing another
+   framing** — five framings across two days agree, and the accelerometer test
+   does not depend on framing at all.
+   - The only route left is an **application-specific Data Injection firmware**,
+     which Bosch's own help names and which would **replace** the KLIO image.
+     That needs Bosch's toolchain and an operator decision. **Not a next step.**
+   - If the goal is only "classify motion", do it on the **ESP32-S3**: 985 KB
+     free, vector instructions, six channels already read at 97 Hz.
 9. **`check_addr_fresh.py` compares image size, not `linked_host`.** That symbol
    moves on nearly every build regardless of size, so a code-only rebuild could
    still ship a stale one — a runtime diagnostic now, but reading the symbol out
