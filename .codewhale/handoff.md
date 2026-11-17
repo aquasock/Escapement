@@ -1,4 +1,4 @@
-# Handoff — Escapement / TinyDesk on T-Watch Ultra, 2026-11-16T21:40
+# Handoff — Escapement / TinyDesk on T-Watch Ultra, 2026-11-16T22:45
 
 Orientation, not authority. **Verify before acting on it.** The files, the
 coredump partition and the board are the fact; this file is a claim.
@@ -6,20 +6,22 @@ coredump partition and the board are the fact; this file is a claim.
 ## One line
 
 **`music` plays FLAC on the built-in speaker with the decoder running out of the
-`modules` partition, and the inline decoder is deleted — 32 KB of app image
-recovered. A 5:58 track decoded at 15792504 frames, 0 errors, 0 short writes.**
+`modules` partition. Bluetooth now has a fourth slot for a controller, and a
+gamepad can no longer be paired into the keyboard slot — both old pairings
+survived the change. Moving the Xbox pad into its new slot is the operator's
+next tap.**
 
 ## Where things live
 
-- Project-control repo: `/run/media/vash/GIT/Escapement`, `main`, at `bee1216`
-  (core-log **entry 37**). `.ai/core.md` is RESTRICTED — do not edit without an
+- Project-control repo: `/run/media/vash/GIT/Escapement`, `main`, at `fa9b6bd`
+  (core-log **entry 38**). `.ai/core.md` is RESTRICTED — do not edit without an
   explicit request. Reference records live in `.ai/core-reference.md`.
 - **`.ai/core.md`'s Purpose line is stale and deliberately untouched.** It says
   "Escapement is a port of linux". The project is TinyDesk; the Linux line
   closed 2026-11-11. Fixing it needs the operator's word, because that file may
   only be edited when asked.
 - **Active code is the fork: `/run/media/vash/GIT/tinydesk-twatch`, branch
-  `t-watch-ultra`, clean at `5021959`.** Push to `fork`
+  `t-watch-ultra`, clean at `869cbfe`.** Push to `fork`
   (`aquasock/tinydesk`) only — **never** `origin` (upstream
   `tinydesk-project/tinydesk`).
 - `/run/media/vash/ROCKBOX` is the operator's source backup. **Never write to it
@@ -97,6 +99,44 @@ python $IDF_PATH/tools/idf.py -C ports/twatchultra -B ports/twatchultra/build bu
 ```
 
 App size: `0x2e3090`, 53 KB free in `ota_1`.
+
+## THE CONTROLLER SLOT — what it took, and the trap in it
+
+```
+TD_BT_SLOT_CONTROLLER = 3, TD_BT_SLOTS = 4
+TD_BT_KIND_GAMEPAD    appearance 0x03C3 (joystick) or 0x03C4 (gamepad)
+```
+
+The Xbox pad was in the **keyboard** slot because a gamepad advertises HID and
+no keyboard appearance, which made it an "other HID device" — offered to any
+slot. `collect()` now withholds a GAMEPAD from every slot but the controller's,
+so the trap is gone, not just moved.
+
+**The silent hazard: `slots_load()` demanded `n == sizeof(s_slots)`.** Four
+slots make the array bigger, so that check would fail and zero the blob — both
+pairings gone, no error. It now accepts any whole number of slots (the new one
+is appended, so the old blob is a prefix) and clears only the tail. Verified:
+the watch still reports **2 stored in the board's NVS** after two flashes.
+
+**Moving a device:** `ops_pair()` clears any OTHER slot holding the same
+address and closes its connection, but keeps the bond — deleting it would force
+the controller back into pairing mode. A saved slot holds an address and a
+name, never a kind, so storage cannot identify the pad in the keyboard slot;
+re-pairing it into the controller slot is what moves it. **That move has not
+been observed** — it needs the pad awake and in pairing mode.
+
+**NimBLE:** `CONFIG_BT_NIMBLE_MAX_CONNECTIONS` 3 → 4. The board sets
+`MEM_ALLOC_MODE_EXTERNAL`, so the extra connection is PSRAM, not internal RAM.
+
+**Rows are counted, not assumed.** Client height on the watch, measured:
+**23 rows** (26, less the taskbar, less frame+title), **22** with the title bar
+set to Large. Slots are top-anchored at row 3; the scan section is anchored to
+the bottom and gives up list rows (4 at 23, 3 at 22). `COL` went 11 → 12
+because "Controller" is ten characters and read "Controlleridle".
+
+`api_stable` failed on the two enums — the gate working. Re-recorded with
+`--record`; the diff is two added lines. `TD_VERSION` stays 0.4.0 (semver rules
+are from 1.0, and the text lives in six port CMakeLists).
 
 ## Driving the watch's console
 
@@ -371,6 +411,12 @@ did NOT work from the harness; `Esc`, F10 and typed commands did.
 4. **`__assert_func`** routes through the API table and returns rather than
    halting. Reviewed, **never exercised**.
 5. **No picker, queue, seek or progress display.** `music` takes a path.
+
+6. **Pair the Xbox controller into the Controller slot once**, from Bluetooth →
+   Controller → Pair… with the pad in pairing mode. It is paired in the keyboard
+   slot today (reconnecting off), so this is the one step that closes entry 38.
+7. **The app image is at 2% free** (0x2e3e60 in a 3 MB OTA slot). The next
+   feature needing real space has to trade something out.
 
 ## Out of scope by instruction
 
