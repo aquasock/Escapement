@@ -1,4 +1,4 @@
-# Handoff — Escapement / TinyDesk on T-Watch Ultra, 2026-11-17T18:10
+# Handoff — Escapement / TinyDesk on T-Watch Ultra, 2026-11-17T19:45
 
 Orientation, not authority. **Verify before acting on it.** The files, the
 coredump partition and the board are the fact; this file is a claim.
@@ -15,15 +15,15 @@ are equal, and **the app is at 0x20000, not 0x10000**. The flash is four equal
 
 ## Where things live
 
-- Project-control repo: `/run/media/vash/GIT/Escapement`, `main`, at `473a988`
-  (core-log **entry 53**). `.ai/core.md` is RESTRICTED — do not edit without an
+- Project-control repo: `/run/media/vash/GIT/Escapement`, `main`, at `e5adf45`
+  (core-log **entry 54**). `.ai/core.md` is RESTRICTED — do not edit without an
   explicit request. Reference records live in `.ai/core-reference.md`.
 - **`.ai/core.md`'s Purpose line is stale and deliberately untouched.** It says
   "Escapement is a port of linux". The project is TinyDesk; the Linux line
   closed 2026-11-11. Fixing it needs the operator's word, because that file may
   only be edited when asked.
 - **Active code is the fork: `/run/media/vash/GIT/tinydesk-twatch`, branch
-  `t-watch-ultra`, clean at `259513c`.** Push to `fork`
+  `t-watch-ultra`, clean at `e7571a5`.** Push to `fork`
   (`aquasock/tinydesk`) only — **never** `origin` (upstream
   `tinydesk-project/tinydesk`).
 - `/run/media/vash/ROCKBOX` is the operator's source backup. **Never write to it
@@ -407,7 +407,65 @@ than the two packed structs account for — log all 11, not the first 6.
 **Patterns are volatile.** The firmware is uploaded to RAM each boot, so LEARN AND
 DETECT MUST HAPPEN IN THE SAME BOOT.
 
-## DATA INJECTION — DEAD ON THIS FIRMWARE (entry 51)
+## DATA INJECTION — IMPLEMENTED, ACCEPTS DATA, DOES NOT REACH THE SENSOR (entry 54)
+
+**Entry 51's "inert" verdict was wrong, and the method was blind.** `bhy2_inject_data()`
+ends at `bhy2_hif_exec_cmd_generic()`, which writes to `CHAN_CMD` and returns
+`BHY2_OK` when the I2C write completes — it never reads a status response. So
+`rc 0` meant "the bytes left the ESP32" and nothing more.
+
+What the status channel actually says:
+
+```
+imu param 0900                        rc 0, 4 B      positive control: it answers
+imu cmd ffee     unknown id           status 0x000f CMD ERR, `ee ff 05 00`  reason 05
+imu cmd 0008     INJECT_DATA bare     status 0x000f CMD ERR, `08 00 01 00`  reason 01
+imu cmd 0007 02000000  step-by-step   accepted silently
+imu cmd 0008 <payload> after that     ACCEPTED SILENTLY
+```
+
+**So the command exists, parses, and does not error.** Two distinct refusal
+reasons for two distinct failures, which is what makes reason 01 not "unknown
+command".
+
+**What is still true: accepted data does not reach the accelerometer.** Sensor
+stopped, FIFO verified empty by a raw header read, a 7-byte frame (one-byte
+sensor id `04`, z = +2.5 g) left the FIFO empty and the reading unchanged.
+
+**The open question is where it goes** — most plausibly the ALGORITHM path
+rather than the sensor outputs. That would be exactly the operator's use case:
+run KLIO learning while injecting, see whether progress moves with nobody
+touching the watch. **This is the next probe and it is small.**
+
+### Commands for poking at the part
+
+```
+imu reg                 the documented registers, decoded
+imu reg <hex>           one register
+imu raw <reg> [len]     any register, under the SDK
+imu cmd <id> [payload]  bare command id; then error reg + status channel
+imu status              listen to the status channel alone
+imu param <hex id>      read a parameter (the positive control)
+imu inject [1..6]       one or all payload shapes, with status reporting
+```
+
+### Two defects found here
+
+- **`bhy2_hif_set_inject_data_mode()` clears the async status bit and never
+  restores it.** Every call leaves the part with async status off for the rest
+  of the session (reg 0x06 read 0x00 where boot leaves 0x80). Restored
+  explicitly after the sweep. An SDK defect, invisible until something needs it.
+- **`imu raw` on a FIFO channel hangs the shell task** and needs a hard reset.
+  The channels are not plain registers: read a 4-byte header (word + bytes
+  remaining), then a second read of exactly that length. Fixed.
+
+### The hazard that bit twice this cycle
+
+**`imu accel` can block the shell task** — the sensor-configuration call blocks
+and takes the terminal with it; two hard resets this session. It does not
+reproduce every time. Prefer `imu rate`, which stops the sensor when it finishes.
+
+## ENTRY 51's superseded note — kept for the record
 
 **Six payload shapes, all accepted by the protocol, all inert.** Including the
 **28-byte float frame** the algorithm itself consumes (`bhy2_klio_log_frame_t`:
@@ -678,11 +736,16 @@ measurement about one game and one ROM.
 ## Backups taken and verified
 
 ```
-klio-music-2026-11-17-1300.bin       16,777,216 B   THE CURRENT BOARD
-   sha256 a4aeea4a1038d740d7bdc1fa4b79e9927ec7aef5ded75313bc8627fe60405176
+imu-probe-2026-11-17-1401.bin       16,777,216 B   THE CURRENT BOARD
+   sha256 b37985bd95084e9aab08b54bddd299e12e4175d9c79af29be217b8b68317c585
    app 0x20000, module text 0xC00000, module data 0xE00000, IMU fw 0xE10000
    -- all four byte-identical to the build. verify OK, board came back.
-   KLIO learning + recognition, redrawn posture names, music working.
+   KLIO learn + recognise, posture names, music working, and the entry-54
+   instruments (imu reg / raw / cmd / status / param / inject).
+
+klio-music-2026-11-17-1300.bin       STALE -- five app rebuilds behind
+   sha256 a4aeea4a1038d740d7bdc1fa4b79e9927ec7aef5ded75313bc8627fe60405176
+   Has no `imu cmd`, `imu raw` or `imu param`; predates the injection findings.
 
 klio-2026-11-17-1247.bin             16,777,216 B   same app, STALE MODULES
    sha256 c850ae2c25a5e032b20981cc3ce6afe0ecbe2c23367a7b1931efefde1df87d3b
@@ -873,7 +936,7 @@ did NOT work from the harness; `Esc`, F10 and typed commands did.
    halting. Reviewed, **never exercised**.
 5. **No picker, queue, seek or progress display.** `music` takes a path.
 
-6. **The app image is 3,054,112 B with 1,009,120 B (985 KiB) free** in its
+6. **The app image is 3,059,616 B with 1,003,616 B (980 KiB) free** in its
    0x3E0000 slot — entry 43 bought that room. That is FLASH for the image, not
    RAM; both slots are 0x3E0000 so it is the budget either way.
 7. **KLIO is a demonstration, not a feature.** Three things stand between it and
@@ -883,10 +946,14 @@ did NOT work from the harness; `Esc`, F10 and typed commands did.
    piece), **a UI** (it is a shell command), and **tuning** the four knobs
    `RECOGNITION_SENSITIVITY`, `RECOGNITION_RESPONSIVNESS`, `LEARNING_SPEED`,
    `LEARNING_SIMILARITY_THRESHOLD`.
-8. **Host-side data injection is inert on this firmware** (entry 51, six payload
-   shapes). The operator's "stream arbitrary x,y,z in" version of the demo cannot
-   be built here; the remaining avenues are a different firmware image or Bosch's
-   own toolchain, both large. Say this plainly before anyone plans around it.
+8. **Where does accepted injected data go?** Entry 54 shows `INJECT_DATA` is
+   implemented and accepts a payload silently once step-by-step mode is set —
+   but it does not reach the accelerometer output or the FIFO. **The next probe
+   is whether it reaches the ALGORITHMS**: run KLIO learning while injecting a
+   synthetic motion stream and see whether progress moves with nobody touching
+   the watch. Small experiment, large payoff, and it is the operator's actual
+   use case. If it fails, feeding the AI engine from a file really does need our
+   own code on the Fuser core — say so plainly before anyone plans around it.
 9. **`check_addr_fresh.py` compares image size, not `linked_host`.** That symbol
    moves on nearly every build regardless of size, so a code-only rebuild could
    still ship a stale one — a runtime diagnostic now, but reading the symbol out
