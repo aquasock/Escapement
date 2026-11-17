@@ -1,3 +1,33 @@
+## 34 COMMIT Unreleased 2026-11-16T19:46:24-07:00
+
+#### Coming From:
+
+Unreleased 0644fef
+
+#### Purpose:
+
+Boot the Game Boy Color emulator with Zelda running at the operator's request, which turned up a start failure that had nothing to do with the emulator.
+
+#### Outcome:
+
+ZELDA RUNS, AND IT COULD NOT BE STARTED FROM A SHELL UNTIL ONE LINE CHANGED. The operator asked for the GBC emulator with Zelda, and the ROM is the firmware's own default -- `Legend of Zelda, The - Link's Awakening DX (USA, Europe) (Rev 2) (SGB Enhanced) (GB Compatible).gbc` under `/sd/media/gbc/homebrew/`, resolved through `sd_media()` with `/sd/game.gbc` as the flat fallback -- so `gb start` with no argument is the whole command. The first attempt printed `gb: no guest task` and ran nothing. THE CAUSE WAS INTERNAL DRAM AND THE MESSAGE WAS HONEST. The guest task's stack was 8 KB of internal DRAM, and with the desktop up and a Terminal open internal free measured 25,395 bytes with the largest block 9,728 -- an 8 KB stack plus its TCB does not fit, so `xTaskCreatePinnedToCore()` returned an error and the code said so. PSRAM had 7.7 MB free. THE FIX IS THE RIGHT ONE FOR A REASON WORTH STATING RATHER THAN A TRADE. The guest task runs gnuboy and nothing else: the cartridge and both frame buffers are already PSRAM allocations, it opens no file and maps no partition, so it never disables the cache that a PSRAM stack lives behind -- the constraint that forced `modload_prepare()` and every `/fs` read onto specific tasks does not apply to it. `xTaskCreatePinnedToCoreWithCaps(..., MALLOC_CAP_SPIRAM)` moves the stack where the memory actually is, and the delete became `vTaskDeleteWithCaps()` to match, because plain `vTaskDelete()` would leak the PSRAM stack exactly as the music player did in entry 33. The save task, which does write to `/fs`, is left on internal RAM deliberately. VERIFIED ON HARDWARE: `gb start` loads the cartridge, reports `gnuboy_load_sram: Loaded SRAM bank 0..2` and `gb: save restored from /sd/saves/gbc/...sav`, and `gb status` then reads `running=1 frames=1068 blits=1066 dropped=0 audio=on 43691Hz` with the panel showing pixels rather than text. The operator played it and passed it. TWO SMALLER THINGS WERE LEARNED ABOUT THE HARNESS AND ARE RECORDED BECAUSE THEY MISLED ME HERE. The Start menu is open at boot and `Enter` does open the selected app -- but the screen mirror only sends CHANGED cells, so the frame captured immediately after Enter still showed the menu and I twice concluded the key had not landed when the Terminal was in fact open and focused. And a command typed into a Terminal that has just opened is lost: the pause has to be long enough for the window to take focus, not merely for the frame to paint. The menu itself was confirmed to have changed as intended in entry 33 -- `>> Music` now appears at the bottom of the list, immediately before the separator and the user's own `.tdlink` entries. NO BACKUP WAS TAKEN THIS CYCLE AND THAT IS OWED: the board re-enumerated to `/dev/ttyACM0` and a 16 MiB read needs a reset, which would have ended a game the operator was playing. The previous image `music-ui-2026-11-16-1921.bin` (sha256 `e7bc1c62`) holds everything except this one app-image change, and that change is a single call in `gb.c` reproducible from `0644fef`.
+
+#### Next Steps:
+
+A 16 MiB backup is owed at the next convenient reset, since this cycle's image is on the board but only the previous one is archived. Beyond that, three things stand from entries 32 and 33 and none is affected by this change: the progress bar needs `total_samples` in the module's handle, the module loader still holds exactly one blob, and `uac2.c` and `usbhost.c` create tasks with `xTaskCreateWithCaps()` that do not self-delete today but would need `vTaskDeleteWithCaps()` if they ever did. The Game Boy's own known gaps are unchanged and unchanged by this: the two margin columns are unassigned in the emulator ports, and the NES remains at roughly 21 fps because of its blit. One thing this cycle makes worth checking when convenient: `gb start` now spends PSRAM on a stack that it did not before, and the measurement that would close the loop is internal free with the emulator running -- which was 25,395 before the change and should be unchanged after, since the stack is no longer internal.
+
+#### Files Modified:
+
+- ports/twatchultra/main/gb.c
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: PASS
+
+---
+
 ## 33 COMMIT Unreleased 2026-11-16T19:25:27-07:00
 
 #### Coming From:
