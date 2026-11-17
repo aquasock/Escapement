@@ -1,4 +1,4 @@
-# Handoff — Escapement / TinyDesk on T-Watch Ultra, 2026-11-17T07:30
+# Handoff — Escapement / TinyDesk on T-Watch Ultra, 2026-11-17T08:00
 
 Orientation, not authority. **Verify before acting on it.** The files, the
 coredump partition and the board are the fact; this file is a claim.
@@ -7,20 +7,20 @@ coredump partition and the board are the fact; this file is a claim.
 
 **`music` plays FLAC on the built-in speaker with the decoder running out of the
 `modules` partition. Bluetooth has a controller slot and the pad lives there.
-Both TinyDesk 0.5.2 fixes are in — the Store divide-by-zero and the held
-descriptors 0-2. NVS is 24 KB and running with one free page of the six.**
+Both TinyDesk 0.5.2 fixes are in. NVS is 64 KB now (was 24 KB) and the OTA slots
+are equal. **The app is at 0x20000, not 0x10000.**
 
 ## Where things live
 
-- Project-control repo: `/run/media/vash/GIT/Escapement`, `main`, at `7f3ce38`
-  (core-log **entry 40**). `.ai/core.md` is RESTRICTED — do not edit without an
+- Project-control repo: `/run/media/vash/GIT/Escapement`, `main`, at `705199e`
+  (core-log **entry 41**). `.ai/core.md` is RESTRICTED — do not edit without an
   explicit request. Reference records live in `.ai/core-reference.md`.
 - **`.ai/core.md`'s Purpose line is stale and deliberately untouched.** It says
   "Escapement is a port of linux". The project is TinyDesk; the Linux line
   closed 2026-11-11. Fixing it needs the operator's word, because that file may
   only be edited when asked.
 - **Active code is the fork: `/run/media/vash/GIT/tinydesk-twatch`, branch
-  `t-watch-ultra`, clean at `44f87fa`.** Push to `fork`
+  `t-watch-ultra`, clean at `4ca882e`.** Push to `fork`
   (`aquasock/tinydesk`) only — **never** `origin` (upstream
   `tinydesk-project/tinydesk`).
 - `/run/media/vash/ROCKBOX` is the operator's source backup. **Never write to it
@@ -81,7 +81,7 @@ the module, flash all three regions.** The guard makes forgetting it a log line.
 ## Flash and build
 
 ```
-app      esptool write_flash 0x10000  build/tinydesk.bin
+app      esptool write_flash 0x20000  build/tinydesk.bin   <-- 0x20000 since entry 41
 .text    esptool write_flash 0xE00000  modules/build/flac.bin
 .rodata  esptool write_flash 0xF00000  modules/build/flac.data.bin
 ```
@@ -99,41 +99,51 @@ python $IDF_PATH/tools/idf.py -C ports/twatchultra -B ports/twatchultra/build bu
 
 App size: `0x2e3090`, 53 KB free in `ota_1`.
 
-## NVS IS THE NEXT REAL CONSTRAINT — measured 2026-11-17
+## NVS: DONE — 64 KB since 2026-11-17 (entry 41)
+
+The 24 KB region was measured and replaced. Before:
 
 ```
-region     24 KB, six 4 KB pages, at 0x9000 0x6000
-in use     5 pages full or active, 1 uninitialised
-entries    420 of 756 slots written, 200 erased
-churn      page sequence numbers 66, 100, 101, 102 -- GC runs continuously
-payload    ~8-11 KB live once duplicates awaiting collection are discounted
+24 KB, six pages: 5 full or active, 1 free
+420 of 756 entry slots written, page sequence numbers 66/100/101/102
 ```
 
-What is in it: **ns10** NimBLE bonds (the keyboard and the controller),
-**ns11** this port's own slot blob (136 bytes = 4 × 34, confirming the
-four-slot format is on the board), **ns1** shell accounts, **ns7** WiFi station,
-**ns8** 1.9 KB of regenerable RF calibration, **ns12** SSH host key, **ns5** AP.
+That is garbage collection with one page to work in, and the failure it heads
+for is silent — `nvs_flash_init()` returns `ESP_ERR_NVS_NO_FREE_PAGES` and
+`app_main()` answers with `nvs_flash_erase()` (`ports/esp_idf/app/main.c:909`):
+accounts, networks and bonds, with no message.
 
-**The failure it is heading for is silent.** When no free page is left,
-`nvs_flash_init()` returns `ESP_ERR_NVS_NO_FREE_PAGES` and `app_main()`
-answers with `nvs_flash_erase()` (`ports/esp_idf/app/main.c:909`) — accounts,
-networks and Bluetooth bonds, with no message. Every other port here uses
-0x10000; only `crowpanel7` matches our 0x6000.
-
-**The change is designed and NOT applied** (it erases state, so it needs the
-operator's word). Nothing above 0x600000 moves:
+Now: **64 KB, 6 pages used and 10 free of 16.** The live on-board table:
 
 ```
-nvs       0x9000   0x10000    phy_init  0x19000  0x1000
-ota_0     0x1A000  0x2F0000   ota_1     0x310000 0x2F0000
-coredump / otadata / storage / modules / moddata -- unchanged
+nvs        0x9000    64K      phy_init   0x19000   4K
+ota_0      0x20000   3008K    ota_1      0x310000  3008K
+coredump   0x600000  64K      otadata    0x610000  8K
+storage    0x620000  8064K    modules    0xE00000  1M
+moddata    0xF00000  1M
 ```
 
-Cost: the new region covers 0xF000-0x19000, which holds `phy_init` and the
-app's first 36 KB, so NVS takes the erase path and both pairings must be redone.
-Avoidable in principle by writing the existing 24 KB blob back into an erased
-region (leaving ten clean pages), but that is a plan, not a measurement.
-An OTA cannot change the partition table: one serial flash with an erase.
+**Nothing above 0x600000 moved**, so no littlefs migration and no module relink.
+The 24 KB at 0x1A000-0x20000 is deliberately unused: two 3008 KB slots ending on
+the coredump boundary start at 0x20000 and 0x310000.
+
+**The old 24 KB blob was restored, not wiped**, so the account, the WiFi
+credentials and both pairings survived. It can be redone from
+`~/twatch-backup/pre-nvs64-2026-11-17-0740.bin` at 0x9000 if ever needed again.
+
+**TWO TRAPS THIS CYCLE PRODUCED, both worth avoiding:**
+- **A CSV edit is not a table change until `partition-table.bin` says so.**
+  After editing `partitions.csv`, `idf.py build` still wrote `0x10000` into
+  `flash_args` and left the OLD `partition-table.bin` in place, despite ninja
+  listing the CSV as a prerequisite. Writing that would have put 64 KB of app
+  image into NVS. `idf.py reconfigure` (after deleting the stale
+  `partition-table.bin`) fixed it. **Read the .bin, not the CSV.**
+- **`erase_flash` would have destroyed `storage`** — the launchers, the shell
+  config, the user's files. The scoped form is
+  `erase_region 0x9000 0x11000` (new NVS + `phy_init` only).
+
+**Reading NVS properly** (the first attempt got nonsense): states are 2-bit
+fields in the page's **bytes 32-63**, entries start at **64**, 126 per page.
 
 **Reading NVS properly** (the first attempt got nonsense): states are 2-bit
 fields in the page's **bytes 32-63**, entries start at **64**, 126 per page.
@@ -316,22 +326,26 @@ measurement about one game and one ROM.
 ## Backups taken and verified
 
 ```
-pinball-fixed-menu-2026-11-16-2134.bin  16,777,216 B   CURRENT
-   sha256 48dd838b1931ce4d4ca49bccf6e51630d14a65484c278cfae660dfde1d014e31
-   app 0x10000 = b6f1ce70   module text 0xE00000 = 2ef7b97a
+nvs64-2026-11-17-0755.bin            16,777,216 B   CURRENT LAYOUT
+   sha256 542396eb749c1c34dae4480a2c87b3a39a5ecfdd54a6551c9f7bfc98daae47d8
+   app 0x20000 = 2822d342   module text 0xE00000 = 741413b9
    module rodata 0xF00000 = ff665897 -- all three byte-identical to the build
-   verify OK (digest matched) with the board held in the stub, board came back
-   HOLDS THE FIXED LAUNCHERS: storage extracted at 0x620000 and mounted with
-   littlefs-python shows /root/Apps/pm.py and tama.py both with
-   `import tinydesk` -- entry 36's device-side edit is in the image.
-pinball-gb-music-2026-11-16-1952.bin    16,777,216 B
-   sha256 e7cd9c68d9274fa7
-   same three regions; PREDATES the pm.py fix (littlefs only)
+   verify OK with the board held in the stub; board came back
+   NVS 64 KB layout, both pairings and the account present.
+
+pre-nvs64-2026-11-17-0740.bin        16,777,216 B   THE OLD LAYOUT
+   sha256 26e67e981c636711a136800a490c66696a157ddd927c8e9eaaec8a1d9e95096b
+   app at 0x10000, nvs 24 KB. The only image in the OLD layout, so the only
+   way back to it -- and where the 24 KB NVS blob lives if it is wanted again.
+
+pinball-fixed-menu-2026-11-16-2134.bin
+   sha256 48dd838b1931ce4d4ca49bccf6e51630d14a65484c278cfae660dfde1d014e31
+   old layout, predates both 0.5.2 fixes.
 ```
 
-**A full-image flash is the one thing `scripts/apps/` cannot survive**, so this
-backup is the only image that carries the working launchers. Untested: restoring
-it. `esptool write_flash 0 0x1000000` is ~6 minutes and has never been run here.
+**Take a new one after any layout change** — an image in the old layout no
+longer matches the partition table on the board, so restoring it is a rollback
+rather than a backup.
 
 ## THE HARNESS BUG THAT MISLED ME FOR A WHOLE STRETCH
 
