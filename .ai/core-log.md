@@ -1,3 +1,33 @@
+## 44 COMMIT Unreleased 2026-11-17T10:10:00-07:00
+
+#### Coming From:
+
+Unreleased 1c7d664
+
+#### Purpose:
+
+Bring up the watch's IMU, which turned out to be a Bosch BHI260AP and had never been powered, and get as far as a firmware upload and a boot.
+
+#### Outcome:
+
+THE PART WAS INVISIBLE FOR ONE REASON AND IT WAS THE POWER RAIL. The BHI260AP sits at I2C 0x28 with its interrupt on GPIO 8, and AXP2101 ALDO4 feeds it at 1.8 V -- and nothing in this port had ever enabled ALDO4, whose enable is bit 3 of register 0x90 and whose voltage is register 0x95 at 500 mV plus 100 mV steps. Before the change a bus scan found only 0x1a 0x20 0x34 0x51 0x5a; enabling ALDO4 from MicroPython at runtime made 0x28 appear at once, and chip id register 0x2B then read 0x70, which is BHI260_CHIP_ID. After the change, with no runtime poking, a plain reboot scans six devices. AN UNPOWERED I2C DEVICE DOES NOT NAK -- it is simply absent, so the symptom reads as "this board has no IMU" rather than "the rail is down", which is the same shape as the amplifier on BLDO2 and the card on ALDO1. The voltage is 1.8 V and not 3.3, taken from the vendor's own rail table in LilyGoLib; the schematic was checked to confirm the part is fitted (U7). THIS IS NOT AN ACCELEROMETER WITH A REGISTER MAP. It is a Fuser core running Bosch algorithms -- orientation, step counter, gestures, wake-on-motion -- reported through a FIFO over the BHY2 protocol. Getting a sample means uploading ~121 KB of Bosch firmware into its RAM and booting it. Bosch's BHY2 SDK is vendored into components/bhy2 from SensorLib (BSD-3-Clause, licence recorded beside it, one SensorLib-only include deleted); the linker strips the parts nothing calls, so the whole SDK costs the app 5.6 KB rather than the 5,656 source lines it looks like. THE FIRMWARE IS LAZY AND LIVES IN `moddata`, NOT THE APP IMAGE. 121 KB is 12 percent of the app slot that entry 43 had just freed to 1005 KB, and an upload costs seconds at start-up. So the image is a blob at moddata+0x10000, streamed with esp_partition_read() on first use, 64 KB clear of the codec's .rodata at offset 0 so `make flac` and `make imu` may be flashed in either order. It is reproducible: components/imu/fetch.sh regenerates it from SensorLib. VERIFIED ON THE WATCH: the rail is raised (`PMU aldo4_v=0d ldo_en=bf`), the chip id is checked before anything is uploaded, the blob is found and its magic validated, 123,696 bytes upload and boot in 3.26 s, and the kernel version reads back as 23.103 -- a real Bosch firmware version, which is the proof that the part is executing our image rather than sitting in boot ROM. `imu` returns to the prompt. WHAT DOES NOT WORK YET, AND IT IS THE SAMPLE PATH: `imu accel` blocks inside bhy2_set_virt_sensor_cfg and takes the shell task with it, so Ctrl+C cannot reach it. Rather than leave a command that hangs the terminal, the default `imu` was made to report status only and the sample path is opt-in by name. THREE MISTAKES COST THIS CYCLE AND EACH IS NOW A COMMENT WHERE IT BIT. First, the HIF write buffer was 136 bytes and the uploader hands over 4,096-byte writes; the SDK turns any non-zero return into BHY2_E_IO (-3), so "your buffer is too small" presented as a bus fault and the upload "failed at 4096" after succeeding at 0. Second, a hand-rolled loop over bhy2_upload_firmware_to_ram_partly() uploaded all 123,696 bytes and then booted with HOST_FW_VERIFY_ERROR set -- boot status 0x78 -- because the chunk offsets it passed were not what the protocol wanted; the SDK's whole-image call sequences it correctly and the image is resident in PSRAM for the duration, which is 121 KB of a 7.7 MB pool and freed immediately. Third, bus_delay_us floored every sub-millisecond delay to a whole FreeRTOS tick, which at 1 kHz turned the SDK's microsecond handshakes into something very slow. A FOURTH DEAD END WAS TESTED AND REVERTED rather than left in: read_write_len = 0 makes the upload fail with BHY2_E_INVALID_PARAM (-2), because the uploader chunks the image by that value and 0 means no chunking. 64 is load-bearing in both directions and the comment says so.
+
+#### Next Steps:
+
+THE ONE OPEN BUG IS NARROW AND NAMED: bhy2_set_virt_sensor_cfg blocks. The next session should instrument that single call -- a log line before and after, and an I2C timeout audit -- rather than re-deriving the bring-up, which is now solid. Two hypotheses are worth testing in order: that the parameter-write path expects a different transfer length than the 64 that uploads the firmware, and that the part needs the HIF control set (`bhy2_set_host_intf_ctrl(BHY2_HIF_CTRL_ASYNC_STATUS_CHANNEL)`) before any virtual sensor is configured -- the vendor sets it immediately after boot and before cfg, and this driver does not. ONCE SAMPLES FLOW, the rest is short and was already planned: `td_imu_ops_t` in `td_sysinfo.h` shaped like `td_bt_ops_t` and `td_gps_ops_t`, then the GPS-style window app showing orientation and tilt live. NOTE THAT THE INTERESTING PART IS THE ON-CHIP ALGORITHMS and not the raw axes: the KLIO firmware carries orientation and step counting, which is work the ESP32 would otherwise do in the 26 KB of internal RAM this board is short of -- worth reaching for rather than settling for an accelerometer readout. THE IMU COMMAND IS NOT IN THE HEARTBEAT, so nothing regressed: entry 43's layout stands, both Bluetooth pairings are still present, and the app is 0x2e6800 with 1,004 KB free in the slot. Everything carried from entries 40 to 43 is unchanged: `update.url` is unset, `third_party/tdsh` is pinned, the launchers have no installer, the Music progress bar still needs `total_samples`, `modload` still holds one blob, the guest stacks are still internal DRAM, and `.ai/core.md`'s Purpose line still calls this a port of Linux. The board is left with the firmware flashed at 0xE10000 and a working `imu` status command.
+
+#### Files Modified:
+
+None in this repository; the fork carries the work at d81ed1b (ports/twatchultra/main/imu.c|h, power.c|h, components/bhy2/**, components/imu/**, modules/Makefile, main/CMakeLists.txt, link_twatch.c).
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: PARTIAL (part identified, powered, uploaded and booted on the hardware; acceleration not yet read)
+
+---
+
 ## 43 COMMIT Unreleased 2026-11-17T10:45:00-07:00
 
 #### Coming From:

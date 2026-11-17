@@ -1,4 +1,4 @@
-# Handoff — Escapement / TinyDesk on T-Watch Ultra, 2026-11-17T10:45
+# Handoff — Escapement / TinyDesk on T-Watch Ultra, 2026-11-17T11:15
 
 Orientation, not authority. **Verify before acting on it.** The files, the
 coredump partition and the board are the fact; this file is a claim.
@@ -13,15 +13,15 @@ says what holds it and what the real constraint is.
 
 ## Where things live
 
-- Project-control repo: `/run/media/vash/GIT/Escapement`, `main`, at `4276241`
-  (core-log **entry 43**). `.ai/core.md` is RESTRICTED — do not edit without an
+- Project-control repo: `/run/media/vash/GIT/Escapement`, `main`, at `1c7d664`
+  (core-log **entry 44**). `.ai/core.md` is RESTRICTED — do not edit without an
   explicit request. Reference records live in `.ai/core-reference.md`.
 - **`.ai/core.md`'s Purpose line is stale and deliberately untouched.** It says
   "Escapement is a port of linux". The project is TinyDesk; the Linux line
   closed 2026-11-11. Fixing it needs the operator's word, because that file may
   only be edited when asked.
 - **Active code is the fork: `/run/media/vash/GIT/tinydesk-twatch`, branch
-  `t-watch-ultra`, clean at `93abe97`.** Push to `fork`
+  `t-watch-ultra`, clean at `d81ed1b`.** Push to `fork`
   (`aquasock/tinydesk`) only — **never** `origin` (upstream
   `tinydesk-project/tinydesk`).
 - `/run/media/vash/ROCKBOX` is the operator's source backup. **Never write to it
@@ -160,6 +160,60 @@ cannot be recovered from a capture. Each subcommand fits.
 **Turning a slot's reconnect off does NOT keep the radio down across a boot**:
 `bt off combo` + `bt off controller` + reboot still reported "Radio: up". Use
 `board set bt.enable 0` for a no-Bluetooth baseline, and put it back afterwards.
+
+## THE IMU: A BOSCH BHI260AP (entry 44)
+
+```
+part        Bosch BHI260AP "smart sensor"   (U7, on the schematic)
+I2C         0x28   on the shared bus
+interrupt   GPIO 8 (SENSOR_INT)
+power       AXP2101 ALDO4 @ 1.8 V  <- nothing enabled it until entry 44
+firmware    ~121 KB, uploaded to the part's RAM on FIRST USE
+protocol    Bosch BHY2 SDK, vendored in components/bhy2 (BSD-3-Clause)
+```
+
+**The rail was the whole reason it was invisible.** An unpowered I2C device
+does not NAK — it is absent — so the symptom is "this board has no IMU". Enable
+ALDO4 (bit 3 of 0x90, 1.8 V = code 13 in 0x95) and 0x28 appears. Same shape as
+the amplifier on BLDO2 and the card on ALDO1.
+
+**It is not an accelerometer.** A Fuser core runs algorithms — orientation, step
+counter, gestures — and reports through a FIFO. That is the prize: work the
+ESP32 would otherwise do in the 26 KB it does not have.
+
+**What works, verified:**
+```
+imu          rail up, chip id 0x70 checked, blob found at moddata+0x10000,
+             123,696 bytes uploaded and booted in 3.26 s,
+             kernel 23.103 read back, returns to the prompt
+```
+
+**What does not:** `imu accel` blocks inside `bhy2_set_virt_sensor_cfg` and takes
+the shell task with it — Ctrl+C cannot reach it. The default command therefore
+reports status only; samples are opt-in by name.
+
+**Next: instrument that one call.** Two hypotheses, in order —
+(1) the parameter-write path wants a different transfer length than the 64 that
+uploads the firmware; (2) the part needs
+`bhy2_set_host_intf_ctrl(BHY2_HIF_CTRL_ASYNC_STATUS_CHANNEL)` before any virtual
+sensor is configured (the vendor sets it right after boot; this driver does not).
+
+**Flashing the firmware** (separate from `make flac`, they share `moddata`):
+
+```
+moddata   0xE00000  codec .rodata at offset 0     (1,976 B)
+          0xE10000  IMU firmware at offset 0x10000
+make imu                   # flashes components/imu/bhi260_klio.img to 0xE10000
+components/imu/fetch.sh    # regenerates that image from SensorLib
+```
+
+**Three mistakes this cost, all now comments where they bit:**
+1. A 136-byte HIF write buffer vs the uploader's 4,096-byte writes; the SDK maps
+   any non-zero return to `BHY2_E_IO (-3)`, so it read as a bus fault.
+2. Hand-rolling `..._partly()` uploaded all 123,696 B then booted with
+   `HOST_FW_VERIFY_ERROR` (boot status 0x78). Use the whole-image call.
+3. `bus_delay_us` flooring sub-ms to a whole tick (1 kHz) made handshakes crawl.
+   `read_write_len = 0` is NOT the fix — it breaks the upload with (-2).
 
 ## THE FLASH: FOUR EQUAL 4 MiB REGIONS (entry 43, 2026-11-17)
 
