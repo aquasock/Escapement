@@ -1,4 +1,4 @@
-# Handoff — Escapement / TinyDesk on T-Watch Ultra, 2026-11-17T09:20
+# Handoff — Escapement / TinyDesk on T-Watch Ultra, 2026-11-17T10:45
 
 Orientation, not authority. **Verify before acting on it.** The files, the
 coredump partition and the board are the fact; this file is a claim.
@@ -13,15 +13,15 @@ says what holds it and what the real constraint is.
 
 ## Where things live
 
-- Project-control repo: `/run/media/vash/GIT/Escapement`, `main`, at `ff2af3b`
-  (core-log **entry 42**). `.ai/core.md` is RESTRICTED — do not edit without an
+- Project-control repo: `/run/media/vash/GIT/Escapement`, `main`, at `4276241`
+  (core-log **entry 43**). `.ai/core.md` is RESTRICTED — do not edit without an
   explicit request. Reference records live in `.ai/core-reference.md`.
 - **`.ai/core.md`'s Purpose line is stale and deliberately untouched.** It says
   "Escapement is a port of linux". The project is TinyDesk; the Linux line
   closed 2026-11-11. Fixing it needs the operator's word, because that file may
   only be edited when asked.
 - **Active code is the fork: `/run/media/vash/GIT/tinydesk-twatch`, branch
-  `t-watch-ultra`, clean at `1e0a653`.** Push to `fork`
+  `t-watch-ultra`, clean at `93abe97`.** Push to `fork`
   (`aquasock/tinydesk`) only — **never** `origin` (upstream
   `tinydesk-project/tinydesk`).
 - `/run/media/vash/ROCKBOX` is the operator's source backup. **Never write to it
@@ -61,7 +61,12 @@ sink                built-in MAX98357A over I2S
                  modules (instruction)     moddata (data)
 with inline dec     0x42ae0000              0x3cbe0000
 after removing it   0x42ad0000              0x3cbd0000
+after the quad table 0x42ad0000             0x3ccd0000   (entry 43)
 ```
+
+The **instruction** base tracks the app image size; the **data** base tracks the
+`moddata` partition's offset. Entry 43 moved the partition without moving the app,
+so exactly one of the pair changed — a case neither earlier guard test covered.
 
 A blob linked for the old pair **still executes** — the entry point is reached by
 offset from whichever instruction base is live — and reads its constants 64 KB
@@ -82,9 +87,9 @@ the module, flash all three regions.** The guard makes forgetting it a log line.
 ## Flash and build
 
 ```
-app      esptool write_flash 0x20000  build/tinydesk.bin   <-- 0x20000 since entry 41
-.text    esptool write_flash 0xE00000  modules/build/flac.bin
-.rodata  esptool write_flash 0xF00000  modules/build/flac.data.bin
+app      esptool write_flash 0x20000  build/tinydesk.bin   <-- 0x20000, unchanged
+.text    esptool write_flash 0xC00000  modules/build/flac.bin   <-- 0xC00000 since entry 43
+.rodata  esptool write_flash 0xE00000  modules/build/flac.data.bin  <-- 0xE00000 since entry 43
 ```
 
 The IDF environment does **not** come from `export.sh` — it fails on a missing
@@ -156,48 +161,39 @@ cannot be recovered from a capture. Each subcommand fits.
 `bt off combo` + `bt off controller` + reboot still reported "Radio: up". Use
 `board set bt.enable 0` for a no-Bluetooth baseline, and put it back afterwards.
 
-## NVS: DONE — 64 KB since 2026-11-17 (entry 41)
-
-The 24 KB region was measured and replaced. Before:
+## THE FLASH: FOUR EQUAL 4 MiB REGIONS (entry 43, 2026-11-17)
 
 ```
-24 KB, six pages: 5 full or active, 1 free
-420 of 756 entry slots written, page sequence numbers 66/100/101/102
+region 1  0x000000 - 0x400000
+  nvs        0x0009000    64K
+  phy_init   0x0019000     4K
+  ota_0      0x0020000  3968K   <- THE APP LIVES HERE (1005 KB free)
+region 2  0x400000 - 0x800000
+  ota_1      0x0400000  3968K
+  coredump   0x07e0000    64K
+  otadata    0x07f0000     8K
+region 3  0x800000 - 0xC00000
+  storage    0x0800000     4M   littlefs, mounted at /
+region 4  0xC00000 - 0x1000000
+  modules    0x0C00000     2M   .text,  MMAP_INST
+  moddata    0x0E00000     2M   .rodata, MMAP_DATA
 ```
 
-That is garbage collection with one page to work in, and the failure it heads
-for is silent — `nvs_flash_init()` returns `ESP_ERR_NVS_NO_FREE_PAGES` and
-`app_main()` answers with `nvs_flash_erase()` (`ports/esp_idf/app/main.c:909`):
-accounts, networks and bonds, with no message.
+**The slots are 3968 KB, not 4 MiB** — the boot overhead sits inside region 1,
+so both slots take its smaller size. 4+4+4+4 needs 176 KB more than the chip has.
 
-Now: **64 KB, 6 pages used and 10 free of 16.** The live on-board table:
+**NVS is 64 KB** because 24 KB had 5 of 6 pages used and GC never stopped; when
+it fills, `nvs_flash_init()` returns `NO_FREE_PAGES` and `app_main()` calls
+`nvs_flash_erase()` — accounts, networks and bonds, silently.
 
-```
-nvs        0x9000    64K      phy_init   0x19000   4K
-ota_0      0x20000   3008K    ota_1      0x310000  3008K
-coredump   0x600000  64K      otadata    0x610000  8K
-storage    0x620000  8064K    modules    0xE00000  1M
-moddata    0xF00000  1M
-```
+**storage is 4 MiB** and held 11 dirs / 29 files / 23,047 B before the change.
+Shrink it only by extract-and-rebuild, never truncation (entry 25).
 
-**Nothing above 0x600000 moved**, so no littlefs migration and no module relink.
-The 24 KB at 0x1A000-0x20000 is deliberately unused: two 3008 KB slots ending on
-the coredump boundary start at 0x20000 and 0x310000.
+**Flash offsets, and the one that will bite:** `0x20000` app, `0xC00000` module
+text, `0xE00000` module data. The old module text offset `0xE00000` is now the
+DATA partition — writing a blob there would put code in the rodata window.
 
-**The old 24 KB blob was restored, not wiped**, so the account, the WiFi
-credentials and both pairings survived. It can be redone from
-`~/twatch-backup/pre-nvs64-2026-11-17-0740.bin` at 0x9000 if ever needed again.
-
-**TWO TRAPS THIS CYCLE PRODUCED, both worth avoiding:**
-- **A CSV edit is not a table change until `partition-table.bin` says so.**
-  After editing `partitions.csv`, `idf.py build` still wrote `0x10000` into
-  `flash_args` and left the OLD `partition-table.bin` in place, despite ninja
-  listing the CSV as a prerequisite. Writing that would have put 64 KB of app
-  image into NVS. `idf.py reconfigure` (after deleting the stale
-  `partition-table.bin`) fixed it. **Read the .bin, not the CSV.**
-- **`erase_flash` would have destroyed `storage`** — the launchers, the shell
-  config, the user's files. The scoped form is
-  `erase_region 0x9000 0x11000` (new NVS + `phy_init` only).
+**Two module-mechanism bugs were fixed here** (see MODULE LINKING below).
 
 **Reading NVS properly** (the first attempt got nonsense): states are 2-bit
 fields in the page's **bytes 32-63**, entries start at **64**, 126 per page.
@@ -376,6 +372,18 @@ nothing else — the ROM is loaded on the caller's task, buffers are already
 PSRAM, and they open no file and map no partition, so they never disable the
 cache a PSRAM stack lives behind.
 
+**AND TWO WAYS THE REPAIR ITSELF WAS BROKEN, both found by entry 43:**
+
+1. **The publish came after the refusal.** `modload_prepare()` wrote
+   `/root/modaddr.txt` *after* the stale-link check, so a stale blob returned
+   early and never wrote the file the build reads to make a fresh one — the guard
+   made itself permanent. Publish now happens as soon as both mappings exist,
+   before anything that can refuse.
+2. **`moddata.at` was not a prerequisite of `flac.bin`.** Addresses are read at
+   Makefile-parse time, so a changed file only relinks if make knows it is a
+   dependency. Without that, `make modaddr && make flac` printed "gen_addr:
+   unchanged" and shipped a blob for the old address. Now a prerequisite.
+
 **Two instances means a class.** Still on internal stacks and worth a sweep:
 `tama.c`, `nes.c`, `gbcbench.c`, `pmbench.c`. `nes.c` fits today, but that is a
 measurement about one game and one ROM.
@@ -383,17 +391,23 @@ measurement about one game and one ROM.
 ## Backups taken and verified
 
 ```
-nvs64-2026-11-17-0755.bin            16,777,216 B   CURRENT LAYOUT
-   sha256 542396eb749c1c34dae4480a2c87b3a39a5ecfdd54a6551c9f7bfc98daae47d8
-   app 0x20000 = 2822d342   module text 0xE00000 = 741413b9
-   module rodata 0xF00000 = ff665897 -- all three byte-identical to the build
-   verify OK with the board held in the stub; board came back
-   NVS 64 KB layout, both pairings and the account present.
+quad4m-2026-11-17-1030.bin           16,777,216 B   CURRENT LAYOUT (quad)
+   sha256 535776ecbcdaa0462cf98ce5c06db596bf3667c8eac00651d1f034c5664b8dac
+   app 0x20000 = 987b7852   module text 0xC00000 = ea99cb70
+   module data 0xE00000 = 9b47992b -- all three byte-identical to the build
+   storage 0x800000, 4 MiB littlefs. 29 files, both pairings, account.
 
-pre-nvs64-2026-11-17-0740.bin        16,777,216 B   THE OLD LAYOUT
-   sha256 26e67e981c636711a136800a490c66696a157ddd927c8e9eaaec8a1d9e95096b
-   app at 0x10000, nvs 24 KB. The only image in the OLD layout, so the only
-   way back to it -- and where the 24 KB NVS blob lives if it is wanted again.
+pre-quad-2026-11-17-1000.bin         16,777,216 B   THE PREVIOUS LAYOUT
+   sha256 fa736ea629fd90db05bf5a4d947e917423916366b131d1a098ea3d64aaa897ca
+   3008 KB slots, storage at 0x620000 (8 MB), modules at 0xE00000.
+   The only image in that layout: the clean rollback, and where a coredump
+   written before the change would be (0x600000).
+
+nvs64-2026-11-17-0755.bin
+   64 KB NVS, 8064 KB storage, modules at 0xE00000 -- superseded layouts.
+
+pre-nvs64-2026-11-17-0740.bin
+   app at 0x10000, nvs 24 KB. Two layouts back; keeps the 24 KB NVS blob.
 
 pinball-fixed-menu-2026-11-16-2134.bin
    sha256 48dd838b1931ce4d4ca49bccf6e51630d14a65484c278cfae660dfde1d014e31
@@ -614,5 +628,5 @@ esp_coredump info_corefile --core <f> --core-format raw --off 0x18 \
 ```
 
 Copy the ELF out **before** the next build. A coredump whose SHA doesn't match
-the app means it is stale — clear it with `erase_region 0x600000 0x10000` and see
+the app means it is stale — clear it with `erase_region 0x7E0000 0x10000` and see
 whether a fresh one appears.
