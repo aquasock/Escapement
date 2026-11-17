@@ -1,3 +1,38 @@
+## 32 COMMIT Unreleased 2026-11-16T18:25:46-07:00
+
+#### Coming From:
+
+Unreleased df9de5b
+
+#### Purpose:
+
+Give the FLAC player a window: a playlist of tracks from the SD card with a transport row, laid out on TinyPhosphor's design, so music can be chosen and played from the desktop instead of by typing a path at the shell.
+
+#### Outcome:
+
+THE MUSIC WINDOW EXISTS AND ITS PLAYER PATH IS PROVEN ON THE DEVICE. `Music` appears in the Start menu and opens a 38x20 window shaped like TinyPhosphor's player, shrunk: a folder line, the library with a scrollbar, then now-playing, elapsed time and a Play/Stop/Prev/Next row anchored to the bottom edge so a resize grows the list and leaves the transport where it was. `modflac.c` became `music_player.c` and grew a playlist -- `music_tracks_scan()` reads a directory into a PSRAM name pool, because 256 names of 72 bytes is 18 KB that would be internal DRAM as a static array, the same mistake that once pushed `ssh start` under its 65,536-byte floor; and the list is SORTED, because readdir order on FAT is the order the files were copied, so a card written by a ripper lists 01, 10, 11, 02 and a playlist is read by a person. The window is a view, never a second player: it calls `music_play_index()` and reads `music_status_get()` twice a second, while the shell's `music` command drives the same task, so the amplifier cannot be held twice. THE EVIDENCE IS A FILE, NOT THE SCREEN, AND THAT IS THE LESSON OF THE CYCLE. The display mirror sends only CHANGED cells and attached stale or incomplete repeatedly -- twice I read its `░` wallpaper as a stuck shadow and drew a wrong conclusion from it -- so a gated `MUSIC_UI_SELFTEST` drives `launch()` and then the very handlers the buttons call, and writes the result to `/fs/root/musicboot.txt` for esptool to read. It reported `window=1`, `tracks=74`, `first=01 - Bohemian Rhapsody.flac`, `dir=/sd/ROCKBOX/Audio`, `play=running:1 state:1 idx:0 frames:253440 rate:44100 secs:5 err:0 short:0`, `now=01 - Bohemian Rhapsody.flac`, `stopped=running:0 state:0`, `after_next=running:0 sel=1`. 253,440 frames in 5.75 s is real time with no decode errors, and Next moving the selection without starting audio is the designed behaviour for a transport pressed while nothing plays. TWO REAL DEFECTS SURFACED, BOTH FOUND BY THAT FILE. Status reported `rate 0` during playback, because the rate is only copied out of the caller-owned state block when the task ENDS -- so the UI's clock would have sat at 00:00 for a whole track; it now reads the live handle. And the module was linked against a stale `g_modhost_ptr` (`0x3c26b8c8` against the app's `0x3c26b99c`, then `0x3c26ba78`, `0x3c26b9a4` -- it moves on almost every build), surfacing only as "decode error" in the status line. THE GUARD FROM ENTRY 30 DOES NOT COVER THIS: `modload_prepare()` compares the two mmap bases and nothing else, so a blob whose host-table pointer is stale is accepted and fails at the first API call. The fix each time is `make modaddr` then `make flac` after every app build, which is now written into the README's build section with the order that matters -- build, flash, boot, modaddr, make flac, flash. A THIRD, SMALLER FIX: the status line printed `00:00 playing 0 Hz` for the few hundred milliseconds before STREAMINFO parses, which is a number that is not true; the rate field is now omitted until it is known. THE SHIPPED IMAGE IS VERIFIED COHERENT: the app region read back off the chip is byte-identical to the build (sha256 `8dbcd979cc464731`), and the blob carries 9 references to the app's live `g_modhost_ptr` at `0x3c26b9a4`. WHAT IS NOT VERIFIED IS THE PART THE OPERATOR HAS TO DO: nobody has yet seen the window on the glass or heard a track started by the Play button. The self-test proves the handlers work on the device, not that the pixels are right or that the buttons are where a thumb lands.
+
+#### Next Steps:
+
+THE OPERATOR'S LOOK IS THE REMAINING STEP and everything else waits on it: open Music from Start, confirm the list and the transport row are legible at 40 columns, tap a track and Play, hear it, tap Stop. If the layout reads badly the fix is geometry (the window is 38x20 of a 40x26 desktop) rather than plumbing. Two things are known to be missing from the window on purpose and are the obvious next additions: a PROGRESS BAR, which needs `total_samples` from STREAMINFO and therefore a field added to `flacmod.cpp`'s 32-byte handle -- an ABI change and a module rebuild, which is why it was deferred rather than forgotten; and VOLUME, which this player has no notion of at all, because the I2S path writes samples straight to the amplifier. The inline `music` command remains the fallback if the window is ever wrong, and `MUSIC_UI_SELFTEST` stays in the tree commented out in CMakeLists as the instrument to reach for when a later display question cannot be answered by looking. Beyond the window, the module loader still holds exactly one blob, so a second codec remains the structural piece rather than another decoder.
+
+#### Files Modified:
+
+- ports/twatchultra/main/music_player.c
+- ports/twatchultra/main/music_player.h
+- ports/twatchultra/main/music_ui.c
+- ports/twatchultra/main/music_ui.h
+- ports/twatchultra/main/link_twatch.c
+- ports/twatchultra/main/CMakeLists.txt
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: NOT RUN
+
+---
+
 ## 31 COMMIT Unreleased 2026-11-16T17:25:50-07:00
 
 #### Coming From:
