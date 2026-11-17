@@ -1,4 +1,4 @@
-# Handoff — Escapement / TinyDesk on T-Watch Ultra, 2026-11-17T08:00
+# Handoff — Escapement / TinyDesk on T-Watch Ultra, 2026-11-17T09:20
 
 Orientation, not authority. **Verify before acting on it.** The files, the
 coredump partition and the board are the fact; this file is a claim.
@@ -7,20 +7,21 @@ coredump partition and the board are the fact; this file is a claim.
 
 **`music` plays FLAC on the built-in speaker with the decoder running out of the
 `modules` partition. Bluetooth has a controller slot and the pad lives there.
-Both TinyDesk 0.5.2 fixes are in. NVS is 64 KB now (was 24 KB) and the OTA slots
-are equal. **The app is at 0x20000, not 0x10000.**
+Both TinyDesk 0.5.2 fixes are in. NVS is 64 KB, the OTA slots are equal, and
+**the app is at 0x20000, not 0x10000**. Internal RAM is now accounted: `mem`
+says what holds it and what the real constraint is.
 
 ## Where things live
 
-- Project-control repo: `/run/media/vash/GIT/Escapement`, `main`, at `705199e`
-  (core-log **entry 41**). `.ai/core.md` is RESTRICTED — do not edit without an
+- Project-control repo: `/run/media/vash/GIT/Escapement`, `main`, at `ff2af3b`
+  (core-log **entry 42**). `.ai/core.md` is RESTRICTED — do not edit without an
   explicit request. Reference records live in `.ai/core-reference.md`.
 - **`.ai/core.md`'s Purpose line is stale and deliberately untouched.** It says
   "Escapement is a port of linux". The project is TinyDesk; the Linux line
   closed 2026-11-11. Fixing it needs the operator's word, because that file may
   only be edited when asked.
 - **Active code is the fork: `/run/media/vash/GIT/tinydesk-twatch`, branch
-  `t-watch-ultra`, clean at `4ca882e`.** Push to `fork`
+  `t-watch-ultra`, clean at `1e0a653`.** Push to `fork`
   (`aquasock/tinydesk`) only — **never** `origin` (upstream
   `tinydesk-project/tinydesk`).
 - `/run/media/vash/ROCKBOX` is the operator's source backup. **Never write to it
@@ -98,6 +99,62 @@ python $IDF_PATH/tools/idf.py -C ports/twatchultra -B ports/twatchultra/build bu
 ```
 
 App size: `0x2e3090`, 53 KB free in `ota_1`.
+
+## INTERNAL RAM — measured 2026-11-17, with `mem`
+
+The board runs with ~26 KB of internal heap free. Where it went, all measured
+on the watch by the port's new `mem` command:
+
+```
+internal heap     263,651 total   236,928 used   26,680 free
+largest FREE block 9,728          <-- the real constraint, see below
+min free (boot)   15,823
+IRAM/exec pool    9,352 free, largest 7,168, one region min-free 308
+PSRAM             428,612 used of 8.2 MB
+static .bss/.data 97,620 B, plus ~113 KB IRAM text
+```
+
+| Consumer | Bytes | How known |
+| --- | --- | --- |
+| Bluetooth (radio up) | **47,304** | measured with `bt.enable` 0 vs 1 across a reboot |
+| `CONFIG_SPIRAM_MALLOC_RESERVE_INTERNAL` | **32,768** | survives BT off; it is the IDF reserve pool |
+| shell task stack | 24,576 | `TDSH_SHELL_TASK_STACK`, one block |
+| everything else | ~132 KB | ~300 allocations, avg <1 KB |
+
+**The 32 KB is not a leak.** `CONFIG_SPIRAM_MALLOC_RESERVE_INTERNAL=32768` (the
+IDF default) withholds 32 KB of internal RAM from ordinary `malloc()` so that
+task stacks and DMA can still succeed when internal memory is full. Its Kconfig:
+"the memory in this pool is not given out when a normal malloc() is called".
+
+**THE CONSTRAINT IS THE LARGEST BLOCK, NOT THE TOTAL.** 26 KB free but only
+9,728 in one piece — which is exactly why `pm start` failed needing a 10,240
+stack. Freeing more bytes does not fix that; allocating emulator stacks EARLY,
+before the small allocations chop the heap up, would.
+
+**Distribution of the 236,928 allocated bytes:** 2 blocks of 17-32 KB = 57,344
+(24%); 19 blocks of 2-4 KB = 64,088 (27%); 5 blocks of 4-8 KB = 35,840 (15%);
+19 of 1-2 KB = 30,192 (12%); 285 blocks ≤128 B = 13,608 (6%). So the mass is in
+~45 blocks, not thousands of small ones.
+
+**PSRAM placement is already right** — `s_vt` 36 KB, `games_database` 48 KB, the
+panel frame buffer, emulator ROMs and frame buffers all live there.
+
+## THE `mem` COMMAND (new, entry 42)
+
+```
+mem heap      per capability, with the lifetime low-water mark
+mem regions   IDF's per-region list
+mem tasks     per task: unused stack bytes + internal or PSRAM
+mem blocks    size histogram of allocated blocks + the largest by address
+```
+
+Split into four **because the desktop's terminal is 24 usable rows and the
+mirror carries only what is on the screen** — longer output scrolls away and
+cannot be recovered from a capture. Each subcommand fits.
+
+**Turning a slot's reconnect off does NOT keep the radio down across a boot**:
+`bt off combo` + `bt off controller` + reboot still reported "Radio: up". Use
+`board set bt.enable 0` for a no-Bluetooth baseline, and put it back afterwards.
 
 ## NVS: DONE — 64 KB since 2026-11-17 (entry 41)
 
