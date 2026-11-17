@@ -1,3 +1,46 @@
+## 33 COMMIT Unreleased 2026-11-16T19:25:27-07:00
+
+#### Coming From:
+
+Unreleased 69cb2c9
+
+#### Purpose:
+
+Fix the player dying after four or five tracks with "error: no amplifier", and move the Music window out of the first Start-menu slot.
+
+#### Outcome:
+
+THE FAILURE WAS TWO LEAKS AND NEITHER WAS THE AMPLIFIER. The message named a symptom: "no amplifier" was the catch-all for five different faults inside `sound_stream_open()`, and the cause was memory rather than audio. Counting allocations instead of guessing found both. FIRST, THE DECODER'S WORKING BUFFER WAS NEVER FREED. micro-flac keeps it until `~FLACDecoder()`, and nothing ever called the destructor -- the player freed the state BLOCK it owns and not what lived inside it -- which cost 41 KB of PSRAM and 356 bytes of internal RAM per track. The module contract now has a TEARDOWN: a call with `in == NULL` asks the module to destroy what it constructed in the caller's block and release everything it took from the host table, and that is `MODLOAD_ABI_VERSION` 3 so a blob built for 2 is refused rather than allowed to leak silently. SECOND, THE PLAYER TASK WAS DELETED THE WRONG WAY. `idf_additions.h` states plainly that a task created with `xTaskCreateWithCaps()` "must only be deleted using `vTaskDeleteWithCaps()`"; plain `vTaskDelete()` hands the task to the idle task, which frees the TCB it knows about but not the PSRAM stack the caps-aware API allocated. That was exactly 8,196 bytes of PSRAM and 356 bytes of internal RAM per track -- the numbers matched the leak too well to be a coincidence, and they only became visible after the module's own allocations were counted separately and came back clean. AFTER BOTH, THE HEAP IS FLAT: over eight consecutive tracks PSRAM returns to the same byte (7,786,392), the internal delta is 0, and the module reports 0/0 live allocations after every track. THE INSTRUMENT WAS THE POINT. `modhost.c` now counts what a module asks for and gives back, using `heap_caps_get_allocated_size()` to recover a block's size at free time, and `MUSIC_UI_SELFTEST` plays a run of tracks and writes PSRAM, internal RAM and the module's live count after each one. That division is what separated the two leaks: the module's number went to zero after the teardown fix while the process still lost 8,196 a track, and the remainder was the task. A THIRD MOVING ADDRESS IS NOW CHECKED. `g_modhost_ptr` -- the API table's address -- moved four times in one afternoon (0x3c26b8c8, 0x3c26b99c, 0x3c26ba78, 0x3c26bb50) and a blob holding a stale one does not fault; every call returns `MODCALL_ERROR` and the only symptom is "decode error". Entry 30's guard compared the two mmap bases and nothing else, which is why that failure stayed silent. The blob header now records `linked_host`, `modload_prepare()` compares it against the live symbol, and `patch_header.py` reads it out of `modaddr.h` at PATCH time rather than trusting a value the Makefile captured at parse time -- a stale parse-time read produced a blob claiming `host=0x0` on the first attempt, which the patcher now refuses outright rather than writing. AND "NO AMPLIFIER" NO LONGER COVERS FIVE FAULTS: `sound.c` records the exact call and its `esp_err_t` name, the player reports that string, so the next occurrence says whether disable, clock, slot, enable or the PSRAM allocation failed. THE MENU MOVED WITH A HOOK RATHER THAN A HACK. Registration order is Start-menu order, and a board registers during init, before the desktop's own apps -- which is why Music was first. A weak `board_apps_register()` in the shared app runs after `td_apps_register_all()`, every other board links unchanged, and the port's own apps now land at the end of the app list immediately before the separator and the user's emulator `.tdlink` entries, which is where the operator asked for it. Verified on the device: window=1, 74 tracks, playback real-time at err=0 over eight tracks, and the app, module and all three linked addresses (inst, data, host) agreeing with the running image. A full 16 MiB backup was taken and its app and module regions confirmed byte-identical to the build.
+
+#### Next Steps:
+
+THE OPERATOR SHOULD PLAY SEVERAL TRACKS AGAIN, and the thing to watch is whether the run now goes past four or five: the two leaks are gone and measured flat, but the operator's failure was never reproduced deliberately, so the honest position is that the cause is removed rather than that the symptom was observed disappearing. If it recurs, the message will now name the failing call instead of saying "no amplifier", which makes the next step a specific one rather than another hunt. TWO THINGS REMAIN OWED IN THIS AREA. A progress bar needs `total_samples` from STREAMINFO, which means a field in `flacmod.cpp`'s 32-byte handle -- an ABI change of the same kind the teardown just made, and the moment to do it is the next time that struct is touched. And `uac2.c` and `usbhost.c` also create tasks with `xTaskCreateWithCaps()`; they do not self-delete today, so they do not have this leak, but anyone adding a self-delete to either must use `vTaskDeleteWithCaps()`. Beyond music, the module loader still holds exactly one blob, so a second codec remains the structural piece.
+
+#### Files Modified:
+
+- ports/twatchultra/main/music_player.c
+- ports/twatchultra/main/music_ui.c
+- ports/twatchultra/main/sound.c
+- ports/twatchultra/main/sound.h
+- ports/twatchultra/main/modhost.c
+- ports/twatchultra/main/modhost.h
+- ports/twatchultra/main/modload.c
+- ports/twatchultra/main/modload.h
+- ports/twatchultra/main/link_twatch.c
+- ports/twatchultra/modules/src/flacmod.cpp
+- ports/twatchultra/modules/src/modtest.c
+- ports/twatchultra/modules/Makefile
+- ports/twatchultra/modules/patch_header.py
+- ports/esp_idf/app/main.c
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: NOT RUN
+
+---
+
 ## 32 COMMIT Unreleased 2026-11-16T18:25:46-07:00
 
 #### Coming From:
