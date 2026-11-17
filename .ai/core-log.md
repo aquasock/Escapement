@@ -1,3 +1,35 @@
+## 36 COMMIT Unreleased 2026-11-16T20:11:21-07:00
+
+#### Coming From:
+
+Unreleased 2fbf347
+
+#### Purpose:
+
+Fix the Start-menu entries that launch the Pokémon Mini and Tamagotchi emulators, because one of them printed a Python traceback instead of starting the game.
+
+#### Outcome:
+
+THE POKEMON MINI ENTRY WAS MISSING ONE LINE, AND THE TAMAGOTCHI ENTRY WAS NOT BROKEN AT ALL. `py` on this port is MicroPython with a `tinydesk` module that is REGISTERED BUT NOT AUTO-IMPORTED (`ports/common/python/td_py_mod.c` registers it as an ordinary module; nothing injects it into globals). `/root/Apps/pm.py` called `tinydesk.shell(...)` on line 1 without `import tinydesk`, so every launch from the Start menu raised `NameError: name 'tinydesk' isn't defined`. `/root/Apps/tama.py` already began with `import tinydesk` and worked, so the belief that both had the same bug was half right: the failure looked identical from outside, and the difference was a single line. Both were verified FROM THE START MENU rather than from the shell, which is the distinction that matters here -- `py /root/Apps/pm.py` succeeding would not have proven the menu path works, and the menu path is the one that failed. THE FIX SIMPLIFIES AS IT REPAIRS. The old line carried the whole ROM path with spaces, commas and parentheses inside a Python string: one typo away from broken, and awkward to re-enter over a console. It is now `tinydesk.shell("pm start")`, which uses the firmware's own `PM_ROM_DEFAULT` -- and that default was verified in the previous cycle to be exactly that Pokémon Pinball cartridge. That also makes the two launchers symmetrical, since `tama.py` already relied on `TAMA_ROM_DEFAULT` the same way. THE FILES HAD NO HOME IN ANY REPOSITORY and that is now corrected: they live on the device's littlefs, which survives app flashes but is not created by a full-image flash, so they could not be restored after one. `scripts/apps/` now holds both, with a README stating the rule (both lines, in this order), the exact `NameError` so the symptom is searchable, why neither passes an argument, and install commands that were RUN VERBATIM and then checked by reading both files back. A METHOD NOTE THAT COST TIME AND IS WORTH KEEPING: writing the files needed `echo` with single quotes around a Python string containing double quotes, and `tdsh` keeps single quotes literal, so `echo 'tinydesk.shell("pm start")' >> file` survives intact. Testing it on a scratch file first (`/tmp/t1.py`) before touching the real one is what made the write safe. THE HARNESS LESSON FROM ENTRY 35 WAS APPLIED AND IT WORKED: escape sequences written in one `write()` each, so `F10` opens the menu rather than arriving as Escape followed by literal text. Navigating to the user's own entries needed type-ahead rather than arrow counting -- 'p' selects Pixels and a second 'p' reaches Pokémon Mini, because `td_type_ahead` steps to the next match; End reaches the very bottom, which is the users section and "Sign out", not the app list.
+
+#### Next Steps:
+
+THE OLD ROM PATH IS STILL IN THE TRACE, AS EVIDENCE AND NOT AS A CONFIGURATION. `/root/Apps/pm.py` previously named `/sd/media/min/homebrew/Pokemon Pinball Mini (USA, Europe).min` explicitly, and that is now implicit in `PM_ROM_DEFAULT`; if the card's layout ever changes, the launcher follows the firmware rather than drifting from it. The larger outstanding item is unchanged and is the one entry 35 named: guest stacks in `tama.c`, `nes.c`, `gbcbench.c` and `pmbench.c` are still internal DRAM, and two of them have already failed for exactly that reason. A second, smaller thing is now visible and worth a decision rather than a fix: the `.tdlink` files and these Python launchers are user state on littlefs with no installer, so a full-image flash still loses them even though they are now reproducible from `scripts/apps/`. Whether that becomes a deploy script or stays a documented manual step is the operator's call, and the README in that directory is written to serve either. Nothing else regressed: Pokémon Mini was relaunched from the Start menu at the end of this cycle and reported 71.8 fps with missed=0, and the Tamagotchi was started and stopped from the menu in the same session.
+
+#### Files Modified:
+
+- scripts/apps/pm.py
+- scripts/apps/tama.py
+- scripts/apps/README.md
+
+#### Status:
+
+- Build: N/A
+- Deployment: PASS
+- User Test: PASS
+
+---
+
 ## 35 COMMIT Unreleased 2026-11-16T19:56:37-07:00
 
 #### Coming From:
