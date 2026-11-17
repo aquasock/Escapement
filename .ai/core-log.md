@@ -1,3 +1,36 @@
+## 31 COMMIT Unreleased 2026-11-16T17:25:50-07:00
+
+#### Coming From:
+
+Unreleased a043a9d
+
+#### Purpose:
+
+Make the documentation say what the project is rather than what it was, because the front page still opened with "Linux on a T-Watch Ultra" for a line of work closed on 2026-11-11.
+
+#### Outcome:
+
+THE README NOW OPENS WITH THE DESKTOP, NOT THE KERNEL. `README.md` described a NOMMU Linux 7.2.4 that boots to a bash login, which is accurate history and no longer the project: the operator's direction is that the Linux line is finished and TinyDesk is where the work continues. The new front page says what runs on the watch today, and gives the Linux era its own section that states plainly why it was abandoned -- too heavy, because a kernel plus a rootfs plus a userspace on 8 MB of PSRAM leaves nothing over -- with the closing commit named (`8645a82`, 2026-11-11) so the claim is checkable rather than a matter of tone. THE ARCHIVE IS LABELLED RATHER THAN DELETED, which is the part that needed judgement. `patches/`, `userspace/` and `probes/` remain, because `docs/panel-geometry.md` is still the only measurement of where the chamfers are and the current desktop is laid out inside that rectangle, and because a future reader is owed the reason a whole approach was dropped instead of a silent gap. A NEW `docs/README.md` SORTS EVERY DOCUMENT INTO CURRENT AND ARCHIVE, which is the piece that was actually missing: fourteen documents sit in a flat directory where three describe the running system and eleven describe code that no longer runs, and nothing in the filenames says which. It also resolves the scripts, and found that the split is not what the dates suggest -- `watch-backup.sh`, `tamacore-host.sh` and `tamacore-sync.sh` are live while every `build-*.sh` is not, and `watch-backup.sh` works only because it reaches into the old toolchain's Python at `build/idf-tools/python_env/idf5.1_py3.14_env`, which still exists and carries esptool 4.13; that dependency is now written down before somebody deletes `build/`. THREE CLAIMS IN THE OLD TEXT WERE NOT TRUE AND ARE CORRECTED RATHER THAN RE-WORDED. It asserted GPLv3 for this repository "matching upstream", but there is no LICENSE file here at all and the firmware now lives in an MIT fork, so the page records the gap as a decision owed instead of inheriting a licence that has nothing behind it. Its "no sound, no PMU" line in the fork's port README described a moment several cycles past and was contradicted by the PMU row twenty lines below it, and `partitions.csv` still called the `modules` partition UNPROVEN with nothing loading from it while a FLAC decoder plays a 5:58 track out of it. Two stray pipes were also splitting the Pictures and Tamacore rows of that table into phantom extra columns. The build section gained the two things that cost time this week: the IDF environment that `export.sh` cannot produce on this machine, because it fails on a missing `riscv32-esp-elf-gdb` and leaves `idf.py` off the path, and THE MODULE REBUILD ORDER, which is not a preference but a consequence of the MMU choosing both addresses at boot -- build the app, flash it, let it boot, `make modaddr`, `make flac`, flash -- with the failure it prevents spelled out as the bad-magic error on good files that entry 30 recorded. Every link, anchor and referenced path in both files was checked against the tree, all fourteen documents are listed with none orphaned and none absent, and the table column counts were verified after editing. THE RESTRICTED FILE IS THE REMAINING STALE DOCUMENT AND WAS NOT TOUCHED: `core.md`'s Purpose still reads "Escapement is a port of linux to the Lilygo T Watch Ultra", which is the same falsehood on the most authoritative page in the project, and it is left alone because `core.md` may only be edited when asked. That is raised with the operator rather than quietly fixed.
+
+#### Next Steps:
+
+THE PURPOSE LINE IN `core.md` IS THE ONE THING OWED and it needs the operator's word, not an agent's judgement, because editing that file is explicitly restricted; it should say that this is a TinyDesk port for the T-Watch Ultra, with the Linux port recorded as the abandoned first attempt. Beyond that the documentation has a gap the README now points at without filling: there is no document describing the port's architecture as it stands -- the core split between the desktop, the shell, the apps and the board half, plus where the flash partitions divide the job -- and `docs/cores.md` describes the Linux arrangement in enough detail that a reader could mistake it for current. Writing that is a cycle of its own and belongs beside the fork's port README rather than duplicating it. The Linux-era documents could each gain a one-line header saying they are archive, which `docs/README.md` currently does in one place instead of eleven; that is cheap and worth doing when one of them is next opened for any other reason. The fork's own top-level `README.md` is still upstream's, describing TinyDesk generally and not this project, and a fork is entitled to say what it changed. Finally, `core-log.md` stands at thirty-one entries against the hundred-entry ring, so no archive is due, but the pattern of entries 25 to 31 -- one structural change per cycle, each with a hardware measurement behind it -- is what the next cycle should keep.
+
+#### Files Modified:
+
+- README.md
+- docs/README.md
+- ports/twatchultra/README.md
+- ports/twatchultra/partitions.csv
+
+#### Status:
+
+- Build: N/A
+- Deployment: N/A
+- User Test: NOT RUN
+
+---
+
 ## 30 COMMIT Unreleased 2026-11-16T16:57:59-07:00
 
 #### Coming From:
