@@ -485,11 +485,21 @@ did NOT work from the harness; `Esc`, F10 and typed commands did.
    halting. Reviewed, **never exercised**.
 5. **No picker, queue, seek or progress display.** `music` takes a path.
 
-6. **The app image is at 2% free** (0x2e3e60 in a 3 MB OTA slot). The next
-   feature needing real space has to trade something out.
-7. **A gamepad reaches the desktop input path like a keyboard now.** Whether the
-   emulators exploit that — the NES already takes a BLE Xbox pad through
-   `gamepad.c` — is separate work from pairing, and not needed for the slot.
+6. **The app image is at 0x2e3fc0, 48.1 KB free** in the smaller OTA slot. Two
+   upstream bug fixes cost 352 bytes; the partition change is the only thing
+   that buys real headroom back.
+7. **Decide the NVS question** (see the NVS section): grow to 64 KB now and
+   re-pair, or wait until something forces a full-image flash anyway.
+8. **`update.url` is unset** in `board.example.conf` and the device's
+   `board.conf`, so *Check for official updates* reads upstream's feed and would
+   offer an image not built for this watch.
+9. **`third_party/tdsh` is pinned behind its remote** (0b8ebee -> 53e8681 seen
+   on this fetch; the shell itself stays at 0.5.1).
+10. **A gamepad reaches the desktop input path like a keyboard now.** Whether
+    the emulators exploit that — the NES already takes a BLE Xbox pad through
+    `gamepad.c` — is separate work from pairing.
+11. **Upstream invitation, from the author on issue 20:** the port is welcome
+    upstream as `ports/twatchultra` if a PR is ever wanted.
 
 ## Out of scope by instruction
 
