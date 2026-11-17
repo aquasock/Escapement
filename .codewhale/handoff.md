@@ -1,4 +1,4 @@
-# Handoff — Escapement / TinyDesk on T-Watch Ultra, 2026-11-16T23:05
+# Handoff — Escapement / TinyDesk on T-Watch Ultra, 2026-11-17T07:30
 
 Orientation, not authority. **Verify before acting on it.** The files, the
 coredump partition and the board are the fact; this file is a claim.
@@ -6,21 +6,21 @@ coredump partition and the board are the fact; this file is a claim.
 ## One line
 
 **`music` plays FLAC on the built-in speaker with the decoder running out of the
-`modules` partition. Bluetooth has a fourth slot for a controller; the Xbox pad
-lives there now, reconnects by itself at boot, and survives a hard reset. The
-keyboard slot is empty. A gamepad can no longer be paired into it.**
+`modules` partition. Bluetooth has a controller slot and the pad lives there.
+Both TinyDesk 0.5.2 fixes are in — the Store divide-by-zero and the held
+descriptors 0-2. NVS is 24 KB and running with one free page of the six.**
 
 ## Where things live
 
-- Project-control repo: `/run/media/vash/GIT/Escapement`, `main`, at `98a0b06`
-  (core-log **entry 39**). `.ai/core.md` is RESTRICTED — do not edit without an
+- Project-control repo: `/run/media/vash/GIT/Escapement`, `main`, at `7f3ce38`
+  (core-log **entry 40**). `.ai/core.md` is RESTRICTED — do not edit without an
   explicit request. Reference records live in `.ai/core-reference.md`.
 - **`.ai/core.md`'s Purpose line is stale and deliberately untouched.** It says
   "Escapement is a port of linux". The project is TinyDesk; the Linux line
   closed 2026-11-11. Fixing it needs the operator's word, because that file may
   only be edited when asked.
 - **Active code is the fork: `/run/media/vash/GIT/tinydesk-twatch`, branch
-  `t-watch-ultra`, clean at `869cbfe`.** Push to `fork`
+  `t-watch-ultra`, clean at `44f87fa`.** Push to `fork`
   (`aquasock/tinydesk`) only — **never** `origin` (upstream
   `tinydesk-project/tinydesk`).
 - `/run/media/vash/ROCKBOX` is the operator's source backup. **Never write to it
@@ -98,6 +98,69 @@ python $IDF_PATH/tools/idf.py -C ports/twatchultra -B ports/twatchultra/build bu
 ```
 
 App size: `0x2e3090`, 53 KB free in `ota_1`.
+
+## NVS IS THE NEXT REAL CONSTRAINT — measured 2026-11-17
+
+```
+region     24 KB, six 4 KB pages, at 0x9000 0x6000
+in use     5 pages full or active, 1 uninitialised
+entries    420 of 756 slots written, 200 erased
+churn      page sequence numbers 66, 100, 101, 102 -- GC runs continuously
+payload    ~8-11 KB live once duplicates awaiting collection are discounted
+```
+
+What is in it: **ns10** NimBLE bonds (the keyboard and the controller),
+**ns11** this port's own slot blob (136 bytes = 4 × 34, confirming the
+four-slot format is on the board), **ns1** shell accounts, **ns7** WiFi station,
+**ns8** 1.9 KB of regenerable RF calibration, **ns12** SSH host key, **ns5** AP.
+
+**The failure it is heading for is silent.** When no free page is left,
+`nvs_flash_init()` returns `ESP_ERR_NVS_NO_FREE_PAGES` and `app_main()`
+answers with `nvs_flash_erase()` (`ports/esp_idf/app/main.c:909`) — accounts,
+networks and Bluetooth bonds, with no message. Every other port here uses
+0x10000; only `crowpanel7` matches our 0x6000.
+
+**The change is designed and NOT applied** (it erases state, so it needs the
+operator's word). Nothing above 0x600000 moves:
+
+```
+nvs       0x9000   0x10000    phy_init  0x19000  0x1000
+ota_0     0x1A000  0x2F0000   ota_1     0x310000 0x2F0000
+coredump / otadata / storage / modules / moddata -- unchanged
+```
+
+Cost: the new region covers 0xF000-0x19000, which holds `phy_init` and the
+app's first 36 KB, so NVS takes the erase path and both pairings must be redone.
+Avoidable in principle by writing the existing 24 KB blob back into an erased
+region (leaving ten clean pages), but that is a plan, not a measurement.
+An OTA cannot change the partition table: one serial flash with an erase.
+
+**Reading NVS properly** (the first attempt got nonsense): states are 2-bit
+fields in the page's **bytes 32-63**, entries start at **64**, 126 per page.
+
+## TINYDESK 0.5.2 FIXES — both applied 2026-11-17
+
+Taken from upstream by cherry-pick; both faults existed here.
+
+- `03fc1b9` **Store**: `apps/store.c` divided `st.done * 100` by
+  `s_apps[s_busy_app].size`, which is **0 for an app listed offline** — an
+  offline double click panicked the board. `on_install()` also had no guard for
+  a hidden Install button. Clean apply; only `docs/VALIDATION.md` conflicted and
+  was left at our version (it is upstream's QA record).
+- `73a3bd7` **descriptors 0-2**: we run `CONFIG_ESP_CONSOLE_NONE`, so nothing
+  opened fds 0/1/2 and the first files opened got them — a log line went into
+  the file, and a read-only one made littlefs assert. `hold_std_fds()` registers
+  `/dev/tdnull` and opens it three times at the top of `app_main()`.
+  **Checked first:** the USB mirror writes via `usb_serial_jtag_write_bytes()`
+  (`link_usj.c`), never fd 1; and the shell replaces the global `stdout` with
+  its own `funopen()` stream per task (`tdsh_bridge_esp.c`).
+
+**The fix's own effect is NOT directly observed** — reproducing it needs a
+failed Store download with WiFi. `cat /dev/tdnull` from the shell was
+inconclusive: tdsh resolves through `tdsh_path_to_real()` and never reaches
+IDF's VFS. The argument it works is from `components/vfs/vfs.c:80-106`, which
+can only reject a length of 1, a length over `ESP_VFS_PATH_MAX`, a bad prefix,
+or OOM.
 
 ## THE CONTROLLER SLOT — what it took, and the trap in it
 
