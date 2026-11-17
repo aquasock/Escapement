@@ -1,4 +1,4 @@
-# Handoff — Escapement / TinyDesk on T-Watch Ultra, 2026-11-17T14:40
+# Handoff — Escapement / TinyDesk on T-Watch Ultra, 2026-11-17T15:20
 
 Orientation, not authority. **Verify before acting on it.** The files, the
 coredump partition and the board are the fact; this file is a claim.
@@ -13,15 +13,15 @@ says what holds it and what the real constraint is.
 
 ## Where things live
 
-- Project-control repo: `/run/media/vash/GIT/Escapement`, `main`, at `2490285`
-  (core-log **entry 50**). `.ai/core.md` is RESTRICTED — do not edit without an
+- Project-control repo: `/run/media/vash/GIT/Escapement`, `main`, at `4393aa4`
+  (core-log **entry 51**). `.ai/core.md` is RESTRICTED — do not edit without an
   explicit request. Reference records live in `.ai/core-reference.md`.
 - **`.ai/core.md`'s Purpose line is stale and deliberately untouched.** It says
   "Escapement is a port of linux". The project is TinyDesk; the Linux line
   closed 2026-11-11. Fixing it needs the operator's word, because that file may
   only be edited when asked.
 - **Active code is the fork: `/run/media/vash/GIT/tinydesk-twatch`, branch
-  `t-watch-ultra`, clean at `a6f0913`.** Push to `fork`
+  `t-watch-ultra`, clean at `86eb891`.** Push to `fork`
   (`aquasock/tinydesk`) only — **never** `origin` (upstream
   `tinydesk-project/tinydesk`).
 - `/run/media/vash/ROCKBOX` is the operator's source backup. **Never write to it
@@ -338,23 +338,34 @@ than the two packed structs account for — log all 11, not the first 6.
 **Patterns are volatile.** The firmware is uploaded to RAM each boot, so LEARN AND
 DETECT MUST HAPPEN IN THE SAME BOOT.
 
-## DATA INJECTION — API says yes, implementation says no (entry 50)
+## DATA INJECTION — DEAD ON THIS FIRMWARE (entry 51)
+
+**Six payload shapes, all accepted by the protocol, all inert.** Including the
+**28-byte float frame** the algorithm itself consumes (`bhy2_klio_log_frame_t`:
+timestamp + accel[3] + gyro[3]):
 
 ```
-bhy2_set_data_injection_mode()   NORMAL / REAL_TIME / STEP_BY_STEP   returns 0
-bhy2_inject_data()                                                   returns 0
+8B  id+int16          10B id+ts+int16     8B ACC_WU+int16
+28B float frame       30B float + KLIO_LOG id
+28B float in REAL_TIME mode instead of STEP_BY_STEP
 ```
 
-Both **accepted**; injecting `+2.50 g` on z — impossible for gravity — left the
-reading at the real sensor's `+1.03 g`. **No payload struct exists anywhere in
-`bhy2_defs.h`**, so the layout used (uint16 sensor id, then the sensor's fields)
-is from datasheet prose and is wrong or incomplete.
+All read `z +1.00` against an injected `+2.50 g`. **No `meta 11 SENSOR ERROR`
+for any of them** — the command is acknowledged and never reaches the sensor
+pipeline.
 
-Next hypotheses, in order: (a) the payload needs a timestamp or a different
-header order; (b) step-by-step needs one command per sample, not one command.
+**So it is not a payload-shape question.** Either this build refuses host
+injection regardless of shape, or the mechanism needs setup this port does not
+do. Both are expensive. **Do not re-litigate the payload.**
 
-**If this is solved, a classifier on the Fuser core could be trained from a FILE**
-— recorded or synthesised motion — not only from a hand.
+**Two method lessons worth keeping:**
+- **Test with the watch STILL.** The first run had the operator rocking it and
+  the readings wandered (+0.65…+1.08), which looked like partial success. The
+  still run gave +1.00 six times. **The pass condition is a specific impossible
+  VALUE (+2.50), never "did the number change"** — that is the only reason the
+  noisy run was not called a positive.
+- **Verify the effect, never the acknowledgement.** The API returned success for
+  every shape it ignored.
 
 ## RESTART CAUTION
 

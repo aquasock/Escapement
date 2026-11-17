@@ -1,3 +1,33 @@
+## 51 COMMIT Unreleased 2026-11-17T15:20:00-07:00
+
+#### Coming From:
+
+Unreleased 4393aa4
+
+#### Purpose:
+
+Test whether the BHI260AP accepts arbitrary IMU data from the host, which entry 50 left open: the earlier 8-byte attempt was accepted and ineffective, and the leading hypothesis was that the payload had the wrong shape.
+
+#### Outcome:
+
+THE HYPOTHESIS IS DISPROVED, AND THE ANSWER IS CLEANER THAN "WRONG PAYLOAD". Six shapes were tried in one run, including the 28-byte float frame the algorithm itself consumes -- timestamp followed by accel[3] and gyro[3], straight from `bhy2_klio_log_frame_t` -- and every one of them was accepted by the protocol and did nothing. `8B id+i16`, `10B id+ts+i16`, `8B ACC_WU+i16`, `28B float frame`, `30B float frame behind a KLIO_LOG id`, and the float frame in REAL_TIME_INJECTION rather than STEP_BY_STEP. All read exactly `z +1.00` afterwards, against an injected `+2.50 g`, which is a value gravity cannot physically produce. THE ABSENCE OF ERRORS IS THE FINDING: not one `meta 11 (SENSOR ERROR)` appeared. A payload that was parsed and rejected raises that event, and a payload that was parsed and accepted moves the reading; neither happened for any shape, so the command is acknowledged at the protocol layer and never reaches the sensor pipeline at all. That makes this no longer a payload-shape question. Either this firmware build refuses host injection whatever the shape, or the mechanism needs setup the port does not perform -- and both are more expensive than the demo is worth today. THE MEASUREMENT WAS ALMOST INVALIDATED BY THE OPERATOR'S HANDS, and the recovery is worth recording because it is a lesson about instruments rather than about chips. The first run produced readings that WANDERED -- z between +0.65 and +1.08 across the six shapes -- and that looked like partial success, or at least like something happening. It was the operator rocking the watch during the test. A re-run with the watch perfectly still gave `+1.00` six times, identical, which is the clean result. The success criterion had been designed for exactly this hazard -- a specific impossible value, `+2.50`, rather than "did it change" -- and that is the only reason the noisy run could not be mistaken for a positive. A test whose pass condition is "the number moved" would have called that a success six times. SECOND-ORDER LESSON: the injection probe reported `accepted` from the API's return code for a shape that did nothing, which is precisely why the check measures the READING and not the return code. An API that returns success for an operation it ignored is common enough that the pattern is worth keeping: verify the effect, never the acknowledgement. WHAT THIS MEANS FOR THE OPERATOR'S IDEA, stated plainly because the idea is good and the answer is not the one hoped for. Treating the BHI260AP as a general-purpose accelerator is sound in hardware terms -- the Fuser core runs whatever algorithm the firmware blob carries -- but two things block the demo. First, KLIO is one specific algorithm compiled into that blob; running a different one needs Bosch's toolchain and a different image, not a parameter. Second, feeding it data from the host does not work on this build. So the demo as described -- stream 28-byte samples in, get fuzzy pattern matching out -- cannot be built on this firmware. What CAN be built is the same idea with the sensors as the input: the part genuinely learns a repeated motion and genuinely recognises fuzzy variants of it, which is the operator's concept with the input stage the part insists on.
+
+#### Next Steps:
+
+RECOGNITION IS STILL THE OPEN TECHNICAL PROBLEM and is now the only one worth pursuing on this part: `klio learn` works (verified four times), `klio detect` gives zero frames with learning off and keeps learning with it on. The next session should stop guessing at injection and finish that instead, because it is the difference between a working demo and a curiosity. THE DEMO THAT IS ACTUALLY AVAILABLE should be described honestly to the operator: a gesture trained by hand and recognised by hand, with the fuzzy matching and the on-chip classifier that make the idea interesting, and without host-supplied data. IF HOST INJECTION EVER MATTERS ENOUGH, the remaining avenues are a different firmware image that enables it, or Bosch's own sensor-fusion toolchain, and both are large. NOTHING REGRESSED: the app is 0x2e9740 with 1,000 KB free, both Bluetooth pairings present, the four-region layout from entry 43 stands, `music` decodes through the module, and `imu`, `imu accel`, `imu rate`, `imu scan` and `klio` all work. The posture vocabulary from entry 49 is unchanged and still pinned by its host test. THE SILENT-BOARD CAUTION FROM ENTRY 50 STANDS and was not seen again this cycle: the board needed no `esptool chip_id` reset during these runs. Carried forward unchanged: `update.url` is unset, `third_party/tdsh` is pinned, the launchers have no installer, the Music progress bar needs `total_samples`, `modload` holds one blob, the guest stacks are internal DRAM, `.ai/core.md`'s Purpose line still calls this a port of Linux, and the newest backup `imu-window-2026-11-17-1315.bin` is now three changes stale.
+
+#### Files Modified:
+
+None in this repository; the fork carries the work at 86eb891 (ports/twatchultra/main/imu.c).
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: PASS (injection tested and cleanly negative; the operator's rocking was identified as the cause of the ambiguous first run)
+
+---
+
 ## 50 COMMIT Unreleased 2026-11-17T14:40:00-07:00
 
 #### Coming From:
