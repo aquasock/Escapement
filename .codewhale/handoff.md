@@ -1,4 +1,4 @@
-# Handoff — Escapement / TinyDesk on T-Watch Ultra, 2026-11-17T12:30
+# Handoff — Escapement / TinyDesk on T-Watch Ultra, 2026-11-17T13:00
 
 Orientation, not authority. **Verify before acting on it.** The files, the
 coredump partition and the board are the fact; this file is a claim.
@@ -13,15 +13,15 @@ says what holds it and what the real constraint is.
 
 ## Where things live
 
-- Project-control repo: `/run/media/vash/GIT/Escapement`, `main`, at `63eea97`
-  (core-log **entry 46**). `.ai/core.md` is RESTRICTED — do not edit without an
+- Project-control repo: `/run/media/vash/GIT/Escapement`, `main`, at `3033f26`
+  (core-log **entry 47**). `.ai/core.md` is RESTRICTED — do not edit without an
   explicit request. Reference records live in `.ai/core-reference.md`.
 - **`.ai/core.md`'s Purpose line is stale and deliberately untouched.** It says
   "Escapement is a port of linux". The project is TinyDesk; the Linux line
   closed 2026-11-11. Fixing it needs the operator's word, because that file may
   only be edited when asked.
 - **Active code is the fork: `/run/media/vash/GIT/tinydesk-twatch`, branch
-  `t-watch-ultra`, clean at `83d4a58`.** Push to `fork`
+  `t-watch-ultra`, clean at `60e6fbc`.** Push to `fork`
   (`aquasock/tinydesk`) only — **never** `origin` (upstream
   `tinydesk-project/tinydesk`).
 - `/run/media/vash/ROCKBOX` is the operator's source backup. **Never write to it
@@ -230,10 +230,41 @@ is worse than no command.**
 `td_imu_ops_t` is in `td_sysinfo.h`, reached through a **weak
 `board_imu_ops()`** — a `#define` cannot cross the component boundary.
 
-**Orientation is wired but silent.** `DEVICE_ORI` (69) is in the firmware's
-sensor list and `on_ori()` parses it, but heading/pitch/roll still read `--`.
-Try the wakeup variant (70) or a motion nudge before suspecting the parser; it
-reports on change, so a still watch may legitimately say nothing.
+**THE AXES, MEASURED (entry 47).** The operator's rotation data fixes the frame:
+
+```
+flat                x +0.01  y -0.07  z +1.00    z+ out of the glass
+tipped fwd 90 deg   x -1.00  y  0.00  z  0.00    gravity moved z -> x
+```
+
+So **y runs left-right across the case, x runs strap-to-strap, z comes out of
+the glass.** Tipping forward is a rotation about y.
+
+**IT IS ACCELERATION, NOT ORIENTATION** — and the reason the numbers feel wrong
+is physical: **an accelerometer cannot see yaw.** Spin the watch flat on a table
+and the readings do not change, because gravity did not. Heading needs a
+magnetometer or the fusion quaternion; it is not a bug.
+
+The window now leads with **FACE UP / FACE DOWN / EDGE / SIDE / TILTED**, and
+shows **tilt in degrees** derived from gravity —
+`pitch = atan2(-x, sqrt(y²+z²))`, `roll = atan2(y, sqrt(x²+z²))`. Checked
+against the operator's own 90° rotation: it gives +90° pitch, 0 roll.
+
+**Heading still reads `--`.** Both 69 (on-change) and 70 (wakeup) are subscribed;
+neither delivered a value yet. If they never do, question `on_ori()`'s payload
+layout next — it assumes 4×int16 quaternion at 2^14 then 3×int16 Euler at 2^8,
+taken from the driver, not yet checked against Bosch's documentation.
+
+**Reopen fix is IN CODE BUT UNVERIFIED.** `start()` was called once behind a
+`static bool started`; closing calls `stop()`, so the second open never
+re-enabled the sensors. Now called every tick with a bounded retry. **Tap IMU,
+close, tap again** — that is the test.
+
+**A harness note that has now cost three sessions: driving the Start menu over
+serial is the least reliable part of this workflow.** Type-ahead resets after
+~2 s, so `i` `i` searches twice from the top and lands on Image Viewer both
+times; an arrow count of 18 overshot into Users. **Use the operator's finger,
+or a shell command.**
 
 **What the KLIO firmware carries (35 ids):** 1 3 4 5 6 7 10 12 13 14 15 16 28 29
 31 32 37 38 48 50 52 53 55 57 59 61 63 67 69 70 75 77 94 112 127.

@@ -1,3 +1,33 @@
+## 47 COMMIT Unreleased 2026-11-17T13:00:00-07:00
+
+#### Coming From:
+
+Unreleased 3033f26
+
+#### Purpose:
+
+The operator rotated the watch and reported that the readings changed with rotation but not as they expected, and concluded the part was reporting pitch, roll and yaw.
+
+#### Outcome:
+
+THE OPERATOR'S CONCLUSION WAS THE OTHER WAY ROUND, AND THE CORRECTION IS THE SUBSTANCE OF THIS ENTRY. The window was showing ACCELERATION -- three numbers saying which way is down in the watch's own axes -- not orientation angles. Their evidence was exact and useful: flat, the window read `+0.01 -0.07 +1.00`; tipped forward 90 degrees toward the top strap, `-1.00 0.00 0.00`. That is gravity moving from z to x, a clean quarter turn about the axis that stayed at 0.00, which is y. So y runs left to right across the case, x runs strap to strap, and z comes out of the glass. THE THING THAT MAKES THE ORIGINAL NUMBERS FEEL WRONG IS PHYSICAL AND WORTH WRITING DOWN IN THE UI RATHER THAN A COMMENT: an accelerometer cannot see yawn. Rotation about the gravity axis leaves gravity unchanged, so a watch spun flat on a table reads identically however far it is turned, and no amount of shaking changes that. Only a magnetometer or a fusion algorithm can report heading. THE WINDOW NOW LEADS WITH THE ANSWER IN ONE WORD -- FACE UP, FACE DOWN, EDGE UP, EDGE DOWN, SIDE UP, SIDE DOWN, or TILTED -- chosen by whichever axis the gravity vector points along, with 0.70 (cosine 45 degrees) as the threshold so the name follows the dominant axis rather than merely the largest. TILT IN DEGREES IS DERIVED FROM GRAVITY and shown beside it: `pitch = atan2(-x, sqrt(y^2 + z^2))` and `roll = atan2(y, sqrt(x^2 + z^2))`. This is the rotation reading a person expects and it needs no magnetometer, so a board with only an accelerometer can still show it -- which is the honest answer to what the operator asked for. The arithmetic was checked against their own measurement rather than asserted: x -1.00 with y and z at zero gives exactly +90 degrees pitch and 0 roll. BOTH ORIENTATION SENSORS ARE NOW SUBSCRIBED. Sensor 69 (DEVICE_ORI) reports only ON CHANGE, so a watch lying still produced nothing and heading showed `--` for ever; 70 (DEVICE_ORI_WU) is the wakeup variant and reports continuously. Heading still reads `--` in this session because neither had delivered a value before the session ended, and the window does not call it a compass: without a magnetometer the fusion yaw is relative to power-on and drifts. A REAL BUG WAS FOUND AND FIXED BY TRYING TO REOPEN THE WINDOW. `start()` was called once behind a `static bool started` flag, but closing the window calls `stop()` by design -- the sensor is off when nothing reads it -- so the second open left the firmware running, the sensors off, and the window waiting for a sample that could never arrive. `start()` is idempotent and cheap when already streaming, so it is now called every tick, with a bounded retry so an absent part cannot re-attempt a three-second firmware upload repeatedly. THAT FIX IS NOT VERIFIED ON THE GLASS and this entry does not claim otherwise: reaching the Start-menu entry needs navigation that the session's harness kept getting wrong -- type-ahead resets after about two seconds, so `i` `i` searches twice from the top and lands on Image Viewer both times, and an arrow-count of eighteen overshot into Users. The reasoning is sound and the change is small, but it has not been seen working. A HARNESS NOTE WORTH KEEPING: the reliable way to open a specific app is the operator's finger, or the Terminal with a command; driving the Start menu from a serial capture is the least reliable part of this whole workflow and has now cost time in three separate sessions.
+
+#### Next Steps:
+
+VERIFY THE REOPEN, by tapping IMU, closing it, and tapping it again -- if it streams on the second open the fix is good, and if it hangs on "waiting for the first sample" the retry bound needs looking at. THEN HEADING: it is the one field still dashed. Sensor 70 is the one likely to deliver, and a nudge of the watch should produce a first value; if neither 69 nor 70 ever reports, the payload layout in `on_ori()` is the next thing to question rather than the subscription -- it assumes quaternion as four int16 scaled by 2^14 followed by three int16 Euler angles scaled by 2^8, which came from the driver's own reading of the protocol and has not been checked against Bosch's documentation. THE GESTURE SENSORS REMAIN THE PRIZE and are unchanged in reach: 61 pickup-gesture, 67 wrist-tilt-gesture, 75 stationary and 77 motion all run on the Fuser core, so a wrist-raise-to-wake costs the ESP32 nothing. NOTHING REGRESSED: the app is 0x2e7de0 with 1,000 KB free, both Bluetooth pairings are present, the layout from entry 43 stands, `music` still decodes through the module, and `imu`, `imu accel` and `imu rate` all still work. Carried forward unchanged from entries 40 to 46: `update.url` is unset, `third_party/tdsh` is pinned, the launchers have no installer, the Music progress bar still needs `total_samples`, `modload` still holds one blob, the guest stacks are still internal DRAM, the first IMU start blocks the desktop for about 3.3 s while the firmware uploads, and `.ai/core.md`'s Purpose line still calls this a port of Linux.
+
+#### Files Modified:
+
+None in this repository; the fork carries the work at 60e6fbc (apps/imu.c, include/tinydesk/td_sysinfo.h, ports/twatchultra/main/imu.c).
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: PARTIAL (the window was seen showing FACE UP, tilt in degrees and live axes; the reopen fix has not been exercised)
+
+---
+
 ## 46 COMMIT Unreleased 2026-11-17T12:30:00-07:00
 
 #### Coming From:
