@@ -1,3 +1,33 @@
+## 46 COMMIT Unreleased 2026-11-17T12:30:00-07:00
+
+#### Coming From:
+
+Unreleased 63eea97
+
+#### Purpose:
+
+Settle the sample-rate question entry 45 left open, then give the IMU a desktop app the way GPS has one.
+
+#### Outcome:
+
+THE RATE IS HONEST AT ABOUT 98 Hz AND THE EARLIER 973 Hz WAS AN ARTIFACT OF THE INSTRUMENT, NOT OF THE PART. Two independent measures agree: 195 samples in 2,002 ms, and 13.8 bytes per sample across 307 drains. An accelerometer packet is six bytes of payload plus a sensor id and a timestamp, so thirteen bytes is exactly one packet -- one packet, one sample, one callback. Three consecutive runs after the fix read 97.4, 98.8 and 97.8 Hz against a configured 100. The 973 Hz figure came from a build whose sampling loop was consuming more packets than the part was producing, which is the sort of thing a counter shows and a byte count disproves; that is why both were measured. THE REAL DEFECT THAT CYCLE FOUND IS A HANG, AND IT IS NOW UNDERSTOOD RATHER THAN WORKED AROUND. `bhy2_get_and_process_fifo()` reads into `buffer_size - read_length`, so when the part holds more data than the work buffer that term reaches zero, the read returns nothing, `remain_length` never changes, and the SDK spins for ever with the shell task inside it -- Ctrl+C cannot reach a loop that is not checking for it. The work buffer was 512 bytes, which is thirty-nine samples, less than half a second at 100 Hz. TWO ATTEMPTS TO BE CLEVERER MADE IT WORSE, and both are recorded in the code so they are not repeated. Gating the drain on a FIFO-length read let a backlog accumulate until the next drain could not finish. Draining in bounded passes still handed the SDK a FIFO larger than the buffer, so the same zero-length read came around one layer down. WHAT ACTUALLY FIXES IT IS THREE THINGS: a 2 KB buffer, which is 1.5 s of headroom; one drain per poll, which is the shape that was verified; and -- the part that matters -- turning the sensor OFF when nothing is reading it. A part left streaming into an undrained FIFO builds thirteen bytes per sample, a minute of which is 78 KB, and the next command to touch it is the one that wedges. A command that can freeze the terminal is worse than no command, so the one-shot commands now stop the sensor on the way out and the window stops it on close. THE UI IS BUILT AND HAS BEEN SEEN WORKING ON THE GLASS: `td_imu_ops_t` in `td_sysinfo.h` shaped like `td_gps_ops_t`, where start and stop are a pair and `latest` is the polling read; and `apps/imu.c`, a window that opens from the Start menu immediately after GPS and reads `BHI260AP`, `fw kernel 23.103`, `+0.01 -0.06 +1.00` and a climbing sample count -- a watch lying flat, with gravity on z and the other two axes near zero. The sample count is shown on purpose: a reading that has stopped updating looks exactly like a reading from a watch that is perfectly still, and the counter is the only thing that separates the two. THE PORT IS REACHED THROUGH A WEAK `board_imu_ops()`, the same pattern as `board_apps_register()`, because a `#define` in the port's own CMakeLists cannot reach `ports/esp_idf/app/main.c` and one build was lost to trying. TWO MORE BUGS THE WINDOW FOUND, both presenting as "nothing happens". `start()` booted the part but never enabled the sensors, so the window sat on "waiting for the first sample" with the firmware running and nothing being produced. And `latest()` did not drain the FIFO, so 50 Hz of readings piled up unread behind a live sensor; the contract says the port does the work, so the drain belongs in `latest()`. ORIENTATION IS WIRED BUT NOT YET PRODUCING. `BHY2_SENSOR_ID_DEVICE_ORI` (69) is in the firmware's sensor list and the driver subscribes to it and parses quaternion plus Euler, but heading, pitch and roll still read `--` on the glass while acceleration works. That is the one visible gap in the window.
+
+#### Next Steps:
+
+ORIENTATION IS THE NEXT REAL PIECE OF WORK and it is narrow: sensor 69 reports on change, so a watch sitting still may legitimately produce nothing -- the first thing to try is the wakeup variant (70, `DEVICE_ORI_WU`) or a motion nudge, before assuming the parser is wrong. The payload layout assumed here is quaternion as four int16 scaled by 2^14 followed by three int16 Euler angles scaled by 2^8, which is worth checking against the part's documentation rather than trusting the arithmetic in `on_ori()`. THE GESTURE SENSORS ARE THE PRIZE AND ARE NOW WITHIN REACH: 61 pickup-gesture, 67 wrist-tilt-gesture, 75 stationary, 77 motion are all carried by this firmware and all run on the Fuser core, so a wrist-raise-to-wake or a shake-to-do-something costs the ESP32 nothing. THE OPERATIONAL RULES THIS CYCLE PRODUCED are worth keeping beside the module ones, because they are the same shape: never let a sensor stream into a FIFO nobody drains; a command that can block the shell task is a bug regardless of whether the data is correct; and a counter alone cannot tell "still" from "dead" without a byte count next to it. NOTHING REGRESSED: the app is 0x2e7c20 with 1,000 KB free, both Bluetooth pairings are present, the layout from entry 43 stands, `music` still decodes through the module, and `imu accel` and `imu rate` both still work. Carried forward unchanged from entries 40 to 45: `update.url` is unset, `third_party/tdsh` is pinned, the launchers have no installer, the Music progress bar still needs `total_samples`, `modload` still holds one blob, the guest stacks are still internal DRAM, and `.ai/core.md`'s Purpose line still calls this a port of Linux. THE FIRST START OF THE IMU BLOCKS THE DESKTOP FOR ABOUT 3.3 SECONDS while the firmware uploads, because the window calls `start()` from its tick. It happens once per boot and was accepted rather than solved; moving it to a task is the fix if it ever becomes annoying.
+
+#### Files Modified:
+
+None in this repository; the fork carries the work at 83d4a58 (apps/imu.c, apps/apps.c, apps/td_apps.h, include/tinydesk/td_sysinfo.h, ports/esp_idf/app/main.c, ports/esp_idf/components/tinydesk/CMakeLists.txt, ports/twatchultra/main/imu.c|h, main/CMakeLists.txt, CMakeLists.txt).
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: PASS (window opens and shows live acceleration on the glass; orientation not yet producing)
+
+---
+
 ## 45 COMMIT Unreleased 2026-11-17T11:40:00-07:00
 
 #### Coming From:

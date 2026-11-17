@@ -1,4 +1,4 @@
-# Handoff — Escapement / TinyDesk on T-Watch Ultra, 2026-11-17T11:40
+# Handoff — Escapement / TinyDesk on T-Watch Ultra, 2026-11-17T12:30
 
 Orientation, not authority. **Verify before acting on it.** The files, the
 coredump partition and the board are the fact; this file is a claim.
@@ -13,15 +13,15 @@ says what holds it and what the real constraint is.
 
 ## Where things live
 
-- Project-control repo: `/run/media/vash/GIT/Escapement`, `main`, at `03ebad7`
-  (core-log **entry 45**). `.ai/core.md` is RESTRICTED — do not edit without an
+- Project-control repo: `/run/media/vash/GIT/Escapement`, `main`, at `63eea97`
+  (core-log **entry 46**). `.ai/core.md` is RESTRICTED — do not edit without an
   explicit request. Reference records live in `.ai/core-reference.md`.
 - **`.ai/core.md`'s Purpose line is stale and deliberately untouched.** It says
   "Escapement is a port of linux". The project is TinyDesk; the Linux line
   closed 2026-11-11. Fixing it needs the operator's word, because that file may
   only be edited when asked.
 - **Active code is the fork: `/run/media/vash/GIT/tinydesk-twatch`, branch
-  `t-watch-ultra`, clean at `20fc05a`.** Push to `fork`
+  `t-watch-ultra`, clean at `83d4a58`.** Push to `fork`
   (`aquasock/tinydesk`) only — **never** `origin` (upstream
   `tinydesk-project/tinydesk`).
 - `/run/media/vash/ROCKBOX` is the operator's source backup. **Never write to it
@@ -206,12 +206,34 @@ family — see entry 45. The one worth remembering above the others:
 sensors at all*. That produced a confident, wrong verdict that the firmware had
 no accelerometer.
 
-**The rate is NOT trustworthy yet.** Configured 100 Hz; measured 97.5 Hz with
-latency 0, then 973 Hz with a 20 ms latency and 32-byte watermark, with a
-`meta 12 fifo overflow` warning and five identical readings. Likely the drain is
-re-reading, not the part oversampling — a hypothesis, not a measurement. Pin it
-before a window depends on it: log `bytes_read`/`bytes_remain` from
-`bhy2_hif_get_fifo()`.
+**The rate IS settled: ~98 Hz**, confirmed two ways — 195 samples in 2002 ms and
+**13.8 bytes per sample** (a packet is 13). The earlier 973 Hz was an
+instrumentation artifact. Three runs read 97.4 / 98.8 / 97.8 Hz.
+
+**THE HANG, AND THE RULE IT TEACHES.** `bhy2_get_and_process_fifo()` reads into
+`buffer_size - read_length`; when the part holds more than the buffer that term
+hits zero, the read returns nothing, `remain_length` never changes, and the SDK
+spins **for ever** with the shell task inside it. Ctrl+C cannot reach it.
+
+```
+buffer      2048 B (1.5 s at 100 Hz)   -- 512 B was under half a second
+drains      ONE per poll, never "cleverer"
+and         STOP THE SENSOR when nothing is reading it
+```
+
+A part streaming into an undrained FIFO builds 13 B/sample — a minute is 78 KB —
+and the next command to touch it wedges. **A command that can freeze the terminal
+is worse than no command.**
+
+**The window works** (entry 46): Start menu → IMU, reads `BHI260AP`,
+`fw kernel 23.103`, `+0.01 -0.06 +1.00`, and a climbing sample count.
+`td_imu_ops_t` is in `td_sysinfo.h`, reached through a **weak
+`board_imu_ops()`** — a `#define` cannot cross the component boundary.
+
+**Orientation is wired but silent.** `DEVICE_ORI` (69) is in the firmware's
+sensor list and `on_ori()` parses it, but heading/pitch/roll still read `--`.
+Try the wakeup variant (70) or a motion nudge before suspecting the parser; it
+reports on change, so a still watch may legitimately say nothing.
 
 **What the KLIO firmware carries (35 ids):** 1 3 4 5 6 7 10 12 13 14 15 16 28 29
 31 32 37 38 48 50 52 53 55 57 59 61 63 67 69 70 75 77 94 112 127.
