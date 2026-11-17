@@ -1,4 +1,4 @@
-# Handoff — Escapement / TinyDesk on T-Watch Ultra, 2026-11-16T20:12
+# Handoff — Escapement / TinyDesk on T-Watch Ultra, 2026-11-16T21:40
 
 Orientation, not authority. **Verify before acting on it.** The files, the
 coredump partition and the board are the fact; this file is a claim.
@@ -11,8 +11,8 @@ recovered. A 5:58 track decoded at 15792504 frames, 0 errors, 0 short writes.**
 
 ## Where things live
 
-- Project-control repo: `/run/media/vash/GIT/Escapement`, `main`, at `1e3ed9f`
-  (core-log **entry 36**). `.ai/core.md` is RESTRICTED — do not edit without an
+- Project-control repo: `/run/media/vash/GIT/Escapement`, `main`, at `bee1216`
+  (core-log **entry 37**). `.ai/core.md` is RESTRICTED — do not edit without an
   explicit request. Reference records live in `.ai/core-reference.md`.
 - **`.ai/core.md`'s Purpose line is stale and deliberately untouched.** It says
   "Escapement is a port of linux". The project is TinyDesk; the Linux line
@@ -200,15 +200,25 @@ cache a PSRAM stack lives behind.
 `tama.c`, `nes.c`, `gbcbench.c`, `pmbench.c`. `nes.c` fits today, but that is a
 measurement about one game and one ROM.
 
-## Backup taken and verified
+## Backups taken and verified
 
 ```
-pinball-gb-music-2026-11-16-1952.bin   16,777,216 B
+pinball-fixed-menu-2026-11-16-2134.bin  16,777,216 B   CURRENT
+   sha256 48dd838b1931ce4d4ca49bccf6e51630d14a65484c278cfae660dfde1d014e31
+   app 0x10000 = b6f1ce70   module text 0xE00000 = 2ef7b97a
+   module rodata 0xF00000 = ff665897 -- all three byte-identical to the build
+   verify OK (digest matched) with the board held in the stub, board came back
+   HOLDS THE FIXED LAUNCHERS: storage extracted at 0x620000 and mounted with
+   littlefs-python shows /root/Apps/pm.py and tama.py both with
+   `import tinydesk` -- entry 36's device-side edit is in the image.
+pinball-gb-music-2026-11-16-1952.bin    16,777,216 B
    sha256 e7cd9c68d9274fa7
-   app 0x10000  = b6f1ce70   module text 0xE00000 = 2ef7b97a
-   module rodata 0xF00000    = ff665897
-   all three byte-identical to the build
+   same three regions; PREDATES the pm.py fix (littlefs only)
 ```
+
+**A full-image flash is the one thing `scripts/apps/` cannot survive**, so this
+backup is the only image that carries the working launchers. Untested: restoring
+it. `esptool write_flash 0 0x1000000` is ~6 minutes and has never been run here.
 
 ## THE HARNESS BUG THAT MISLED ME FOR A WHOLE STRETCH
 

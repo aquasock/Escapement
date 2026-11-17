@@ -1,3 +1,33 @@
+## 37 COMMIT Unreleased 2026-11-16T21:40:00-07:00
+
+#### Coming From:
+
+Unreleased bee1216
+
+#### Purpose:
+
+Take the full 16 MiB backup owed after entry 36's device-side fix, so the corrected Start-menu launchers are captured in an image that can be restored rather than only existing as text in a repository.
+
+#### Outcome:
+
+THE BACKUP EXISTS AND IS VERIFIED AGAINST THE CHIP. `pinball-fixed-menu-2026-11-16-2134.bin`, 16,777,216 bytes, sha256 `48dd838b1931ce4d4ca49bccf6e51630d14a65484c278cfae660dfde1d014e31`. The read took 230.3 seconds at 582.7 kbit/s and the verify reported `verify OK (digest matched)` with the board held in esptool's stub between the two, so the comparison was against the same flash the read came from rather than against a board that had rebooted and written NVS in between. The board was reset afterwards and came back: the script's own liveness check printed `board is up`. ALL THREE CODE REGIONS WERE COMPARED AGAINST THE BUILD THAT PRODUCED THEM, because entry 20 and entry 25 both record that a digest read at one moment will not match one read at another once the app descriptor's build time moves: the app at 0x10000 is `b6f1ce70`, the module's text at 0xE00000 is `2ef7b97a`, and its rodata at 0xF00000 is `ff665897`, each byte-identical to `build/tinydesk.bin`, `modules/build/flac.bin` and `modules/build/flac.data.bin`. THE REASON THIS BACKUP WAS WORTH FOUR MINUTES WAS THEN CHECKED RATHER THAN ASSUMED. The point was not the firmware -- that was already safe in git at `5021959` -- but the littlefs state, which a full-image flash destroys. The `storage` partition was extracted from the image at 0x620000 and mounted with littlefs-python at block_size 4096 and block_count 2016, and both launchers were read back out: `/root/Apps/pm.py` holds `import tinydesk` then `tinydesk.shell("pm start")`, and `/root/Apps/tama.py` holds `import tinydesk` then `tinydesk.shell("tama")`. That is entry 36's fix, in the image, restorable. So the two launchers now exist in three independent places -- the device, this backup, and `scripts/apps/` -- where before this cycle they existed in one. THE FIX HAS STILL NOT BEEN SEEN TO SURVIVE A FULL-IMAGE RESTORE, which is the only thing three copies buy and therefore the only thing left untested: the restore path is `esptool write_flash 0 0x1000000`, and it is untested here for the same reason it is rarely tested, that a 16 MiB write costs about six minutes and ends with a board in an unknown state. The claim this entry makes is narrower and it is exact: the bytes are in the file and the file matches the chip.
+
+#### Next Steps:
+
+NOTHING IN THE FORK NEEDED COMMITTING, which is itself the finding: the flashed app was already at `5021959` and the only change since entry 35 was on the device's littlefs, so `git status` is clean on both repositories and this backup's distinct content is entirely user state. The untested restore is the first thing to do when a full-image flash is next wanted for another reason, rather than as an experiment of its own. Everything entry 36 listed still stands: guest stacks in `tama.c`, `nes.c`, `gbcbench.c` and `pmbench.c` are still internal DRAM and two of them have already failed for exactly that reason, the launchers and the `.tdlink` files still have no installer beyond the documented commands in `scripts/apps/README.md`, a progress bar for the Music window still needs `total_samples` in the module handle, `modload` still holds exactly one blob, and `.ai/core.md`'s Purpose line still says the project is a port of Linux. The one item this cycle moved is the backup itself, which was the last outstanding artifact in the sequence that started at entry 32.
+
+#### Files Modified:
+
+None.
+
+#### Status:
+
+- Build: N/A
+- Deployment: N/A
+- User Test: N/A
+
+---
+
 ## 36 COMMIT Unreleased 2026-11-16T20:11:21-07:00
 
 #### Coming From:
