@@ -1,27 +1,29 @@
-# Handoff — Escapement / TinyDesk on T-Watch Ultra, 2026-11-17T16:05
+# Handoff — Escapement / TinyDesk on T-Watch Ultra, 2026-11-17T18:10
 
 Orientation, not authority. **Verify before acting on it.** The files, the
 coredump partition and the board are the fact; this file is a claim.
 
 ## One line
 
-**`music` plays FLAC on the built-in speaker with the decoder running out of the
-`modules` partition. Bluetooth has a controller slot and the pad lives there.
-Both TinyDesk 0.5.2 fixes are in. NVS is 64 KB, the OTA slots are equal, and
-**the app is at 0x20000, not 0x10000**. Internal RAM is now accounted: `mem`
-says what holds it and what the real constraint is.
+**The Bosch BHI260AP IMU works — accel at ~97 Hz, a posture vocabulary pinned by
+a host test, an IMU window on the glass, and KLIO learning and recognising a
+gesture trained by hand.** `music` plays FLAC on the built-in speaker with the
+decoder out of the `modules` partition. Bluetooth has a controller slot and the
+pad lives there. Both TinyDesk 0.5.2 fixes are in. NVS is 64 KB, the OTA slots
+are equal, and **the app is at 0x20000, not 0x10000**. The flash is four equal
+4 MiB regions; internal RAM is accounted by `mem`.
 
 ## Where things live
 
-- Project-control repo: `/run/media/vash/GIT/Escapement`, `main`, at `1b50d77`
-  (core-log **entry 52**). `.ai/core.md` is RESTRICTED — do not edit without an
+- Project-control repo: `/run/media/vash/GIT/Escapement`, `main`, at `473a988`
+  (core-log **entry 53**). `.ai/core.md` is RESTRICTED — do not edit without an
   explicit request. Reference records live in `.ai/core-reference.md`.
 - **`.ai/core.md`'s Purpose line is stale and deliberately untouched.** It says
   "Escapement is a port of linux". The project is TinyDesk; the Linux line
   closed 2026-11-11. Fixing it needs the operator's word, because that file may
   only be edited when asked.
 - **Active code is the fork: `/run/media/vash/GIT/tinydesk-twatch`, branch
-  `t-watch-ultra`, clean at `a8e64d4`.** Push to `fork`
+  `t-watch-ultra`, clean at `259513c`.** Push to `fork`
   (`aquasock/tinydesk`) only — **never** `origin` (upstream
   `tinydesk-project/tinydesk`).
 - `/run/media/vash/ROCKBOX` is the operator's source backup. **Never write to it
@@ -50,8 +52,26 @@ sink                built-in MAX98357A over I2S
   buffers are genuinely released.
 - **Clean rebuild is reproducible:** `make clean && make flac` produced a blob
   byte-identical (sha256 `dd47bce9…`) to the flashed one.
-- **The stale-link guard fires:** a header deliberately claiming the old base
-  was refused with the exact mismatch, decoded nothing, did not crash.
+- **The stale-link guard fires** — and again for real (entry 53): a blob linked
+  for `0x42ad0000/0x3ccd0000` against a live `0x42ae0000/0x3cce0000` was refused
+  with both pairs named, decoded nothing, did not crash.
+- **After the entry-53 relink, re-verified end to end:** 44.1 kHz tone
+  `state done, 352800 frames, 0 errors, 78 decode calls`; 48 kHz tone
+  `state done, 192000 frames, 0 errors, rate 48000`. Operator heard it:
+  "i heard the tone."
+
+```
+klio learn          train a gesture           progress 0..100, then an index
+klio detect         five-step lifecycle       RECOGNISED pattern 0, count 5.1
+klio / klio stop / klio reset
+imu / imu accel / imu rate / imu scan / imu inject
+```
+
+- **KLIO recognises** (entry 52): a gesture trained by hand, then `klio detect`
+  and the same gesture again gives `RECOGNISED pattern 0, count 5.1` then `5.5`,
+  45 frames over one run.
+- **Accelerometer:** `x -0.01 y -0.07 z +1.03` flat, ~97.4 Hz, confirmed two
+  ways. Firmware boots in 3.26 s from `moddata+0x10000`.
 
 ## The trap that cost this cycle — READ BEFORE TOUCHING MODULES
 
@@ -74,15 +94,36 @@ away. Because micro-flac compares the input's first four bytes against
 `MAGIC_BYTES` in `.rodata` (verified: `fLaC` at `.rodata+0x7b0`), the only
 symptom was `FLAC_DECODER_ERROR_BAD_MAGIC_NUMBER` on files that were fine.
 
-Three mechanisms now catch it:
-- `modload_header_t` carries `linked_inst` / `linked_data` (ABI 2).
-- `modload_prepare()` compares them to the live mapping and refuses, leaving the
-  reason in `modload_why()`.
-- `modules/moddata.at` holds the pair; `make modaddr` refreshes it by reading
-  `/root/modaddr.txt` out of the raw storage partition with esptool.
+**IT BIT AGAIN on 2026-11-17 (entry 53), and the runtime guard is why it was
+cheap.** Five app rebuilds for the IMU and KLIO work moved the instruction base
+0x42ad0000 -> 0x42ae0000 while `moddata.at` still held entry 43's pair; `music`
+then refused every file. The guard turned it into one status line naming both
+pairs. **What failed was the repair path, not the guard** — see below.
+
+Four mechanisms now catch it:
+- `modload_header_t` carries `linked_inst` / `linked_data` / `linked_host`
+  (ABI 3). `modload_prepare()` compares all three to the live values and refuses,
+  leaving the reason in `modload_why()`.
+- `modules/moddata.at` holds the pair plus **`app=<size>`**, the size of the app
+  image they were measured against.
+- **`check_addr_fresh.py` refuses to link a module when that size disagrees with
+  the current build**, and `flac` depends on it through a phony target so it
+  cannot be skipped. This is the mechanism that closes the five-rebuild gap.
+- `make modaddr` re-measures by reading `/root/modaddr.txt` out of the raw
+  storage partition with esptool — **and it now parses `partitions.csv` for the
+  storage row.** It held `0x620000/0x7E0000` from before the four-region table,
+  so it was reading 1.5 MiB below storage and could not repair anything. If you
+  ever see it "find nothing", the geometry is the suspect.
 
 **So: after ANY change that alters the app image size — `make modaddr`, rebuild
-the module, flash all three regions.** The guard makes forgetting it a log line.
+the module (`make flac` now refuses without a fresh measurement), flash all
+three regions.** Neither the build nor the loader will let a stale blob through
+silently now.
+
+**What the guard does NOT cover:** `linked_host` moves on nearly every build
+regardless of image size, and only the loader checks it. A build that changes
+code without changing size could still ship a stale one — a runtime diagnostic,
+not garbage. Reading the symbol out of the fresh ELF is the obvious tightening.
 
 ## Flash and build
 
@@ -547,26 +588,20 @@ workflow. Two reliable routes: the operator's finger, or a shell command.**
 - An orphaned helper holding `/dev/ttyACM1` makes every esptool call fail while
   the board looks healthy. `fuser /dev/ttyACM1` names it.
 
-## Backups
-
-```
-music-only-2026-11-16-1654.bin   16,777,216 B   THE CURRENT LAYOUT
-   sha256 8308350bb31ff4e6e966a3d652f24a2b4852e4203966bf56b5a28b60b865dd68
-   app / module .text / module .rodata all verified byte-identical to the build.
-music-module-2026-11-16-1637.bin  the same app plus the pre-guard module
-modules-2026-11-16-1320.bin       pre-`music` layout (inline decoder present)
-baseline-2026-11-16.bin           entry 23, PRE-FLAC — do not restore expecting
-                                  a working board
-```
+## Reading a backup's digest
 
 **A digest read before a rebuild will not match one read after** — the app
 descriptor's build time moves, and esptool appends an image digest computed over
-it. Measured on this change: after deleting the dead `main/music.h`, the rebuild
-produced the same size (0x2e3090) and differed from the flashed image in exactly
-69 bytes — 4 for the timestamp `16:45:02` -> `16:59:14`, the descriptor's ELF
-hash, and the trailing 32-byte digest. Every byte in between was identical, so
-the board runs the same code and was not reflashed. Compare regions, never whole
-digests.
+it. Measured once: after deleting a dead header, the rebuild produced the same
+size (0x2e3090) and differed from the flashed image in exactly 69 bytes — 4 for
+the timestamp `16:45:02` -> `16:59:14`, the descriptor's ELF hash, and the
+trailing 32-byte digest. Every byte in between was identical, so the board ran
+the same code and was not reflashed. **Compare regions, never whole digests.**
+
+Pre-quad images (all in the old layout, all superseded by entry 43):
+`music-only-2026-11-16-1654.bin`, `music-module-2026-11-16-1637.bin`,
+`modules-2026-11-16-1320.bin`, `baseline-2026-11-16.bin` (entry 23, PRE-FLAC —
+do not restore expecting a working board).
 
 ## Documentation, as it now stands
 
@@ -643,11 +678,21 @@ measurement about one game and one ROM.
 ## Backups taken and verified
 
 ```
-imu-window-2026-11-17-1315.bin       16,777,216 B   STALE by one rename
-   (predates entry 49; the image on the board is newer)
+klio-music-2026-11-17-1300.bin       16,777,216 B   THE CURRENT BOARD
+   sha256 a4aeea4a1038d740d7bdc1fa4b79e9927ec7aef5ded75313bc8627fe60405176
+   app 0x20000, module text 0xC00000, module data 0xE00000, IMU fw 0xE10000
+   -- all four byte-identical to the build. verify OK, board came back.
+   KLIO learning + recognition, redrawn posture names, music working.
+
+klio-2026-11-17-1247.bin             16,777,216 B   same app, STALE MODULES
+   sha256 c850ae2c25a5e032b20981cc3ce6afe0ecbe2c23367a7b1931efefde1df87d3b
+   Taken 40 minutes earlier; differs from the above ONLY in the two module
+   regions (linked for 0x42ad0000/0x3ccd0000, so `music` refuses). Restoring it
+   rolls `music` back to broken -- prefer the 1300 image.
+
+imu-window-2026-11-17-1315.bin       16,777,216 B   superseded
    sha256 1325c673bb8dca1be00b98a1772f0b4dc79491b7c6423538f9090f8ddea97557
-   app 0x20000, module text 0xC00000, module data 0xE00000 -- all byte-identical
-   verify OK with the board in the stub; board came back. IMU window + firmware.
+   predates entry 49 (old posture names) and the KLIO work.
 
 quad4m-2026-11-17-1030.bin           16,777,216 B   quad layout, pre-IMU
    sha256 535776ecbcdaa0462cf98ce5c06db596bf3667c8eac00651d1f034c5664b8dac
@@ -828,23 +873,45 @@ did NOT work from the harness; `Esc`, F10 and typed commands did.
    halting. Reviewed, **never exercised**.
 5. **No picker, queue, seek or progress display.** `music` takes a path.
 
-6. **The app image is at 0x2e4c40, 46,016 B (44.9 KB, 1.5%) free** in the OTA
-   slot. That is FLASH for the image, not RAM. Both slots are 0x2F0000 so this
-   is the budget either way. There is also a **24,576 B gap at
-   0x1A000-0x20000** that is unused on purpose (the app offset is kept 64 KB
-   aligned); dropping that alignment to 0x1A000 would make 70,592 B available,
-   and ESP-IDF only asks for 4 KB there without secure boot.
-7. **Decide the NVS question** (see the NVS section): grow to 64 KB now and
-   re-pair, or wait until something forces a full-image flash anyway.
-8. **`update.url` is unset** in `board.example.conf` and the device's
+6. **The app image is 3,054,112 B with 1,009,120 B (985 KiB) free** in its
+   0x3E0000 slot — entry 43 bought that room. That is FLASH for the image, not
+   RAM; both slots are 0x3E0000 so it is the budget either way.
+7. **KLIO is a demonstration, not a feature.** Three things stand between it and
+   something the operator would use, in the order they matter: **persistence**
+   (the firmware is uploaded to RAM every boot, so a trained pattern is gone —
+   `read_pattern` -> littlefs -> `write_pattern` fixes it and is the obvious next
+   piece), **a UI** (it is a shell command), and **tuning** the four knobs
+   `RECOGNITION_SENSITIVITY`, `RECOGNITION_RESPONSIVNESS`, `LEARNING_SPEED`,
+   `LEARNING_SIMILARITY_THRESHOLD`.
+8. **Host-side data injection is inert on this firmware** (entry 51, six payload
+   shapes). The operator's "stream arbitrary x,y,z in" version of the demo cannot
+   be built here; the remaining avenues are a different firmware image or Bosch's
+   own toolchain, both large. Say this plainly before anyone plans around it.
+9. **`check_addr_fresh.py` compares image size, not `linked_host`.** That symbol
+   moves on nearly every build regardless of size, so a code-only rebuild could
+   still ship a stale one — a runtime diagnostic now, but reading the symbol out
+   of the fresh ELF is three lines.
+10. **The module path has no flash step in the build.** `make modaddr && make
+    flac` then flashing 0xC00000 and 0xE00000 is a manual sequence, and a manual
+    sequence is what left it stale for five rebuilds. A `make flash-modules`
+    would close the other half.
+11. **Backups want pruning.** Two images from one hour differ only in the module
+    regions and neither name says so; four layouts are still on disk. Keep the
+    current layout plus one rollback, and say in one line what each holds.
+12. **The IMU window's heading still reads `--`.** `DEVICE_ORI` (69) and
+    `DEVICE_ORI_WU` (70) are both subscribed and neither has delivered a value.
+    If a nudge does not produce one, question `on_ori()`'s payload layout — it
+    assumes 4xint16 quaternion at 2^14 then 3xint16 Euler at 2^8, taken from the
+    driver, not from Bosch's documentation.
+13. **`update.url` is unset** in `board.example.conf` and the device's
    `board.conf`, so *Check for official updates* reads upstream's feed and would
    offer an image not built for this watch.
-9. **`third_party/tdsh` is pinned behind its remote** (0b8ebee -> 53e8681 seen
+14. **`third_party/tdsh` is pinned behind its remote** (0b8ebee -> 53e8681 seen
    on this fetch; the shell itself stays at 0.5.1).
-10. **A gamepad reaches the desktop input path like a keyboard now.** Whether
+15. **A gamepad reaches the desktop input path like a keyboard now.** Whether
     the emulators exploit that — the NES already takes a BLE Xbox pad through
     `gamepad.c` — is separate work from pairing.
-11. **Upstream invitation, from the author on issue 20:** the port is welcome
+16. **Upstream invitation, from the author on issue 20:** the port is welcome
     upstream as `ports/twatchultra` if a PR is ever wanted.
 
 ## Out of scope by instruction
