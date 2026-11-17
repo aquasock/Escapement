@@ -1,4 +1,4 @@
-# Handoff — Escapement / TinyDesk on T-Watch Ultra, 2026-11-16T17:05
+# Handoff — Escapement / TinyDesk on T-Watch Ultra, 2026-11-16T17:30
 
 Orientation, not authority. **Verify before acting on it.** The files, the
 coredump partition and the board are the fact; this file is a claim.
@@ -11,11 +11,15 @@ recovered. A 5:58 track decoded at 15792504 frames, 0 errors, 0 short writes.**
 
 ## Where things live
 
-- Project-control repo: `/run/media/vash/GIT/Escapement`, `main`, at `bd4518b`
-  (core-log **entry 30**). `.ai/core.md` is RESTRICTED — do not edit without an
+- Project-control repo: `/run/media/vash/GIT/Escapement`, `main`, at `1fbcbb2`
+  (core-log **entry 31**). `.ai/core.md` is RESTRICTED — do not edit without an
   explicit request. Reference records live in `.ai/core-reference.md`.
+- **`.ai/core.md`'s Purpose line is stale and deliberately untouched.** It says
+  "Escapement is a port of linux". The project is TinyDesk; the Linux line
+  closed 2026-11-11. Fixing it needs the operator's word, because that file may
+  only be edited when asked.
 - **Active code is the fork: `/run/media/vash/GIT/tinydesk-twatch`, branch
-  `t-watch-ultra`, clean at `791cc7b`.** Push to `fork`
+  `t-watch-ultra`, clean at `a043a9d`.** Push to `fork`
   (`aquasock/tinydesk`) only — **never** `origin` (upstream
   `tinydesk-project/tinydesk`).
 - `/run/media/vash/ROCKBOX` is the operator's source backup. **Never write to it
@@ -135,6 +139,25 @@ produced the same size (0x2e3090) and differed from the flashed image in exactly
 hash, and the trailing 32-byte digest. Every byte in between was identical, so
 the board runs the same code and was not reflashed. Compare regions, never whole
 digests.
+
+## Documentation, as it now stands
+
+Rewritten 2026-11-16 (core-log entry 31). The README describes TinyDesk on the
+watch, with the Linux era in its own section marked as abandoned — not deleted,
+because `docs/panel-geometry.md` is still the only measurement of the chamfers
+and the current desktop is laid out inside it.
+
+- **`docs/README.md` sorts every document into current and archive.** Three are
+  current (`nes-accuracy`, `gbc-scoping`, `pokemini-scoping`); the other eleven
+  are Linux-era. Two archive documents are still load-bearing:
+  `panel-geometry.md` and `panel-transfer-cost.md`.
+- **Live scripts:** `watch-backup.sh`, `tamacore-host.sh`, `tamacore-sync.sh`.
+  Everything else in `scripts/` targets the Linux image. `watch-backup.sh` runs
+  out of the *old* toolchain's Python at
+  `build/idf-tools/python_env/idf5.1_py3.14_env` — it works, and it will break
+  if `build/` is deleted.
+- **This repository has no `LICENSE` file.** The old README claimed GPLv3; the
+  firmware fork is MIT. Unresolved, recorded as a decision owed.
 
 ## Next steps
 
