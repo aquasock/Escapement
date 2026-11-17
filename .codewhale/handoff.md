@@ -1,4 +1,4 @@
-# Handoff — Escapement / TinyDesk on T-Watch Ultra, 2026-11-17T11:15
+# Handoff — Escapement / TinyDesk on T-Watch Ultra, 2026-11-17T11:40
 
 Orientation, not authority. **Verify before acting on it.** The files, the
 coredump partition and the board are the fact; this file is a claim.
@@ -13,15 +13,15 @@ says what holds it and what the real constraint is.
 
 ## Where things live
 
-- Project-control repo: `/run/media/vash/GIT/Escapement`, `main`, at `1c7d664`
-  (core-log **entry 44**). `.ai/core.md` is RESTRICTED — do not edit without an
+- Project-control repo: `/run/media/vash/GIT/Escapement`, `main`, at `03ebad7`
+  (core-log **entry 45**). `.ai/core.md` is RESTRICTED — do not edit without an
   explicit request. Reference records live in `.ai/core-reference.md`.
 - **`.ai/core.md`'s Purpose line is stale and deliberately untouched.** It says
   "Escapement is a port of linux". The project is TinyDesk; the Linux line
   closed 2026-11-11. Fixing it needs the operator's word, because that file may
   only be edited when asked.
 - **Active code is the fork: `/run/media/vash/GIT/tinydesk-twatch`, branch
-  `t-watch-ultra`, clean at `d81ed1b`.** Push to `fork`
+  `t-watch-ultra`, clean at `20fc05a`.** Push to `fork`
   (`aquasock/tinydesk`) only — **never** `origin` (upstream
   `tinydesk-project/tinydesk`).
 - `/run/media/vash/ROCKBOX` is the operator's source backup. **Never write to it
@@ -188,15 +188,37 @@ imu          rail up, chip id 0x70 checked, blob found at moddata+0x10000,
              kernel 23.103 read back, returns to the prompt
 ```
 
-**What does not:** `imu accel` blocks inside `bhy2_set_virt_sensor_cfg` and takes
-the shell task with it — Ctrl+C cannot reach it. The default command therefore
-reports status only; samples are opt-in by name.
+**ACCELERATION NOW READS** (entry 45): `imu accel` prints five live readings of
+`x +0.01  y -0.07  z +1.00` g — a watch lying flat. `imu rate` and `imu scan`
+also work.
 
-**Next: instrument that one call.** Two hypotheses, in order —
-(1) the parameter-write path wants a different transfer length than the 64 that
-uploads the firmware; (2) the part needs
-`bhy2_set_host_intf_ctrl(BHY2_HIF_CTRL_ASYNC_STATUS_CHANNEL)` before any virtual
-sensor is configured (the vendor sets it right after boot; this driver does not).
+```
+imu accel   five live readings, ~1 s apart, then total samples
+imu rate    samples per second over a 2 s window
+imu scan    the 35 virtual sensor ids the KLIO firmware carries
+imu stop    accelerometer off (firmware stays loaded)
+```
+
+**Four bugs stood between the boot and a sample**, all in the "nothing happens"
+family — see entry 45. The one worth remembering above the others:
+`bhy2_is_sensor_available()` reads a bitmap that only
+`bhy2_update_virtual_sensor_list()` populates, so asking first reports *no
+sensors at all*. That produced a confident, wrong verdict that the firmware had
+no accelerometer.
+
+**The rate is NOT trustworthy yet.** Configured 100 Hz; measured 97.5 Hz with
+latency 0, then 973 Hz with a 20 ms latency and 32-byte watermark, with a
+`meta 12 fifo overflow` warning and five identical readings. Likely the drain is
+re-reading, not the part oversampling — a hypothesis, not a measurement. Pin it
+before a window depends on it: log `bytes_read`/`bytes_remain` from
+`bhy2_hif_get_fifo()`.
+
+**What the KLIO firmware carries (35 ids):** 1 3 4 5 6 7 10 12 13 14 15 16 28 29
+31 32 37 38 48 50 52 53 55 57 59 61 63 67 69 70 75 77 94 112 127.
+The interesting ones are **61 pickup-gesture, 63 ar, 67 wrist-tilt-gesture,
+69 device-orientation, 70 ori-wakeup, 75 stationary, 77 motion** — the on-chip
+work this board cannot afford to do itself. Try `BHY2_SENSOR_ID_DEVICE_ORI`
+(69) next; heading on a wrist beats three acceleration numbers.
 
 **Flashing the firmware** (separate from `make flac`, they share `moddata`):
 

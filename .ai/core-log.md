@@ -1,3 +1,33 @@
+## 45 COMMIT Unreleased 2026-11-17T11:40:00-07:00
+
+#### Coming From:
+
+Unreleased 03ebad7
+
+#### Purpose:
+
+Fix the blocking sensor-configuration call that entry 44 left open, and get the BHI260AP actually reporting acceleration.
+
+#### Outcome:
+
+ACCELERATION READS, AND THE VALUES ARE RIGHT. `imu accel` prints five live readings of `x +0.01  y -0.07  z +1.00` in g -- a watch lying flat, which is the one reading gravity makes checkable without moving anything. The command returns to the prompt. FOUR BUGS STOOD BETWEEN THE BOOT THAT WORKED AND A SAMPLE, and each of them presented as "nothing happens", which is why they cost as much as they did. FIRST, `bhy2_update_virtual_sensor_list()` was never called. That function fills `dev->event_size[]`, which is how the FIFO parser knows how long a packet for a given sensor is; `bhy2_get_virt_sensor_list()`, which was called, fills only the presence bitmap. Without the sizes the parser cannot frame a packet, so it dispatches nothing: the sensor is configured, the part streams, the drain returns OK, and zero samples reach the callbacks. SECOND, the availability check lied in a way that sent a whole cycle down the wrong path. `bhy2_is_sensor_available()` reads a bitmap that only the list call populates, so asking before that reports "no sensors at all" -- and the log then said, in a confident engineering voice, that the KLIO firmware had no accelerometer. It has 35 virtual sensors and id 4 is among them. The lesson is the one this project keeps relearning: an absence in one instrument is not evidence about a mechanism, and a "no" from an API is only as good as what populated the thing it reads. THIRD, a FIFO gate that returned early unless the interrupt status showed the WAKEUP bits did two kinds of harm at once -- accel data arrives on the NON-wakeup FIFO (0x18), and the part raises interrupts on a watermark, so a gate trusting a stale status bit let the FIFO fill until it overflowed. It was written to guard against a stall that turned out to be a different bug (the missing async-status-channel control, fixed in entry 44's follow-up), and one bug does not justify a filter that discards data: `bhy2_get_and_process_fifo()` already reads the status itself. FOURTH, the burst loop in the command never refreshed the sample counter it was waiting on, so it always timed out and printed a single line -- while `imu rate`, measuring the same sensor, counted 195 samples in 2,000 ms. A stale loop variable is not evidence about the device. THE REPORTING CADENCE ALSO NEEDED CONFIGURING rather than accepting: with the defaults the part delivers about 26 samples once a second, which is useless for a window redrawing at 4 Hz and leaves the FIFO on the edge of overflowing, so the driver now sets a 20 ms report latency and a 32-byte wakeup watermark. THE SAMPLE RATE IS NOT YET TRUSTWORTHY AND THIS ENTRY WILL NOT CLAIM IT IS. With latency 0 and default watermark the measurement was 97.5 Hz; after the latency and watermark change it measures 973 Hz, three times in a row, against a configured 100 Hz, with a `meta 12 fifo overflow` warning and five consecutive readings identical to two decimal places. Those three facts together suggest the drain is re-reading data it has already delivered rather than the part sampling ten times faster, but that is a hypothesis and not a measurement. What IS established is that real samples arrive with the correct value, which is enough to build on and not enough to size a buffer with. `imu` now takes `accel`, `rate`, `scan` and `stop`, dispatched by `strcmp` rather than by first letter -- "stop" and "scan" share a first letter, and a first-letter dispatch had silently sent `imu scan` to the status branch for one build. `imu scan` prints all 35 sensor ids the loaded KLIO firmware carries, which is worth keeping: 61 pickup-gesture, 63 ar, 67 wrist-tilt-gesture, 69 device-orientation, 70 device-orientation-wakeup, 75 stationary-detect, 77 motion-detect, alongside the expected accelerometer and gyroscope families. That is the wearable firmware, and the gesture and orientation sensors are the interesting half -- they are exactly the on-chip work this board cannot afford to do in its 26 KB of internal RAM.
+
+#### Next Steps:
+
+THE RATE NEEDS PINNING BEFORE ANY WINDOW DEPENDS ON IT, and the way to do that is to look at what the drain actually consumes rather than at the counter: log `bytes_read` and `bytes_remain` from `bhy2_hif_get_fifo` for a few polls, and compare the byte count against the packet size the SDK expects. If the byte counts match the sample count, the part really is oversampling and the configured rate is not being honoured; if they do not, the drain is re-reading. The fifo-overflow warning is the second signal and should disappear once the first is understood. THE UI IS THEN SHORT AND WAS ALREADY SPECIFIED: `td_imu_ops_t` in `td_sysinfo.h` shaped like `td_bt_ops_t` and `td_gps_ops_t`, with a poll-latest accessor rather than a callback, because a 4 Hz window wants the newest value and does not care about the ones it missed; then the GPS-style window. THE GESTURE AND ORIENTATION SENSORS ARE THE REAL PRIZE and should be tried as soon as the plumbing is trusted -- `BHY2_SENSOR_ID_DEVICE_ORI` (69) gives a heading and pitch directly, which is more useful on a wrist than three acceleration numbers and costs the ESP32 nothing. NOTHING REGRESSED: the app is 0x2e7650 with 1,003 KB free, both Bluetooth pairings are present, the layout from entry 43 stands, and `music` still decodes through the module. Carried forward unchanged from entries 40 to 44: `update.url` is unset, `third_party/tdsh` is pinned, the launchers have no installer, the Music progress bar still needs `total_samples`, `modload` still holds one blob, the guest stacks are still internal DRAM, and `.ai/core.md`'s Purpose line still calls this a port of Linux. The board is left with the IMU firmware flashed, `imu accel` and `imu rate` both working, and the accelerometer configured.
+
+#### Files Modified:
+
+None in this repository; the fork carries the work at 20fc05a (ports/twatchultra/main/imu.c).
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: PASS (acceleration reads with correct gravity; the rate figure is flagged as untrustworthy rather than accepted)
+
+---
+
 ## 44 COMMIT Unreleased 2026-11-17T10:10:00-07:00
 
 #### Coming From:
