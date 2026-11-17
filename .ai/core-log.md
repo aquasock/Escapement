@@ -1,3 +1,33 @@
+## 56 COMMIT Unreleased 2026-11-17T23:30:00-07:00
+
+#### Coming From:
+
+Unreleased f6d7152
+
+#### Purpose:
+
+Follow the operator's own reasoning to its conclusion: "i dont think boshe ever made what i want but if they did, it would be a diag tool to test the ai engine in the imu. the engineers need some way to make sure its working properly and only synthetic, repeatable data can do that." They were right, and entries 51, 54 and 55 had all been searching in the wrong place.
+
+#### Outcome:
+
+BOSCH SHIPS DATA INJECTION FIRMWARE FOR THE BHI260AP AND IT BOOTS ON THIS BOARD. `firmware/bhi260ap/DataInject.fw`, 95,960 bytes, and `DataInject_nobsx.fw`, 94,460 bytes, from `boschsensortec/BHI2xy_SensorAPI`. They are not in SensorLib, which this port took its KLIO image from, and SensorLib is where every earlier search started -- so the part looked permanently incapable of injection on the strength of a third-party Arduino library's contents. THE MEASUREMENT, WITH ITS CONTROL: the BHI260AP KLIO image (123,696 B) gives `boot 38`, err `00`; the BHI260AP DataInject image (95,960 B) also gives `boot 38`, err `00` and boots in 2,473 ms; the BHI360 data-inject image (99,736 B) gives `boot 78` with err `14`, which is HOST_FW_VERIFY_ERROR. THE BHI360 ATTEMPT IS WHAT MAKES THE RESULT WORTH TRUSTING, because it exercises the same code path, the same container magic (0x662B) and the same silicon and comes out different -- the part received that image in full, ran verification and rejected it. The distinguishing fact is chip id: 0x70 is a BHI260, 0x7A is a BHI360, and this board reports 0x70. A NEW INSTRUMENT WAS NEEDED TO SEE ANY OF THIS: `imu boot [upload]` brings the rail, bus and SDK up and reports the part's own boot status WITHOUT uploading firmware, which is the only way to inspect a part whose firmware was refused -- every other command gates on a successful start, so the one case that needed diagnosis was the one case that could not be reached. `boot 38` is iface-ready + verify-done + no-flash; `boot 78` adds VERIFY-ERROR. THE INJECTION PROTOCOL WAS THEN FOUND IN BOSCH'S OWN EXAMPLE, `examples/swim/swim_data_injection`, AND ONE STEP EXPLAINS EVERY EARLIER FAILURE: THE VIRTUAL SENSOR MUST BE CONFIGURED FIRST, `bhy2_set_virt_sensor_cfg(SENSOR_ID, rate, latency)`, BEFORE ANYTHING IS INJECTED. Injection supplies data FOR a sensor; with no sensor configured nothing is listening and the packets are accepted and dropped, which is precisely what entry 55 measured from the outside with +7.32 g on Z and zero samples above 4 g. The rest of the sequence is: step-by-step mode, drain the status FIFO, inject a SIX-BYTE FULL TIMESTAMP as its own call, then inject the event, then drain the FIFO between injections. A 6-byte timestamp as a separate injection is the second thing every earlier attempt lacked and the reason the event would have had nowhere to sit in time. THE TRADE IS REAL AND MUST BE STATED: the DataInject image presents only TWO virtual sensors, ids 4 and 6 -- the accelerometer and its wake-up variant. No gyro, no orientation, no KLIO. The IMU window, the posture vocabulary and the KLIO experiments all stop working while it is loaded, and there is no image that combines KLIO learning with injection on this silicon. That is a choice per session, not a capability. WHAT IS NOT DONE: `imu feed <seconds> <hz> <amp>` implements Bosch's sequence and generates a sine with the host, injects it and round-trips the samples back through the part's parser -- but it WEDGES THE SHELL TASK on the drain, and `imu raw` on a FIFO channel desyncs the stream whenever the read is capped short of the length the header states. Both are instrument bugs and neither is evidence about the part. The board was returned to the KLIO image and verified whole: IMU boots to kernel 23.103, `music` decodes 352800 frames with 0 errors and 78 decode calls. BOTH THE FIRMWARE IMAGES AND THE PROTOCOL ARE NOW RECORDED IN `ports/twatchultra/components/imu/README.md`, including the 12-byte FUMI wrapper the port requires, the esptool commands in both directions, and the BHI360 negative -- so the next session does not have to rediscover any of it.
+
+#### Next Steps:
+
+FINISH THE FEEDER, AND IT IS SMALL: the wedge is in the drain, not in the injection. Bosch's own loop sets the async status bit, calls `bhy2_get_and_process_fifo` against a generously sized work buffer, then clears the bit; this port has a documented history of that exact call spinning for ever when the FIFO is larger than the buffer, so the buffer and the bound both need to be right rather than optimistic. The `imu raw` capping behaviour should be removed entirely: a partial FIFO read leaves the stream desynchronised for every later read, which is why the counts jumped from 251 to a nonsense 64,768. ONCE THE SINE ROUND-TRIPS, THE OPERATOR'S ACTUAL EXPERIMENT IS TWO COMMANDS: train on a reference sine, then measure `bhy2_klio_similarity_score()` against modulated variants, which already returns a float where "close to 1.0 means the same exercise and negative means very different" -- that is the 90%-sure figure and its decay, and `klio save <slot>` and `klio compare <ref> <slots>` are already built and waiting for it. NOTE THAT KLIO IS NOT IN THE DATAINJECT IMAGE, so the similarity experiment needs the KLIO image and the feeding needs DataInject: if both are required in one session, that is the point at which Bosch's toolchain becomes the real answer. THE FULL SEQUENCE TO TEST FIRST, in order: flash DataInject, `imu boot upload`, `imu cmd 0007 02000000` for step-by-step, configure the accelerometer with `bhy2_set_virt_sensor_cfg`, then timestamp-then-event injection with a full drain between. THE BOARD IS ON THE KLIO IMAGE AND FULLY WORKING as of this entry, which is where it should stay until the feeder is proven. UNCHANGED AND STILL OPEN: KLIO patterns do not survive a reboot, KLIO has no UI and none of its four knobs are tuned, the similarity commands are built but never run against a real pattern, the guest stacks are internal DRAM, `update.url` is unset, and `.ai/core.md`'s Purpose line still calls this a port of Linux.
+
+#### Files Modified:
+
+None in this repository; the fork carries the work at f28ad6a (ports/twatchultra/main/imu.c, components/imu/DataInject.fw, DataInject_nobsx.fw, README.md).
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: N/A (firmware identified and booted; the experiment it exists for is not finished)
+
+---
+
 ## 55 COMMIT Unreleased 2026-11-17T21:30:00-07:00
 
 #### Coming From:

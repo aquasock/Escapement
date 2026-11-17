@@ -1,13 +1,15 @@
-# Handoff — Escapement / TinyDesk on T-Watch Ultra, 2026-11-17T21:45
+# Handoff — Escapement / TinyDesk on T-Watch Ultra, 2026-11-17T23:45
 
 Orientation, not authority. **Verify before acting on it.** The files, the
 coredump partition and the board are the fact; this file is a claim.
 
 ## One line
 
-**The Bosch BHI260AP IMU works — accel at ~97 Hz, a posture vocabulary pinned by
-a host test, an IMU window on the glass, and KLIO learning and recognising a
-gesture trained by hand.** `music` plays FLAC on the built-in speaker with the
+**Bosch ships a data-injection firmware for the BHI260AP and it boots on this
+board — that is the door to feeding the AI engine synthetic data, and it was
+found by looking in Bosch's API repo rather than SensorLib.** The IMU otherwise
+works as before: accel at ~97 Hz, a posture vocabulary pinned by a host test, an
+IMU window, and KLIO learning and recognising a gesture trained by hand. `music` plays FLAC on the built-in speaker with the
 decoder out of the `modules` partition. Bluetooth has a controller slot and the
 pad lives there. Both TinyDesk 0.5.2 fixes are in. NVS is 64 KB, the OTA slots
 are equal, and **the app is at 0x20000, not 0x10000**. The flash is four equal
@@ -15,15 +17,15 @@ are equal, and **the app is at 0x20000, not 0x10000**. The flash is four equal
 
 ## Where things live
 
-- Project-control repo: `/run/media/vash/GIT/Escapement`, `main`, at `6b6775b`
-  (core-log **entry 55**). `.ai/core.md` is RESTRICTED — do not edit without an
+- Project-control repo: `/run/media/vash/GIT/Escapement`, `main`, at `f6d7152`
+  (core-log **entry 56**). `.ai/core.md` is RESTRICTED — do not edit without an
   explicit request. Reference records live in `.ai/core-reference.md`.
 - **`.ai/core.md`'s Purpose line is stale and deliberately untouched.** It says
   "Escapement is a port of linux". The project is TinyDesk; the Linux line
   closed 2026-11-11. Fixing it needs the operator's word, because that file may
   only be edited when asked.
 - **Active code is the fork: `/run/media/vash/GIT/tinydesk-twatch`, branch
-  `t-watch-ultra`, clean at `539facd`.** Push to `fork`
+  `t-watch-ultra`, clean at `f28ad6a`.** Push to `fork`
   (`aquasock/tinydesk`) only — **never** `origin` (upstream
   `tinydesk-project/tinydesk`).
 - `/run/media/vash/ROCKBOX` is the operator's source backup. **Never write to it
@@ -406,6 +408,55 @@ than the two packed structs account for — log all 11, not the first 6.
 
 **Patterns are volatile.** The firmware is uploaded to RAM each boot, so LEARN AND
 DETECT MUST HAPPEN IN THE SAME BOOT.
+
+## DATA INJECTION — SOLVED IN PRINCIPLE: BOSCH SHIPS A DIAGNOSTIC FIRMWARE (entry 56)
+
+**Read `ports/twatchultra/components/imu/README.md` before touching this.** It
+holds the images, the protocol and the negative that makes them trustworthy.
+
+**Bosch ships `DataInject.fw` for the BHI260AP** — 95,960 B, in
+`boschsensortec/BHI2xy_SensorAPI` under `firmware/bhi260ap/`. It is **not** in
+SensorLib, which is where every earlier search started, which is why the part
+looked permanently injection-less.
+
+```
+BHI260AP KLIO        123,696 B   booted        boot 38  err 00
+BHI260AP DataInject   95,960 B   BOOTED        boot 38  err 00   sensors 4 6
+BHI360  data_inject   99,736 B   VERIFY-ERROR  boot 78  err 14
+```
+
+The BHI360 row is the control: same code path, same container magic, rejected at
+verification. Chip id **0x70 = BHI260**, **0x7A = BHI360**.
+
+**The trade is unavoidable:** DataInject has only two virtual sensors (4, 6 — the
+accelerometer), so the IMU window, the posture vocabulary and KLIO all stop
+working while it is loaded. Choose per session.
+
+### Bosch's injection sequence — step 2 explains every earlier failure
+
+`examples/swim/swim_data_injection/swim_data_injection.c`:
+
+```
+1  bhy2_set_data_injection_mode(STEP_BY_STEP)
+2  bhy2_set_virt_sensor_cfg(SENSOR_ID, rate, latency)   <-- CONFIGURE FIRST
+3  drain the status FIFO
+4  bhy2_inject_data(timestamp, 6)    full timestamp, its OWN call
+5  bhy2_inject_data(event, 7)        then the event (id + 3 x int16)
+6  drain the FIFO between injections
+```
+
+Injection supplies data **for a sensor**. With none configured nothing is
+listening, so packets are accepted and dropped — exactly what entry 55 measured
+from outside.
+
+### Not finished
+
+`imu feed <s> <hz> <amp>` implements the sequence, generates a sine and
+round-trips it — but **wedges the shell on the drain**, and `imu raw` desyncs the
+FIFO stream when capped short. Instrument bugs, not evidence. Bosch's loop sets
+the async bit, drains against a generous buffer, then clears it.
+
+## SUPERSEDED — entry 55's verdict, which was true only of the KLIO image
 
 ## DATA INJECTION — SETTLED: IT REACHES NOTHING (entry 55)
 
@@ -984,16 +1035,17 @@ did NOT work from the harness; `Esc`, F10 and typed commands did.
    piece), **a UI** (it is a shell command), and **tuning** the four knobs
    `RECOGNITION_SENSITIVITY`, `RECOGNITION_RESPONSIVNESS`, `LEARNING_SPEED`,
    `LEARNING_SIMILARITY_THRESHOLD`.
-8. **Data injection is SETTLED — it reaches nothing.** Entry 55: +7.32 g
-   injected, three framings, ~2,000 samples watched, not one above 4 g. Not the
-   sensor output and not KLIO. **Do not reopen this by guessing another
-   framing** — five framings across two days agree, and the accelerometer test
-   does not depend on framing at all.
-   - The only route left is an **application-specific Data Injection firmware**,
-     which Bosch's own help names and which would **replace** the KLIO image.
-     That needs Bosch's toolchain and an operator decision. **Not a next step.**
-   - If the goal is only "classify motion", do it on the **ESP32-S3**: 985 KB
-     free, vector instructions, six channels already read at 97 Hz.
+8. **Finish the sine feeder — this is the live thread.** Bosch's DataInject
+   firmware for the BHI260AP is downloaded, in the repo, verified to boot
+   (`boot 38`, err `00`, sensors 4 and 6), and its injection protocol is
+   documented in `components/imu/README.md`. What is missing is the drain:
+   `imu feed` wedges the shell task, and `imu raw` desyncs the FIFO when capped.
+   Fix those two instrument bugs and the operator's experiment — train a sine,
+   measure `bhy2_klio_similarity_score()` against modulated variants — becomes
+   two commands. `klio save` and `klio compare` are already built, never run.
+   - **The trade:** DataInject has no KLIO and no gyro. Similarity scoring needs
+     the KLIO image; feeding needs DataInject. Needing both in one session is
+     the point at which Bosch's toolchain becomes the real answer.
 9. **`check_addr_fresh.py` compares image size, not `linked_host`.** That symbol
    moves on nearly every build regardless of size, so a code-only rebuild could
    still ship a stale one — a runtime diagnostic now, but reading the symbol out
