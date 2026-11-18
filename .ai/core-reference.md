@@ -285,6 +285,7 @@ Topic IDs are the `record_id` prefix. An entry reserves a name; it does not clai
 | Why does KLIO stop emitting frames partway through a learning run? | IMU | IMU-007 |
 | Which ttyACM device is the watch, and which is the TinyTang? | TOL | TOL-005 |
 | Why is the console dead after an esptool read with --after no_reset? | TOL | TOL-006 |
+| How do I open a Terminal on the watch from a host, reliably? | TOL | TOL-007 |
 | Why does a fullscreen app flicker against the console? | EXT | EXT-003 |
 
 ---
@@ -460,6 +461,7 @@ IMU-006: "Accelerometer and gyroscope at 50 Hz alongside injected blocks at 100 
 IMU-007: "With a quiet FIFO and zero errors, KLIO climbs 20/40/60/80 in about 5 s, then returns to 0 with change_reason 1 and STOPS EMITTING FRAMES ENTIRELY (15 frames, then silence for 1400 more accepted blocks), and the peak is not reproducible between identical runs (80 then 20)"
 TOL-005: "The watch and the TinyTang both appear as ttyACM devices and swap numbers between reboots: the watch is 303a:1001 (Espressif USB JTAG/serial debug unit) and the TinyTang is ffff:5454 (TinyTang CDC), so identity must come from /dev/serial/by-id or udev, never from the ttyACM number"
 TOL-006: "esptool's --after no_reset leaves the ESP32-S3 in its ROM bootloader, so the board's console emits nothing and every later command reads stale state until a --after hard_reset chip_id or a power cycle"
+TOL-007: "The desktop Start menu remembers its last selection, so F10 then Enter is only deterministic after a reboot: the sequence that works is reboot, F10, Enter, and the window that appears must be verified to be `tdsh` before typing, or the keys land in whichever app was selected last"
 ```
 
 ---
@@ -2572,6 +2574,19 @@ TOL-006: "esptool's --after no_reset leaves the ESP32-S3 in its ROM bootloader, 
   sources:
     - "esptool 4.13.0 `--after` option semantics (hard_reset | soft_reset | no_reset | no_reset_stub)"
   verification: "Verified on hardware 2026-11-18 (core-log entry 74): after `read_flash ... --after no_reset` the watch returned zero bytes on the serial port and two separate command sequences appeared to run without effect, while the traces recovered from flash were older than the runs being attempted. A `--after hard_reset chip_id` restored the desktop immediately."
+
+- record_id: TOL-007
+  kind: TOOLCHAIN
+  topic_id: TOL
+  status: VERIFIED
+  verified_date: 2026-11-18
+  title: "Opening a Terminal on the watch from a host is reboot, F10, Enter -- and the window must be verified to be tdsh, because the Start menu remembers its last selection"
+  statement: "The desktop is driven over the USB mirror by sending escape sequences. F10 is `ESC [ 2 1 ~` and opens the Start menu; Enter launches the highlighted item. The Start menu does NOT reset its selection to the first item when it is closed and reopened -- it remembers what was last selected -- so F10 followed by Enter launches whichever application was chosen before, not necessarily Terminal. A fresh boot does start with Terminal selected."
+  consequence: "Any host harness that needs a shell must either reboot the board first, making F10/Enter deterministic, or read the screen back and confirm that a `tdsh` window is present before sending a command. Failing to check is not a cosmetic problem: the typed command becomes keystrokes delivered to whatever application did open, which on one occasion started the Tamagotchi emulator and fed `imu inject` into it as game input. The escape sequence must also be written in ONE write rather than byte by byte, because the desktop's parser abandons a lone ESC after a few tens of milliseconds and every such key arrives as Escape followed by literal text."
+  sources:
+    - "tinydesk-twatch tools/watch-screen.py (Screen model, DECSC/DECRC handling, drain-before-send)"
+    - "tinydesk-twatch ports/twatchultra/main/ (desktop key handling for F10 and Enter; Start menu selection persistence)"
+  verification: "Verified on hardware 2026-11-18 (core-log entry 75): repeated attempts using F10 followed by Enter with no screen check launched the Tamagotchi emulator several times, and `imu inject 30 ...` was typed into it as game input. After a reboot the same F10/Enter sequence produced a `tdsh` window on the first attempt, confirmed by reading the screen back, and the injection runs then executed normally."
 
 ```
 

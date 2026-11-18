@@ -1,3 +1,33 @@
+## 75 COMMIT Unreleased 2026-11-18T12:11:06-07:00
+
+#### Coming From:
+
+Unreleased 330a48e
+
+#### Purpose:
+
+Test the one variable entry 74 left open -- the duration of the rest between repetitions -- and repeat every configuration three times, because entry 74 found the peak was not reproducible between identical runs.
+
+#### Outcome:
+
+LENGTHENING THE REST CHANGES NOTHING, AND THE SIX-RUN REPEAT IS WHAT MAKES THAT A RESULT RATHER THAN AN ANECDOTE. Entry 74 established that with the FIFO quiet the engine counts repetitions to 80 percent, reports change_reason 1, and stops emitting frames. The rest phase is already as still as injection can make it -- the wrist angle is exactly zero, so the accelerometer sits at a constant one gravity on z and the gyroscope at exactly zero -- so stillness could not be sharpened and only its duration could be varied. Shape 2 is therefore the same 0.9 s swing as the baseline with the rest lengthened from 0.6 s to 1.5 s, a 2.4 s cycle against 1.5 s, and nothing else changed: same 1.0 radian amplitude, same 100 Hz injection, same physical sensors off. Six runs were made, three of each shape, alternating so that any drift over the session would affect both equally. The result is indistinguishable: shape 0 peaked at 20, 40 and 40 with 9, 21 and 22 frames, shape 2 peaked at 20, 40 and 40 with 6, 22 and 22 frames, and all six runs reported 3000 blocks accepted, zero FIFO overflows, zero sensor errors and `read_pattern` rc -2 at 244 bytes. CHANGE_REASON 2 WAS NOT OBSERVED ONCE IN ANY OF THE SIX, which is the sharper way to say it: the engine never concludes that the injected rest is stillness, and lengthening it from 600 ms to 1500 ms did not move it. THE TRAJECTORIES SAY WHAT THE PEAKS CANNOT. Progress reaches 20 on the frame after the first repetition and then returns to 0 on the very next frame, repeatedly, across the run -- one repetition is counted and the following one is judged different, so the engine is not accumulating slowly toward a boundary it nearly reaches, it is being reset every cycle. That reframes the problem from "the gesture is too short" to "successive repetitions of this waveform are not similar enough by the engine's own measure", which points at the waveform's cycle-to-cycle identity rather than at its timing. THE PEAK ALSO FELL COMPARED WITH ENTRY 74, and that is recorded as a fact rather than explained: entry 74's shape 0 runs peaked at 80 and at 20, and these six never exceeded 40, with the same image on the same board and the same command. Whatever varies between runs is not the waveform, and six runs is still too few to characterise it. TWO INSTRUMENT FIXES CAME OUT OF THE CYCLE. The shape argument was `shp == 1 ? 1 : 0`, which silently turned every value except 1 into the baseline -- adding shape 2 would have re-run the 1.5 s gesture and reported it as the longer rest, so out-of-range shapes are now refused with a usage line. And traces carry a run counter, because entry 74's naming by shape and configuration alone meant the second run of a configuration overwrote the first, which is how the run-to-run variance was nearly missed in the first place. A HARNESS MISTAKE COST MOST OF THIS CYCLE AND IS RECORDED SO IT CANNOT RECUR: the sequence used to open a Terminal was F10 then Enter with no check that the Terminal was what opened, and the Start menu remembers its last selection rather than resetting to its first item, so several attempts launched the Tamagotchi emulator instead and typed `imu inject` into it as game input. The operator caught it and gave the recipe that works: reboot, then F10, then Enter, which is deterministic because a fresh boot starts with Terminal selected, and the window that appears must be verified to be `tdsh` before anything is typed. Three runs were also lost to a subtler version of the same fault -- a flash read ends with `--after no_reset` and the following hard reset closes the Terminal, so commands sent afterwards went to the desktop and did nothing while appearing to run. THE BOARD IS HEALTHY AND ON THE NEW IMAGE and was left booted at the desktop. The fork carries `9104188`; the app was rebuilt, the module relinked against the addresses `make modaddr` re-read from the newly flashed image and reflashed, and nothing about the audio path was touched after the failure that entry 74 fixed.
+
+#### Next Steps:
+
+THE NEXT VARIABLE IS CYCLE-TO-CYCLE SAMENESS, NOT TIMING. Progress reaching 20 and then resetting on the immediately following frame says the engine counts the first repetition and then finds the second unlike it, so the cheapest next test is a waveform whose cycles are provably identical -- for instance one generated from a table and repeated exactly rather than recomputed from a float phase accumulator, since `fmodf(t, period)` on a 10 ms grid does not land every cycle on the same samples -- or a waveform with a longer, simpler, single-axis swing so the only thing that differs between cycles is numerical noise. THE 7-BYTE PACKETS ON SENSOR 112 REMAIN UNEXPLAINED AND ARE THE OTHER CANDIDATE: the tap still records 7-byte packets interleaved with its 11-byte KLIO frames with both physical sensors disabled, and if those are the injected blocks arriving back through the parser rather than the engine's own output, then the engine is being fed each sample twice and no waveform will be learned. That is cheap to check and should probably come first, because it would make the waveform work moot. SIX RUNS IS STILL A SMALL SAMPLE and the peak range of 20 to 40 here against 20 to 80 in entry 74 should be characterised before any convergence claim is made. UNCHANGED AND STILL OPEN: `read_pattern` has never returned 157 bytes from injected data so the architecture remains unproven on synthetic input, no public KLIO+DataInject image exists, patterns do not survive a reboot, `klio save` and `klio restore` are instruments rather than a durable store, the two unidentified header fields at 0x2c and 0x44 still gate custom firmware, the guest stacks are internal DRAM, `update.url` is unset, and entries 66 through 73 still carry fenced code blocks inside Outcome which the syntax forbids.
+
+#### Files Modified:
+
+None.
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: PASS
+
+---
+
 ## 74 COMMIT Unreleased 2026-11-18T11:49:18-07:00
 
 #### Coming From:
