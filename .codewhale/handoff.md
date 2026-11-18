@@ -1,25 +1,24 @@
-# Handoff — Escapement / TinyDesk on T-Watch Ultra, 2026-11-18T12:52
+# Handoff — Escapement / TinyDesk on T-Watch Ultra, 2026-11-18T13:22
 
 Orientation, not authority. **Verify before acting on it.** The files, the flash
 and the board are the fact; this file is a claim.
 
 ## One line
 
-**Stop synthesising.** Five entries have eliminated every physical property of the
-injected signal that can be checked — framing, alignment, inject ids, FIFO, rate,
-timestamp unit and encoding, rest duration, cycle repeatability, and as of entry 77
-the gyro axis (it was on Y; the acceleration it accompanies implies rotation about
-X). The engine still counts one repetition, reports 20, and resets with
-`change_reason 1`. **The next experiment is to replay a gesture recorded from a real
-hand** — the only way left to separate "injection cannot drive this engine" from
-"the synthesised waveform is still wrong".
+**A real, demonstrably learnable gesture, recorded and replayed through injection,
+does not learn.** Live it reaches 100 percent and `klio detect` reads back a
+157-byte pattern; replayed five times it peaked 20/60/40/40/20 and `read_pattern`
+returned rc -2 every time. So **the input content is not what separates the two
+paths** — five entries of waveform design were chasing the wrong thing. One
+difference is left untested and it is a single-variable change: Bosch's
+**step-by-step injection mode**.
 
 ## Where things live
 
-- Project-control repo: `/run/media/vash/GIT/Escapement`, `main`, at `f9dd08c`
-  (core-log **entry 77**). Pushed.
+- Project-control repo: `/run/media/vash/GIT/Escapement`, `main`, at `85e63f4`
+  (core-log **entry 78**). Pushed.
 - **Active code is the fork: `/run/media/vash/GIT/tinydesk-twatch`, branch
-  `t-watch-ultra`, clean at `b6d5b44`, pushed to `fork`.** Push to `fork`
+  `t-watch-ultra`, clean at `059feb3`, pushed to `fork`.** Push to `fork`
   (`aquasock/tinydesk`) only — **never** `origin` (upstream
   `tinydesk-project/tinydesk`).
 - `.ai/core.md` is RESTRICTED. Its Purpose line was corrected in entry 74 with
@@ -48,44 +47,51 @@ the Tamagotchi emulator as game input. A display-repaint can also leave escape
 residue in the shell's input line (`tdsh: command not found: ^[[?2026himu`) — send
 a `Ctrl+C` first if the prompt looks polluted. Records TOL-005/006/007.
 
-## What entries 76 and 77 established
+## What entries 77 and 78 established
 
 ```
-entry 76  the injected TS field is a DELTA bhy2.c ADDS; the code wrote an absolute
-          counter and zeroed it at 65000. `imu clock` measured the unit from the
-          physical accelerometer alone: 1282-1283 ticks per 20 ms => 64130 ticks/s,
-          641 per 10 ms block. Fixed; peaks unchanged (20/40/40/40).
+entry 77  cycle-to-cycle sameness is VOID (proved on the host, no flash spent:
+          existing float-phase loop already differs by <=1 LSB of 4096 on 0.8% of
+          samples). Real defect found instead: the synthetic waveform rotated
+          gravity y-z (about X) but wrote the rate to gy. shape 4 fixes the axis;
+          peaks unchanged.
 
-entry 77  cycle-to-cycle sameness is VOID -- proved on the host, no flash spent:
-          the existing float-phase loop already differs by at most 1 LSB of 4096
-          on 0.8 percent of samples. shape 3 (table replay) exists but was never run.
+entry 78  THE CONTROL: `klio learn` from hand motion -> 100%, 12 frames,
+          `klio detect` -> read_pattern ok (0), 157 bytes. Injection has never
+          done this.
 
-          real defect found instead: the acceleration rotates gravity in the y-z
-          plane, which is a rotation ABOUT X, but the gyro rate was written to gy.
-          Every block from entry 73 to 76 asserted a tilt about x AND a spin about
-          y at once. shape 4 fixes the axis and changes nothing else.
+          `imu record <seconds>` -> /root/gesture.bin, six int16 per sample
+          (ax,ay,az,gx,gy,gz), raw ints, 100 Hz. 3111 accel + 3111 gyro samples
+          for 3000 ticks. Validated off the chip: |a| = 0.97 g, all axes swinging.
+          The real gesture rotates x-z with rate on gy (about y) -- self-
+          consistent, unlike the synthetic waveform.
 
-          six alternating runs: shape 0 peaks 20/40/40, shape 4 peaks 40/40/40.
-          Both cap at 40. The axis fix is correct and is not the ceiling.
+          shape 5 replays it. Five runs: peaks 20/60/40/40/20, frames
+          3/27/26/23/12, read_pattern rc -2 ALL FIVE.
+          The 60 is ONE SAMPLE of a noisy distribution, not an improvement.
 ```
 
-Audio re-verified after the last module relink: 253440 frames, 0 errors.
+Audio verified after the final module relink: 258048 frames, 0 errors, by ear.
+`/root/gesture.bin` still holds a 30 s recording — no need to ask the operator to
+perform again.
 
 ## Next steps, in order
 
-1. **Replay a recorded hand-trained gesture.** A hand-trained gesture already learns
-   and recognises — that is the project's measured result. Record accel+gyro at
-   100 Hz during one, then replay those exact samples through injection. If a
-   real, learnable recording also fails to produce a 157-byte pattern, injection is
-   not equivalent to the sensor path and no waveform design will fix it: a firm
-   negative result and the honest end of this line. If it succeeds, synthesis was
-   the problem. Needs `imu record <seconds>` writing samples to a file, and a shape
-   that replays a file instead of generating one.
-2. **Characterise the spread.** The same command on the same image has peaked at 80,
-   40 and 20. No claim smaller than that spread can be read. Run one configuration
-   six-plus times and report the distribution.
-3. Traps when reading traces: the run counter restarts at boot, so order recovered
-   traces by **flash offset**, not by filename; littlefs keeps stale copies.
+1. **Test normal injection mode instead of step-by-step.** This is now the only
+   unexplained difference between a path that learns and a path that does not.
+   `imu inject` calls `imu_inject_begin(BHY2_STEP_BY_STEP_INJECTION)`; a variant
+   using `BHY2_NORMAL_MODE` is a single-variable change. Bosch's CLI uses
+   step-by-step, but every hand-trained success ran against a free-running FIFO.
+2. **If that fails, close the line with an entry that says so.** Six entries have
+   eliminated waveform, axis, amplitude, rate, timestamp, transport and finally the
+   input data itself. A further failure means injection is not equivalent to the
+   sensor path on this firmware.
+3. Before closing, two cheap ones: report how many injected samples the engine
+   actually consumes per KLIO frame (a ratio near zero would explain a lot), and
+   try the same recording at a lower injection rate.
+
+**Reading traces:** order recovered traces by **flash offset**, not filename — the
+run counter restarts at boot and littlefs keeps stale copies.
 
 ## Instrument
 
@@ -94,8 +100,10 @@ Audio re-verified after the last module relink: 253440 frames, 0 errors.
 
 - `shape 0` gesture 0.9 s swing + 0.6 s rest (baseline); `shape 1` 1 Hz sine
   control; `shape 2` gesture with 1.5 s rest; `shape 3` table-replayed twin of
-  shape 0 (built, never run — hypothesis void); `shape 4` shape 0 with the gyro
-  on the axis the acceleration implies. Other values refused with a usage line.
+  shape 0 (built, never run — hypothesis void); `shape 4` shape 0 with the gyro on
+  the axis the acceleration implies; `shape 5` replay `/root/gesture.bin`.
+- `imu record <seconds>` writes `/root/gesture.bin` from the physical sensors at
+  100 Hz; `imu clock` measures the timestamp unit.
 - `phys 0` disables accel and gyro — **use this**; it is what Bosch's CLI does and
   it is the only configuration with zero overflows.
 - `imu clock` measures the timestamp unit; re-run it if the firmware image or the
