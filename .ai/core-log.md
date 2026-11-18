@@ -1,3 +1,33 @@
+## 72 COMMIT Unreleased 2026-11-18T22:30:00-07:00
+
+#### Coming From:
+
+Unreleased 9f86b6d
+
+#### Purpose:
+
+Feed KLIO a gentle 1 Hz sine at 0.3 radian and see whether it learns from injected data, which entry 71 left as the open question.
+
+#### Outcome:
+
+**INJECTION IS FULLY ACCEPTED AND KLIO STILL DOES NOT LEARN, AND THE PROGRESS FIGURES I REPORTED WHILE GETTING HERE WERE NOT TRUSTWORTHY.** The stable, reproducible facts first. A 30-second run at 50 blocks a second returns **1500 blocks sent, all with error `0x00`** -- the injection handler takes every one. **46 KLIO frames arrived** on sensor 112. And **`read_pattern` returned `rc -2` with a 244-byte buffer**, meaning no pattern exists to read. The same result across repeated runs. **THE PROGRESS FIELD IS NOT A PERCENTAGE AND I SHOULD HAVE STOPPED AT THE FIRST CONTRADICTION.** Values observed across this entry and the last: 0, 1, 20, 25, 35, 43, 96 and **246**. A field that reports 246 cannot be the 0..100 progress the engine documents. Every "progress 96%", "progress 43%" and "progress 35%" quoted in this session's chat was that same unreliable byte, and the operator was right that the last several runs were worse -- they were not worse, they were **measuring the same thing and being read as if it meant something**. THE ONE HONEST GATE IS `read_pattern` RETURNING 157 BYTES, and it has never once done so from injected data. Entry 71's claim that KLIO "emitted frames" was true and its implication that it was learning was not. A SECOND METHODOLOGY FAILURE IS RECORDED BECAUSE IT COST THE OPERATOR TIME: between the run that showed 96 and the run that showed 1, four things changed at once -- the algorithm sensor's configured rate (100 Hz against 50 Hz), whether accel and gyro were configured, how many drains ran per injected block, and whether the loop exited early on the first frame. None could be attributed. The correct method is one variable per flash. THE CHANGES THAT SURVIVED, each independently justified: `inject_block` counts a delivered block rather than a clean error, because a block that reaches the part and sets an error was still transmitted; `klio_tap_learnt()` no longer gates anything on progress and the loop no longer breaks early, since breaking on "a frame arrived" cut a 30-second run to 97 blocks; and every result is written to `/root/inject.txt` because the display mirror garbles a scrolling trace -- that file is what finally gave a readable reading. WHAT REMAINS UNKNOWN: whether KLIO can learn from injected data at all. Injection works, the blocks are accepted, frames flow, and the engine does not converge. Candidate causes, none tested cleanly: the block's internal layout, the 50 Hz block rate against the 100 Hz the algorithm is configured for, and whether step-by-step injection requires an output frame to be drained between blocks rather than a free-running stream. THE BOARD IS HEALTHY AND ON THE KLIO IMAGE. Nothing about the earlier real result is affected: the similarity metric of entry 58 remains graded and reproducible at 1.000 / 0.795 / 0.475 / negative from real motion.
+
+#### Next Steps:
+
+**ONE VARIABLE PER FLASH, AND THE FIRST VARIABLE IS THE BLOCK RATE.** The engine is configured at 100 Hz and fed at 50; set the block interval to 10 ms so they match exactly, change nothing else, and read `/root/inject.txt`. If `read_pattern` returns 157, injection into KLIO works and the operator's architecture is complete. If it returns -2 again, the next single change is the block layout, and after that the drain-per-block hypothesis. THE OPERATOR SHOULD BE TOLD THE HONEST POSITION: injection is proven on this part, the handler accepts blocks with error 00, and KLIO specifically has not been shown to learn from them. That is a narrower claim than entry 71 made and it is the one the evidence supports. IF FURTHER FLASHING IS NOT WANTED, the project's proven result stands on its own -- a graded, reproducible similarity metric measured from real motion -- and injection remains an open instrument rather than a solved path. UNCHANGED AND STILL OPEN: no public KLIO+DataInject image exists, patterns do not survive a reboot, `klio save`/`restore` are instruments and not a durable store, the guest stacks are internal DRAM, `update.url` is unset, and `.ai/core.md`'s Purpose line still calls this a port of Linux.
+
+#### Files Modified:
+
+None in this repository; the fork carries the instrument changes.
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: N/A (negative; the progress signal was unreliable)
+
+---
+
 ## 71 COMMIT Unreleased 2026-11-18T20:00:00-07:00
 
 #### Coming From:
