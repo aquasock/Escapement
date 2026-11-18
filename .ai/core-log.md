@@ -1,3 +1,39 @@
+## 67 COMMIT Unreleased 2026-11-18T14:00:00-07:00
+
+#### Coming From:
+
+Unreleased 3851fb8
+
+#### Purpose:
+
+The operator's question, after entry 66: *"why cant we inject into KLIO? why is it any differnt than SWIM?"* It was the right question and the answer overturns three entries.
+
+#### Outcome:
+
+**THE BLOCKER WAS WORD ALIGNMENT, AND IT HAS BLOCKED EVERY INJECTION ATTEMPT IN THIS PROJECT SINCE ENTRY 51.** The error register returns 0x7c after every injection, and 0x7c was undocumented in the BHI2xy SDK this port uses. It IS documented in the **BHI360** SDK at `source/bhi360_defs.h`:
+
+```
+#define BHI360_ERR_INPUT_CHANNEL_NOT_WORD_ALIGNED   UINT8_C(0x7C)
+```
+
+**The injection payload must be a multiple of four bytes.** Every payload sent in entries 51, 55, 57 and 65 was 6, 7, 13 or 17 bytes -- none divisible by 4. Every one was rejected for alignment, and the rejection read as "the part ignores injection" because 0x7c was an unknown code. THE FIX IS ONE LINE OF ARITHMETIC and it changes the result immediately: a 17-byte frame padded to 20 bytes no longer returns 0x7c. It returns **0xe2**, which is `BHI360_ERR_SENSOR_DATA_INJECTION` -- a genuine injection error from inside the handler, not a framing rejection. THAT IS THE FIRST TIME ANY INJECTION HAS REACHED THE HANDLER IN THIS ENTIRE INVESTIGATION. **AND KLIO AND SWIM BEHAVE IDENTICALLY**, which answers the operator's question directly and refutes this project's own earlier conclusion. On the KLIO image a word-aligned 20-byte payload returns 0xe2. On the SWIM image the same payload returns 0xe2. Both accept the command, both reject misaligned data with 0x7c, both reach the injection handler and report 0xe2. **THE INJECTION HANDLER IS COMPILED INTO THE KLIO IMAGE.** Entries 51, 55 and 57 concluded the opposite -- that KLIO lacks the handler and only Bosch's DataInject builds carry it -- and that conclusion was drawn from tests that could never have succeeded. The "algorithm plus injection" framing in entry 57 was correct about the CONTAINER question and wrong about KLIO. THE FRAMING THAT GOT THIS FAR is worth recording because it is the first 17-byte structure that makes sense: an output event is 15 bytes (Bosch's own callback checks `data_size != 15`), an injected block is 17, and 17 decomposes exactly as accel event (7 = id + 3 x int16) + gyro event (7) + large-delta timestamp (3) -- one sample in ordinary FIFO format, which is what a field-trial log contains. WHAT 0xe2 MEANS IS NOT YET KNOWN. It is `SENSOR_DATA_INJECTION` with no further detail: the error register holds it and it is sticky (a FIFO flush does not clear it), and `error_aux` (0x2f) is 0. So the handler is reached and rejects the CONTENT rather than the framing, and the reason is one of: the sensor must be configured differently or in a specific order before it will accept injected data, the block must be accompanied by something this test does not send, or the payload's internal structure differs from the guess above. THE BOARD IS HEALTHY AND ON THE KLIO IMAGE: `imu boot upload` reports BOOTED, `chip 70 boot 38 err 00`, 35 virtual sensors. NOTHING IN EITHER REPOSITORY CHANGED.
+
+#### Next Steps:
+
+**0xe2 IS NOW THE ONLY BLOCKER AND IT IS A MUCH BETTER PLACE TO BE THAN 0x7c.** The next move is to make the firmware send what Bosch's own tool sends, byte for byte, rather than a reconstruction. `swim_data_injection.c` reads a six-byte timestamp from a log and injects it as its own call, THEN injects a 17-byte block, and finally injects further blocks of `SENSOR_BLOCK_DATA_SIZE` (119) as the loop runs -- all lengths divisible by four except the 17, which is a contradiction worth resolving: either the 17 is padded internally by the tool, or Bosch's own example is affected by the same alignment rule and the log format accounts for it. Reading `dinject_parse_file()` carefully against `SENSOR_DATA_SIZE` should settle it, and that is a document-reading exercise rather than a hardware one. **SECOND, THE CONFIGURATION ORDER MATTERS AND WAS PROBABLY WRONG.** Bosch's sequence is: set injection mode, THEN `bhy2_set_virt_sensor_cfg(CUSTOM_SENSOR_ID, rate, latency)`, THEN drain the status FIFO, THEN inject. This test set the mode and configured a sensor, but the SWIM configuration parameter (page 0x0b, `update_swim_config` / `dev_on_left_hand` / `pool_length_integral`) was never successfully set -- the first attempt sent 2 bytes where 4 were expected and the error register was already dirty. A clean run through Bosch's exact order, with every payload word-aligned, is the next experiment and it is small. **THIRD, THE PRACTICAL INSTRUMENT IS THE PROBLEM.** Research this session went through `imu cmd <id> <hex>` on a 40-column console, where a single miscounted byte changes the payload length silently and the sticky error register makes a new failure indistinguishable from an old one. A `swim` command in firmware that builds and sends the frames itself, reports each length, and clears the error register between attempts would remove that class of mistake entirely -- and every failure in this entry traces back to exactly that class. **IF INJECTION DOES WORK, THE EARLIER CONCLUSION CHANGES COMPLETELY**: KLIO would be a programmable 25-pattern fuzzy matcher that accepts host data, which is the operator's entire architecture, and none of the BHI360 or ESP32-S3 alternatives would be needed. THE GATE FROM ENTRY 65 IS UNCHANGED AND SEPARATE -- that is about AUTHORING firmware, not about INJECTING data into Bosch's. Injection uses the mechanism as intended and does not touch the signature. UNCHANGED AND STILL OPEN: fork commit 8c2e7c9 is built and not flashed, no public KLIO+DataInject image exists (and may not need to), patterns do not survive a reboot, `klio save`/`restore` are instruments and not a durable store, the guest stacks are internal DRAM, `update.url` is unset, and `.ai/core.md`'s Purpose line still calls this a port of Linux.
+
+#### Files Modified:
+
+None.
+
+#### Status:
+
+- Build: N/A
+- Deployment: PASS (test images flashed, KLIO restored, board verified healthy)
+- User Test: N/A
+
+---
+
 ## 66 COMMIT Unreleased 2026-11-18T12:30:00-07:00
 
 #### Coming From:

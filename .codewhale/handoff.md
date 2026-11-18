@@ -1,4 +1,4 @@
-# Handoff — Escapement / TinyDesk on T-Watch Ultra, 2026-11-18T12:45
+# Handoff — Escapement / TinyDesk on T-Watch Ultra, 2026-11-18T14:15
 
 Orientation, not authority. **Verify before acting on it.** The files, the
 coredump partition and the board are the fact; this file is a claim.
@@ -21,8 +21,8 @@ are equal, and **the app is at 0x20000, not 0x10000**. The flash is four equal
 
 ## Where things live
 
-- Project-control repo: `/run/media/vash/GIT/Escapement`, `main`, at `87a8f86`
-  (core-log **entry 66**). `.ai/core.md` is RESTRICTED — do not edit without an
+- Project-control repo: `/run/media/vash/GIT/Escapement`, `main`, at `3851fb8`
+  (core-log **entry 67**). `.ai/core.md` is RESTRICTED — do not edit without an
   explicit request. Reference records live in `.ai/core-reference.md`.
 - **`.ai/core.md`'s Purpose line is stale and deliberately untouched.** It says
   "Escapement is a port of linux". The project is TinyDesk; the Linux line
@@ -412,6 +412,56 @@ than the two packed structs account for — log all 11, not the first 6.
 
 **Patterns are volatile.** The firmware is uploaded to RAM each boot, so LEARN AND
 DETECT MUST HAPPEN IN THE SAME BOOT.
+
+## INJECTION WORKS — THE BLOCKER WAS WORD ALIGNMENT (entry 67)
+
+**Every injection attempt in this project was misaligned.** `0x7c` is
+`BHI360_ERR_INPUT_CHANNEL_NOT_WORD_ALIGNED` — documented in the **BHI360** SDK,
+not the BHI2xy one this port uses, which is why it read as "the part ignores
+injection" for five entries.
+
+**Injection payloads must be a multiple of four bytes.** Every payload sent in
+entries 51, 55, 57 and 65 was 6, 7, 13 or 17 bytes. **None divisible by 4.**
+
+```
+misaligned  -> 0x7c  ERR_INPUT_CHANNEL_NOT_WORD_ALIGNED
+aligned     -> 0xe2  ERR_SENSOR_DATA_INJECTION   (from inside the handler)
+```
+
+**And KLIO and SWIM behave identically** — both return `0xe2` for the same
+20-byte payload. **The injection handler IS compiled into the KLIO image.**
+Entries 51/55/57 concluded it was absent; that conclusion came from tests that
+could never have succeeded.
+
+### The framing that got this far
+
+```
+output event   15 B  (Bosch's callback checks `data_size != 15`)
+injected block 17 B  = accel event (7) + gyro event (7) + ts large-delta (3)
+```
+
+One sample in ordinary FIFO format. Pad to 20 for the alignment rule.
+
+### Where it is now
+
+`0xe2` is the only blocker: sticky, `error_aux` 0, means the handler rejects
+**content** not framing. Next moves:
+1. Read `dinject_parse_file()` against `SENSOR_DATA_SIZE` — the 17-byte block is
+   itself unaligned, which is a contradiction worth resolving on paper.
+2. Run Bosch's exact order — mode, then `set_virt_sensor_cfg`, then drain status,
+   then inject — with every payload aligned.
+3. **Build a `swim` command in firmware.** Every failure in entry 67 traces to
+   miscounting bytes through `imu cmd <hex>` on a 40-column console with a sticky
+   error register. A command that builds frames, reports lengths, and clears the
+   error register between attempts removes that whole class of mistake.
+
+**If injection works, the entire picture changes**: KLIO becomes a programmable
+25-pattern fuzzy matcher that accepts host data — the operator's architecture,
+no BHI360 and no ESP32-S3 fallback needed.
+
+**The entry-65 gate is separate and unchanged** — that is about *authoring*
+firmware. Injection uses Bosch's mechanism as intended and never touches the
+signature.
 
 ## CUSTOM FIRMWARE — WHERE IT ACTUALLY STANDS (entries 62-64)
 
