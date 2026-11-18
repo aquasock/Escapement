@@ -1,4 +1,4 @@
-# Handoff — Escapement / TinyDesk on T-Watch Ultra, 2026-11-18T09:45
+# Handoff — Escapement / TinyDesk on T-Watch Ultra, 2026-11-18T11:15
 
 Orientation, not authority. **Verify before acting on it.** The files, the
 coredump partition and the board are the fact; this file is a claim.
@@ -21,8 +21,8 @@ are equal, and **the app is at 0x20000, not 0x10000**. The flash is four equal
 
 ## Where things live
 
-- Project-control repo: `/run/media/vash/GIT/Escapement`, `main`, at `69a7218`
-  (core-log **entry 64**). `.ai/core.md` is RESTRICTED — do not edit without an
+- Project-control repo: `/run/media/vash/GIT/Escapement`, `main`, at `a82bc54`
+  (core-log **entry 65**). `.ai/core.md` is RESTRICTED — do not edit without an
   explicit request. Reference records live in `.ai/core-reference.md`.
 - **`.ai/core.md`'s Purpose line is stale and deliberately untouched.** It says
   "Escapement is a port of linux". The project is TinyDesk; the Linux line
@@ -446,26 +446,44 @@ hashlib.sha256(d[0x7C : 0x7C + u32(d[0x58:0x5C])]).digest() == d[0x08:0x28]
 **Not a signature.** Entry 63's fear that this route was blocked on a Bosch key
 was wrong for this field.
 
-### UNSOLVED, and it is the gate: the 40 bytes at `0x2c`/`0x44`
+### UNSOLVED — and entry 65 now treats it as likely blocking: `0x2c`/`0x44`
 
-Two 20-byte fields, each preceded by 4 zero bytes. **A modified image with `0x08`
-recomputed correctly STILL does not boot** — `err 12` becomes `err 11`, a
-different gate. Not SHA-1/224/256-truncated/MD5/RIPEMD-160 over segment 1,
-segment 2, whole file, header alone, header-with-field-zeroed-plus-payload, or
-segment 1 + segment 2 header, either byte order.
+Two 20-byte fields per segment header, each preceded by 4 zero bytes.
 
-**Next move is data, not guessing:** download all 23 BHI260AP images from
-`boschsensortec/BHI2xy_SensorAPI` and correlate those fields against payloads.
+**Proven enforced:** flipping ONLY `0x2c` — payload and `0x08` untouched — gives
+`err 11`. **Proven payload-dependent:** keeping Bosch's `0x2c` while changing a
+payload byte also fails, so it is not a version field.
+
+**Ruled out across ~2,000 combinations:** SHA-1/224/256/384/512, MD5,
+RIPEMD-160, SHA3-256/512, BLAKE2b/s, SM3 — truncated either end, byte-reversed —
+over 13 ranges including both payloads, their concatenations, the whole file,
+headers alone, and field-zeroed variants. Plus a 1,344-case start/end sweep on
+segment 2, plus HMAC-SHA1/256 with four candidate keys. **No match.** Not copied
+from elsewhere either.
+
+**Conclusion, as inference not fact:** a keyed construction (HMAC/signature) is
+now the more likely explanation, and if so **unsigned firmware cannot pass this
+check at all.** The from-scratch route would be blocked on this silicon.
+
+**The only thing that would reopen it:** a Bosch-built BHI260AP image with a
+known payload, so the fields can be solved against a known-good input.
 
 ### Practical state
 
-- **Toolchain is GONE** — `/tmp/arctc` was cleared between sessions. Re-fetch to
-  a durable path before any compile work.
+- **Toolchain is DURABLE** — `~/opt/arctc/arc-multilib-elf32/`, 2.5 GB, verified:
+  `arc-elf32-gcc 16.2.0`, `objdump 2.45.1`, compiles `-mcpu=em`, `hs`, `arc700`.
+  Entry 65 retired the `/tmp` risk.
 - Board is healthy on the KLIO image: `boot 38`, err `00`, 35 sensors.
 - Fork commit `8c2e7c9` is built and **not flashed**.
-- If no digest is found and those fields are keyed output, the honest answer is
-  this silicon will not run authored firmware — and the ESP32-S3 with 985 KB free
-  becomes the real path, not the fallback.
+- That condition now looks met. If it holds, the honest answer is this silicon
+  will not run authored firmware — and the ESP32-S3 with 985 KB free becomes the
+  real path, not the fallback.
+
+### Still true regardless
+
+**KLIO's graded similarity is measured and reproducible** — 1.000 / 0.795 / 0.475
+/ negative, stable to four decimals. That result does not depend on custom
+firmware and is the project's proven outcome.
 
 ## THE FUSER CORE IS ARC — AND THAT IS AS FAR AS IT GOES (entries 59-61)
 

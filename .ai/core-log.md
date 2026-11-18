@@ -1,3 +1,33 @@
+## 65 COMMIT Unreleased 2026-11-18T11:00:00-07:00
+
+#### Coming From:
+
+Unreleased a82bc54
+
+#### Purpose:
+
+Identify the two 20-byte fields at header 0x2c and 0x44 that entry 64 left as the last gate, using the corpus method it named rather than more guessing.
+
+#### Outcome:
+
+THE GATE IS REAL, IS PAYLOAD-DEPENDENT, AND IS NOT ANY STANDARD DIGEST SO FAR TESTED -- ABOUT 2,000 TESTS ACROSS TWELVE IMAGES. Three findings, in order of how much they change the picture. FIRST, THE TOOLCHAIN IS DURABLE AND VERIFIED: `~/opt/arctc/arc-multilib-elf32/`, 2.5 GB, `arc-elf32-gcc 16.2.0` and `arc-elf32-objdump 2.45.1`, both self-describing as "ARCompact/ARCv2 elf32 toolchain", and `-mcpu=em`, `hs` and `arc700` all compile a test object. That retires the durability risk entries 63 and 64 both flagged. SECOND, HEADER 0x08 IS SHA-256 ON ALL TWELVE PUBLISHED IMAGES, not just the four local ones -- BHI260AP, BHI260AP_BME688, BHI260AP_BMP390, BHI260AP_aux_BMM150, BHI260AP_aux_BMM150_BMP390_BME688, BHI260AP_turbo, BHI260AP_klio, BHI260AP_SWIM, DataInject, DataInject_nobsx, DataInject_SWIM -- and THE SECOND SEGMENT'S HEADER HAS THE IDENTICAL LAYOUT, with its own 0x08 verified as SHA-256 of ITS payload. So the container is regular: each segment carries a 0x7C-byte header whose 0x08 is the SHA-256 of the payload that follows it, whether that segment is 20,056 bytes (SWIM segment 1) or 84,396 (its segment 2). THIRD, AND IT IS THE DECISIVE EXPERIMENT: 0x2c IS ENFORCED, AND IT IS A FUNCTION OF THE PAYLOAD. Flipping ONE BYTE of 0x2c -- payload untouched, 0x08 untouched and still correct, 0x44 untouched -- was rejected with `boot 78 err 11`. That proves the field is checked. And it cannot be a version or compatibility field independent of content, because entry 64's earlier test kept Bosch's own 0x2c and 0x44 while changing a payload byte and recomputing 0x08, and that was rejected with the same `err 11`. So it varies with the payload and is verified: a digest or a MAC. WHAT IT IS NOT, each tested rather than reasoned about: not SHA-1, SHA-224, SHA-256, SHA-384, SHA-512, MD5, RIPEMD-160, SHA3-256, SHA3-512, BLAKE2b, BLAKE2s or SM3, truncated to 20 bytes from either end or byte-reversed, over segment 1's payload, segment 2's payload, both payloads concatenated in either order, the whole file, the header alone, segment 2's header alone, any header with the field itself zeroed, the whole file with 0x2c and 0x44 zeroed, or the whole file with all three hash fields zeroed. About 2,000 combinations across 13 ranges, 12 algorithms and 4 truncation forms, plus a bounded sweep of 1,344 start/end/algorithm combinations aimed specifically at segment 2 because it is self-contained at the end of the file. NO MATCH. Nor are the values copied from elsewhere in the image -- each of the three hash fields occurs exactly once, at its own offset, in every image checked. THE CORPUS ITSELF CONFIRMS THE DEPENDENCY: six images share segment 1 byte-for-byte (SHA-256 8ffa20a564d4a315) and share identical 0x2c and 0x44, while two images that share segment 1 with each other (36348df22af40e5b) have DIFFERENT 0x2c values, because their segment 2 differs. So the pair is a function of both segments together, which is consistent with a digest or MAC over the whole program image and inconsistent with any per-segment or per-header field. THE HONEST CONCLUSION, STATED AS INFERENCE AND NOT FACT: an unkeyed digest over a range I have not found is still possible, but the space of obvious ranges is now exhausted, and the more likely explanation is a KEYED construction -- an HMAC or a signature over Bosch's key -- in which case unsigned firmware cannot pass this check at all and the from-scratch route is blocked on this silicon. That is the same conclusion entry 63 reached and entry 64 hoped to avoid; entry 64 successfully eliminated it for the 0x08 field only, and it returns for these two. THE BOARD IS HEALTHY AND ON THE KLIO IMAGE, verified after each test: `imu boot upload` reports BOOTED, `chip 70 boot 38 err 00`, 35 virtual sensors. Every flash this entry was a test image and each was followed by a restore of the good one. Nothing in either repository changed.
+
+#### Next Steps:
+
+THE ONE CHEAP CHECK THAT WAS GOING TO PRECEDE CALLING THIS BLOCKED HAS NOW BEEN RUN, AND IT ALSO FAILED. HMAC-SHA1 and HMAC-SHA256 were tested with four candidate keys -- the 0x08 SHA-256 of segment 1, the 0x08 SHA-256 of segment 2, sixteen zero bytes, and the 0x662b magic -- against segment 1's payload, segment 2's payload, both concatenated, and the whole file, in both truncation forms: no match. So the key, if the construction is keyed at all, is not recoverable from the images themselves by any obvious means. THE ROUTE SHOULD BE TREATED AS BLOCKED UNLESS SOMEONE CAN PRODUCE A BHI260AP FIRMWARE IMAGE THAT BOSCH BUILT WITH A KNOWN PAYLOAD, which would let the fields be solved against a known-good input rather than against guesses. IF THAT FAILS the honest position is that this silicon will not run authored firmware and the operator should hear it plainly: the from-scratch route is blocked not by the ARC compiler, which works, nor by the load address or container format, which are solved, but by an integrity check whose construction is keyed. THE ALTERNATIVE THAT STAYS OPEN is unchanged from entries 60 to 64: the ESP32-S3 doing the classification, with 985 KB of free app slot since entry 43 and the six IMU channels already read reliably at 97 Hz. THE PROJECT'S PROVEN RESULT IS UNAFFECTED by any of this: KLIO scores pattern similarity on a graded, reproducible scale -- 1.000 / 0.795 / 0.475 / negative, four decimals stable across runs -- and that was measured on the glass in entry 58 and does not depend on custom firmware at all. THE TOOLCHAIN should be recorded somewhere durable in the repository rather than only in `~/opt`, since it is the one piece of this that is unambiguously reusable. UNCHANGED AND STILL OPEN: fork commit 8c2e7c9 is built and not flashed, no public KLIO+DataInject image exists, patterns do not survive a reboot, `klio save`/`restore` are instruments and not a durable store, the guest stacks are internal DRAM, `update.url` is unset, and `.ai/core.md`'s Purpose line still calls this a port of Linux.
+
+#### Files Modified:
+
+None.
+
+#### Status:
+
+- Build: N/A
+- Deployment: PASS (test images flashed, good image restored each time, board verified healthy)
+- User Test: N/A
+
+---
+
 ## 64 COMMIT Unreleased 2026-11-18T09:30:00-07:00
 
 #### Coming From:
