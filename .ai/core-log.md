@@ -1,3 +1,33 @@
+## 69 COMMIT Unreleased 2026-11-18T17:00:00-07:00
+
+#### Coming From:
+
+Unreleased 9a5c749
+
+#### Purpose:
+
+Read Bosch's reference injection implementation properly instead of guessing at payloads, after entry 68 left the block format unknown and the operator asked the fair question: *"doesnt the boshe injecter thingy explain it? pretty useless if they dont explain how to inject data"*.
+
+#### Outcome:
+
+TWO CONCRETE DEFECTS WERE FOUND IN THIS PORT'S BLOCK CONSTRUCTION BY READING THE REFERENCE, AND FIXING THEM DID NOT CHANGE THE RESULT. FIRST, PADDING IS ZERO, NOT 0xFF. `bhy2_hif_exec_cmd_generic()` rounds the declared length up to four bytes and then memsets the tail of its command buffer to zero, so when Bosch's own tool calls `bhy2_inject_data(log, 17)` with an unaligned length, what reaches the part is a declared 20 with three ZERO bytes. This port was padding with 0xFF on the theory that `BHY2_SYS_ID_FILLER` was the correct filler. It was not the observable behaviour. SECOND, THE TIMESTAMP IS ITS OWN INJECTION CALL. Bosch's tool does `bhy2_inject_data(inject_lts, 6)` and then `bhy2_inject_data(log, 17)` as two separate commands; combining timestamp and events into one block was a simplification that the reference does not make. Both corrections are in the fork at 64c4034. **THE RESULT IS UNCHANGED: 0xe2, zero KLIO frames, no blocks accepted.** WHERE 0xe2 COMES FROM IS NOW ISOLATED, and this is the entry's one solid piece of new evidence: on a fresh boot the error register reads 00; `CONFIG_SENSOR` for the accelerometer leaves it at 00; `SET_INJECT_MODE` step-by-step leaves it at 00; and `INJECT_DATA` ALONE sets it to 0xe2. So the injection handler is genuinely reached, the configuration sequence is not the problem, and the rejection is of the block content. That also retires a false alarm: an earlier reading of 0xe2 immediately after boot was a sticky value from a previous run, not a boot-time error, and `imu boot upload` clears it to 00. WHY BOSCH DOES NOT DOCUMENT THE FORMAT, which was the operator's actual question and deserves a direct answer: THE TOOL IS NOT A DEVELOPER API. The example's own README lists its pre-requisites as a COINES board on a specific branch, APP3.0 bridge firmware, and a *field trial log* -- a recording produced by Bosch during validation. Nothing in it is addressed to a third party constructing their own injection stream, no sample log file ships with the SDK, and the format exists ONLY as code: 17 hex values per line read with `fscanf("%x")`, 52 characters per line, first line a 19-character timestamp. It is a regression harness for shipping the part, and regression harnesses do not come with integration guides. That is consistent with everything else established here -- entry 66 showed section 4.3 licenses the AP for use, not modification, and injection is a validation path rather than a documented capability. WHAT IS STILL UNKNOWN is what the handler wants. The block is now two physical-sensor events in ordinary FIFO format, a separate large-delta timestamp, zero-padded to a word boundary, sent in step-by-step mode with the sensors configured -- which matches Bosch's reference in every respect that can be read from their code, and is still rejected. THE HONEST POSITION after four entries on injection is that this is now a search over an undocumented format with no sample to compare against, and each attempt costs a build and a flash. THE BOARD IS HEALTHY AND ON THE KLIO IMAGE, verified this entry: BOOTED, `chip 70 boot 38 err 00`, 35 virtual sensors. `klio learn`/`detect`/`save`/`restore`/`compare` all still work and were not touched.
+
+#### Next Steps:
+
+THE ONE REMAINING LEAD WITH REAL WEIGHT IS THE LOG FILE. Bosch's tool consumes a specific text format that this port has never produced and cannot synthesise from documentation -- but a field trial log is exactly the kind of artifact that accumulates in application notes, forum posts, or distributor material, and it would define the byte layout by example rather than by inference. That is a search problem, not an engineering one, and it is worth more than any further payload variation tried on hardware. IF NO LOG CAN BE FOUND, THE PRAGMATIC END IS ALREADY RECORDED and the operator should take it: the ESP32-S3 doing the classification with 985 KB of free app slot, six IMU channels read reliably at 97 Hz, and no undocumented format between the idea and the result. THE THING THAT WAS PROVEN AND IS NOT AFFECTED: KLIO's similarity metric is graded and reproducible -- 1.000 / 0.795 / 0.475 / negative, stable to four decimals -- measured from real motion and independent of injection entirely. IF INJECTION IS EVER RESUMED, the next three things in cost order are: try the woken-up accelerometer id (`BHY2_SENSOR_ID_ACC_WU`, 6) in place of 4, since step-by-step mode may route to the wakeup path; try injecting with the KLIO sensor id itself rather than the physical ones, on the theory that the handler keys on the consumer rather than the source; and try a block that carries a single event rather than two, since Bosch's 17 bytes are not provably accel+gyro and could be one longer event. UNCHANGED AND STILL OPEN: fork commit 64c4034 carries the corrections, no public KLIO+DataInject image exists, patterns do not survive a reboot, `klio save`/`restore` are instruments and not a durable store, the guest stacks are internal DRAM, `update.url` is unset, and `.ai/core.md`'s Purpose line still calls this a port of Linux.
+
+#### Files Modified:
+
+None in this repository; the fork carries 64c4034 (ports/twatchultra/main/imu.c).
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: N/A (result negative, instrument sound)
+
+---
+
 ## 68 COMMIT Unreleased 2026-11-18T15:30:00-07:00
 
 #### Coming From:
