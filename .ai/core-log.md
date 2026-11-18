@@ -1,3 +1,33 @@
+## 60 COMMIT Unreleased 2026-11-18T06:30:00-07:00
+
+#### Coming From:
+
+Unreleased e9b7e39
+
+#### Purpose:
+
+Narrow the ARC variant, which entry 59 left as the first unknown: the core is configurable, so the wrong `-mcpu` produces code that assembles and faults.
+
+#### Outcome:
+
+THE TOOLCHAIN IS REAL AND IT RUNS. `foss-for-synopsys-dwc-arc-processors/toolchain`, release arc-2026.09, asset `arc_gnu_2026.09_prebuilt_elf32_le_linux_install.tar.xz`, 446,205,468 bytes, extracted to 2.5 GB at `/tmp/arctc/arc-multilib-elf32/`. It reports itself as **"GNU objdump (ARCompact/ARCv2 elf32 toolchain - build 11175) 2.45.1"** and `arc-elf32-gcc` compiles for `em`, `hs` and `arc700` -- it is a MULTILIB toolchain, so all three variants are available from one install. The download stalled twice mid-transfer and had to be resumed with `curl -C -`; `xz -t` then verified it. **THE VARIANT IS NOT SETTLED, AND FIVE METHODS WERE TRIED BEFORE SAYING SO.** Each was measured rather than assumed: (1) the fraction of instructions that fail to decode, swept across em, em4, em6, em7d, em9d, hs, hs38, hs47d, arc600 and arc700 at eight byte alignments -- every variant lands between 12.6 and 16.4 percent undecoded, with no separation; (2) the ARCv2-only mnemonics `lp`, `lr`, `trap_s`, `swi_s` -- present, but this toolchain's decoder knows both generations, so arc700 mode decodes them too and they discriminate nothing; (3) register width, on the reasoning that ARCv2 EM has 16 registers and HS and ARC700 have 32 -- the firmware references r16 to r25 substantially, which would rule out EM, but compiled references for all three variants also produce 6.5 to 8.1 percent r16-plus references, so the measure does not separate them either; (4) a chi-square comparison of 16-bit major-opcode histograms against firmware built for each variant from the actual `bhy2.c`, giving 1.12 for em, 1.31 for arc700 and 1.05 for hs -- differences too small to mean anything, and the wrong ordering for a two-horse race; (5) code density, where the firmware is overwhelmingly 16-bit and the compiled references are 94.5 to 97.2 percent 16-bit -- again all three cluster together. **The honest position is that static analysis cannot pin this core down, and stating a winner from any of those five would be the same false confidence that produced "ARM Cortex-M" in entry 59.** WHAT IS SOLID: it is ARC (entry 59, 1279x separation from chance); it is the ARCv2 generation, because the firmware's 16-bit density and its loop and delay-slot usage exercise the modern encoding throughout; and the compiler covers every candidate. **THE DECISIVE TEST IS ON HARDWARE AND IT IS CHEAP** -- compile one minimal program for each of em and hs, flash it, and see which runs. A wrong `-mcpu` faults immediately rather than subtly, the FUMI wrapper is already understood well enough to build images (fetch.sh reproduces Bosch's byte for byte), and each attempt is about thirty seconds. That is a better use of an hour than another afternoon of disassembly. THE COST SO FAR is entirely reversible: no repository files changed, nothing flashed to the watch, and the 2.5 GB toolchain lives in `/tmp` rather than anywhere permanent.
+
+#### Next Steps:
+
+THE HARDWARE TEST, in order: write a minimal ARC program that does something observable -- the smallest useful one is a firmware that publishes a single custom virtual sensor whose payload is a constant, so success is visible as a FIFO event with a known value rather than as "it did not crash"; wrap it in the FUMI header; flash it; and read `imu boot` for the part's verdict. Build it for `em` first, then `hs` if the first faults. The entry point and link address come next and are partly inferable: Bosch's images place code as a contiguous blob after a short header, and the wrapper's checksum is already known. THE LARGER UNKNOWN IS UNCHANGED AND IS THE REAL COST: Bosch's application framework API, meaning how firmware on that core reads the physical sensors and publishes a virtual sensor to the host. That is not documented publicly, and disassembly is the only way to it. The toolchain makes it *possible* to compile; it does not make it *known* what to call. THE OPERATOR SHOULD DECIDE whether this is worth the days of reverse engineering it implies, against the alternatives already recorded -- the ESP32-S3 doing the arithmetic with 985 KB free of app slot, or engaging Bosch. WHAT CHANGED IN THIS ENTRY IS ONLY THE CONFIDENCE BOUNDARY: the toolchain is proven usable and the variant question is proven answerable by hardware rather than by argument. UNCHANGED AND STILL OPEN: no public KLIO+DataInject image, patterns do not survive a reboot, `imu feed` reaches nothing on KLIO, `klio save`/`restore` are instruments and not a durable store, the guest stacks are internal DRAM, `update.url` is unset, and `.ai/core.md`'s Purpose line still calls this a port of Linux.
+
+#### Files Modified:
+
+None. The toolchain was downloaded to `/tmp` and nothing in either repository was touched.
+
+#### Status:
+
+- Build: N/A
+- Deployment: N/A
+- User Test: N/A (toolchain validated; variant not resolved)
+
+---
+
 ## 59 COMMIT Unreleased 2026-11-18T05:00:00-07:00
 
 #### Coming From:
