@@ -1,3 +1,42 @@
+## 58 COMMIT Unreleased 2026-11-18T03:15:00-07:00
+
+#### Coming From:
+
+Unreleased 5f6ada9
+
+#### Purpose:
+
+Measure whether `bhy2_klio_similarity_score()` returns a graded certainty or a saturated yes/no, which entry 57 left as the one unknown standing between the operator's architecture and a demonstration. Their framing: the engine as a fuzzy computer where the patterns are programs, the carrier sine is the clock, and the output is a confidence float.
+
+#### Outcome:
+
+THE SCORE IS GRADED, MONOTONIC, AND REPRODUCIBLE. Four patterns learnt from the operator's hand in one session -- forward-back as the reference, two amplitude reductions, and one orthogonal motion as a control -- then one comparison call:
+
+```
+slot 0 vs itself    +1.000   100.0%
+slot 1  medium      +0.795    79.5%
+slot 2  small       +0.475    47.5%
+slot 3  left-right  -4.486
+```
+
+Reference against itself is exactly 1.000, which anchors the scale; the two modulations are ordered correctly and well separated; the control sits furthest. Repeated three times with identical values to four decimal places. **THE ARCHITECTURE THE OPERATOR DESCRIBED WORKS ON THIS HARDWARE**: patterns are programs, `set_pattern_states(ENABLE, ids)` loads one, the similarity call is the CPU readout, and the result is a number that carries *how different* rather than merely *whether*. THE SECOND FINDING IS A CORRECTION TO THIS PORT'S OWN CODE. The first `klio compare` bounds-checked scores to -1..+1 and printed "OUT OF RANGE (corrupt read)" for anything outside, on the assumption that a similarity behaves like a correlation coefficient. `bhy2_klio.h` says only that two similar patterns score "close to 1.0" and two very different ones "negative", WITH NO STATED FLOOR. Because the out-of-range value reproduced exactly across three runs it is a measurement, not a fault, and the check was mislabelling real data as corruption. It now prints every finite value and flags only a non-number. **The same reasoning retires the -8.837 from the previous run as probably genuine too** -- it came from a build whose FIFO was overflowing, which is the third finding. THE FIFO OVERFLOW WAS THE REAL DEFECT AND IT WAS THIS PORT'S, NOT THE PART'S. `read_pattern`, `write_pattern`, `set_pattern_states` and the similarity call are each several blocking I2C transactions, and the `learn` pass leaves accelerometer and gyroscope streaming at 100 Hz. Nothing drained between them, so the FIFO overflowed mid-operation -- `meta 12 fifo overflow` in every line of the run -- and what landed in a pattern slot was whatever survived. Two new functions fix it at the root: `imu_quiesce()` stops the three sensors, drains hard, flushes, and drains again, and `imu_drain_hard()` drains regardless of whether a sensor is nominally on. `save`, `restore` and `compare` all call it first. The pattern table is pure computation on the part and never needed the sensors streaming; leaving them on was the whole bug. A HOST-SIDE PATTERN BANK WAS ADDED BECAUSE A CALIBRATION RUN CANNOT AFFORD TO LOSE ITS EARLIER PASSES: `klio learn` sets `learning_reset`, and whether that also clears the recognition table is undocumented, so `klio save` stashes the 157 bytes and `klio restore` writes all of them back and enables them in one command. Without it a three-pass sweep would have to be redone from the first motion. MEASURED DETAILS WORTH KEEPING: every save reported `read 157 bytes`, matching the `pattern blob size` the part declares; four slots saved and four restored, all `ok`; `klio learn` reaches progress 100 after five repetitions in roughly ten seconds and the engine assigns its own internal index each time -- 1, 3, 3, 3 across the passes, which is why the recognition table id is always 0 and not that index. THE OPERATOR'S FIRST RUN COMPRESSED TO 93.4 AND 90.8 PERCENT because their "big" reference was barely larger than "medium"; re-recorded genuinely big, the same code gave 79.5 and 47.5. So the metric saturates when the patterns are close, which is worth knowing before reading a narrow gap as a narrow difference. THE PANEL OF INSTRUMENTS IS NOW COMPLETE FOR THIS WORK: `klio learn` to capture, `klio save <slot>` to keep, `klio restore` to recover, `klio list` to see, `klio compare <ref> <slots>` to measure. None of them is a feature; all of them are the calibration rig the operator's architecture needs before anything is built on top.
+
+#### Next Steps:
+
+THE REMAINING GAP IS UNCHANGED AND NOW PRECISELY BOUNDED: the certainty float needs the KLIO image, synthetic input needs a DataInject image, and no published image has both. Everything else the operator described is demonstrated. **The next honest step is to ask Bosch whether a DataInject build of `bhi260ap_klio` exists or can be produced**, with the argument their own documentation makes: an engine this expensive needs a way to validate itself, and only synthetic repeatable data can do that. THE CALIBRATION IS ALSO WORTH REPEATING WITH A FINER LADDER when the feeder exists: five or six amplitude steps rather than three, which would show whether the curve is linear, whether it has a shoulder, and where it crosses zero. Three points fit a line and a line is not necessarily the truth. THE CODE FIXES ARE COMMITTED BUT NOT ON THE BOARD: the corrected bounds reporting and the quiesce are built at 0x2ee620 and flashing them reboots the part, which wipes the four patterns -- so the operator should record the state first or accept redoing the motions. UNCHANGED AND STILL OPEN: KLIO patterns do not survive a reboot, KLIO has no UI and none of its four knobs are tuned, `klio save`/`restore`/`list` are instruments rather than a durable store, the guest stacks are internal DRAM, `update.url` is unset, and `.ai/core.md`'s Purpose line still calls this a port of Linux.
+
+#### Files Modified:
+
+None in this repository; the fork carries the work at 7e92be8 (ports/twatchultra/main/klio.c, main/imu.c, main/imu.h, modules/moddata.at).
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS (the measured build; the label fix is built but not flashed)
+- User Test: PASS (the operator ran all four motions and read the result)
+
+---
+
 ## 57 COMMIT Unreleased 2026-11-18T01:30:00-07:00
 
 #### Coming From:

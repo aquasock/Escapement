@@ -1,4 +1,4 @@
-# Handoff — Escapement / TinyDesk on T-Watch Ultra, 2026-11-18T01:45
+# Handoff — Escapement / TinyDesk on T-Watch Ultra, 2026-11-18T03:30
 
 Orientation, not authority. **Verify before acting on it.** The files, the
 coredump partition and the board are the fact; this file is a claim.
@@ -17,15 +17,15 @@ are equal, and **the app is at 0x20000, not 0x10000**. The flash is four equal
 
 ## Where things live
 
-- Project-control repo: `/run/media/vash/GIT/Escapement`, `main`, at `dc4e424`
-  (core-log **entry 57**). `.ai/core.md` is RESTRICTED — do not edit without an
+- Project-control repo: `/run/media/vash/GIT/Escapement`, `main`, at `5f6ada9`
+  (core-log **entry 58**). `.ai/core.md` is RESTRICTED — do not edit without an
   explicit request. Reference records live in `.ai/core-reference.md`.
 - **`.ai/core.md`'s Purpose line is stale and deliberately untouched.** It says
   "Escapement is a port of linux". The project is TinyDesk; the Linux line
   closed 2026-11-11. Fixing it needs the operator's word, because that file may
   only be edited when asked.
 - **Active code is the fork: `/run/media/vash/GIT/tinydesk-twatch`, branch
-  `t-watch-ultra`, clean at `e48940e`.** Push to `fork`
+  `t-watch-ultra`, clean at `7e92be8`.** Push to `fork`
   (`aquasock/tinydesk`) only — **never** `origin` (upstream
   `tinydesk-project/tinydesk`).
 - `/run/media/vash/ROCKBOX` is the operator's source backup. **Never write to it
@@ -408,6 +408,61 @@ than the two packed structs account for — log all 11, not the first 6.
 
 **Patterns are volatile.** The firmware is uploaded to RAM each boot, so LEARN AND
 DETECT MUST HAPPEN IN THE SAME BOOT.
+
+## THE SIMILARITY SCORE — MEASURED, GRADED, AND NOT -1..+1 (entry 58)
+
+**The number the whole architecture rests on is real.** Four patterns learnt from
+one hand: forward-back as the reference, two amplitude reductions, one orthogonal
+motion. One comparison call:
+
+```
+slot 0 vs itself    +1.000   100.0%
+slot 1  medium      +0.795    79.5%
+slot 2  small       +0.475    47.5%
+slot 3  left-right  -4.486
+```
+
+Monotonic, spread, reference exactly 1.000, control furthest. **Reproduced to
+four decimals across three runs**, which is what makes the negative a
+measurement rather than a glitch.
+
+**THE SCALE HAS NO FLOOR.** `bhy2_klio.h` says similar scores "close to 1.0" and
+very different scores "negative" — nothing more. An earlier version of
+`klio compare` bounds-checked to ±1 and printed "corrupt read" for anything
+outside; that was **mislabelling real data** and is fixed. Print every finite
+value.
+
+**The metric saturates when patterns are close.** A reference barely larger than
+medium gave 93.4/90.8; a genuinely big one gave 79.5/47.5. Do not read a narrow
+gap as a narrow difference.
+
+### The FIFO overflow was this port's bug, not the part's
+
+`read_pattern`, `write_pattern`, `set_pattern_states` and similarity are each
+several blocking I2C calls, while `learn` leaves accel and gyro streaming at
+100 Hz. Nothing drained between them → `meta 12 fifo overflow` → **whatever
+landed in a slot was whatever survived.**
+
+```
+imu_quiesce()      stop accel/gyro/KLIO, drain, flush, drain again
+imu_drain_hard()   drain regardless of s_sensor_on
+```
+
+`save`, `restore` and `compare` all quiesce first. The pattern table is pure
+computation and never needed the sensors streaming.
+
+### The calibration rig
+
+```
+klio learn            capture a motion          ~10 s, five repetitions
+klio save <slot>      keep it (157 bytes) + host-side bank
+klio restore          write all stashed slots back and enable
+klio list             what is stashed
+klio compare <ref> <slots...>
+```
+
+The bank holds 8 slots in PSRAM because `klio learn` sets `learning_reset` and
+whether that clears the table is undocumented — a sweep stays recoverable.
 
 ## DATA INJECTION — THE ARCHITECTURE, AND IT IS AN ALGORITHM PLUS INJECTION (entry 57)
 
