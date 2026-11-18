@@ -283,6 +283,7 @@ Topic IDs are the `record_id` prefix. An entry reserves a name; it does not clai
 | What are the part's meta event codes, and can they be trusted? | IMU | IMU-005 |
 | Why does the FIFO overflow while injecting? | IMU | IMU-006 |
 | Why does KLIO stop emitting frames partway through a learning run? | IMU | IMU-007 |
+| What unit is the IMU timestamp in, and how is it encoded? | IMU | IMU-008 |
 | Which ttyACM device is the watch, and which is the TinyTang? | TOL | TOL-005 |
 | Why is the console dead after an esptool read with --after no_reset? | TOL | TOL-006 |
 | How do I open a Terminal on the watch from a host, reliably? | TOL | TOL-007 |
@@ -459,6 +460,7 @@ IMU-004: "KLIO learning succeeds only when bhy2_klio_read_pattern() returns BHY2
 IMU-005: "bhy2_defs.h meta codes are 1,2,3,5..16,18,19,20 (11 = SENSOR_ERROR, 12 = FIFO_OVERFLOW, 20 = SPACER); with the physical sensors streaming, the meta callback also receives packets that are not meta events at all (observed lead byte 0xF5), so meta counts are only interpretable with those sensors off, where a run yields 12-15 packets all code 20"
 IMU-006: "Accelerometer and gyroscope at 50 Hz alongside injected blocks at 100 Hz overflow the part's one FIFO: measured 42 FIFO_OVERFLOW and 30 SENSOR_ERROR events attributed to sensor 4, against 0 and 0 with both physical sensors off -- injection replaces their contribution, it does not supplement it"
 IMU-007: "With a quiet FIFO and zero errors, KLIO climbs 20/40/60/80 in about 5 s, then returns to 0 with change_reason 1 and STOPS EMITTING FRAMES ENTIRELY (15 frames, then silence for 1400 more accepted blocks), and the peak is not reproducible between identical runs (80 then 20)"
+IMU-008: "The part's timestamp tick is ~15.6 us (64130 ticks/second, MEASURED): a TS_LARGE_DELTA field is a DELTA that bhy2.c ADDS to a running 64-bit counter, not an absolute time, and the physical accelerometer at 50 Hz advances the parsed timestamp by exactly 1282-1283 ticks per 20 ms sample"
 TOL-005: "The watch and the TinyTang both appear as ttyACM devices and swap numbers between reboots: the watch is 303a:1001 (Espressif USB JTAG/serial debug unit) and the TinyTang is ffff:5454 (TinyTang CDC), so identity must come from /dev/serial/by-id or udev, never from the ttyACM number"
 TOL-006: "esptool's --after no_reset leaves the ESP32-S3 in its ROM bootloader, so the board's console emits nothing and every later command reads stale state until a --after hard_reset chip_id or a power cycle"
 TOL-007: "The desktop Start menu remembers its last selection, so F10 then Enter is only deterministic after a reboot: the sequence that works is reboot, F10, Enter, and the window that appears must be verified to be `tdsh` before typing, or the keys land in whichever app was selected last"
@@ -2587,6 +2589,20 @@ TOL-007: "The desktop Start menu remembers its last selection, so F10 then Enter
     - "tinydesk-twatch tools/watch-screen.py (Screen model, DECSC/DECRC handling, drain-before-send)"
     - "tinydesk-twatch ports/twatchultra/main/ (desktop key handling for F10 and Enter; Start menu selection persistence)"
   verification: "Verified on hardware 2026-11-18 (core-log entry 75): repeated attempts using F10 followed by Enter with no screen check launched the Tamagotchi emulator several times, and `imu inject 30 ...` was typed into it as game input. After a reboot the same F10/Enter sequence produced a `tdsh` window on the first attempt, confirmed by reading the screen back, and the injection runs then executed normally."
+
+- record_id: IMU-008
+  kind: IMU
+  topic_id: IMU
+  status: VERIFIED
+  verified_date: 2026-11-18
+  title: "The IMU timestamp is a delta added to a running counter, and its tick is about 15.59 us (64130 ticks per second), measured from the physical accelerometer"
+  statement: "In the BHy2 FIFO, a `BHY2_SYS_ID_TS_LARGE_DELTA` (252) or `..._WU` (246) entry is followed by a 16-bit little-endian value, and bhy2.c's parser applies it as `*time_stamp += BHY2_LE2U16(buffer + pos + 1)` -- the field is a DELTA added to a running 64-bit per-FIFO counter, not an absolute timestamp. A small-delta entry (251/245) adds a single byte the same way, and `BHY2_SYS_ID_TS_FULL` (253) carries an absolute value with its own encoding. Consecutive parsed timestamps for the physical accelerometer configured at 50 Hz advanced by 1282, 1283, 1282, 1283, 1282, 1283, 1283, 1282, 1283, 1282, 1283 ticks across twelve samples, so 20 ms is 1283 ticks and the tick is 20 ms / 1283 = 15.59 us, i.e. 64130 ticks per second."
+  consequence: "Injecting a timestamp means writing a DELTA per block, not an absolute time: at the 100 Hz injection rate used here that is 641 ticks per block, and the counter must be allowed to wrap modulo 2^16 because only the low 16 bits fit the field. Any value that is absolute, that resets to zero, or that is off in scale makes the engine's notion of elapsed time wrong, which matters for an algorithm that segments motion by duration. The unit is not documented in the BHy2 headers this port vendors, so it must be re-measured with `imu clock` if a firmware image or configured rate changes."
+  sources:
+    - "tinydesk-twatch ports/twatchultra/components/bhy2/bhy2.c, parse_fifo: BHY2_SYS_ID_TS_LARGE_DELTA / TS_SMALL_DELTA / TS_FULL handling"
+    - "tinydesk-twatch ports/twatchultra/components/bhy2/include/bhy2_defs.h (BHY2_SYS_ID_TS_LARGE_DELTA 252, _WU 246, TS_SMALL_DELTA 251, TS_FULL 253)"
+    - "tinydesk-twatch ports/twatchultra/main/imu.c: on_accel timestamp capture and the `imu clock` subcommand"
+  verification: "Measured on hardware 2026-11-18 (core-log entry 76) with `imu clock`, which configures ONLY the physical accelerometer at 50 Hz and reads the SDK's parsed timestamp for consecutive samples -- deliberately outside any injection, because the injected deltas are what is in question and an injected run would be circular. Ten consecutive intervals all reported 1282 or 1283 ticks, giving 64130 ticks/s. The consequence was then applied: the injected delta was changed from an absolute 10000-per-block counter that reset at 65000 to a 641-per-block delta with natural 16-bit wraparound. Four subsequent runs with the corrected delta peaked at 20/40/40/40, statistically unchanged from the 20/40/40 baseline, so the fix is correct and is not what blocks learning."
 
 ```
 

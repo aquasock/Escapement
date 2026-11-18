@@ -1,3 +1,33 @@
+## 76 COMMIT Unreleased 2026-11-18T12:30:49-07:00
+
+#### Coming From:
+
+Unreleased c577ec0
+
+#### Purpose:
+
+Test the cheapest of entry 75's two open questions -- whether the 7-byte packets on sensor 112 are the injected blocks coming back -- and, in the course of it, settle the unit of the injected timestamp field.
+
+#### Outcome:
+
+THE 7-BYTE PACKETS ARE THE PHYSICAL SENSORS AND ARE ALREADY GONE FROM EVERY RUN THAT MATTERS, SO ENTRY 75'S FIRST NEXT STEP RESTED ON A MISREADING. Entry 75 listed 7-byte packets appearing on sensor 112 alongside the 11-byte KLIO frames even with both physical sensors disabled. Checking every stored trace rather than the remembered lines shows the opposite: across thirty-nine traces recovered from flash, every 7-byte packet appears in a run with `phys 1` and NOT ONE appears in any `phys 0` run, where the packet sequence is consistently six 11-byte KLIO frames and four 4-byte meta packets. The claim was true of the runs entry 74 made before the `phys` argument existed, and it was carried into entry 75 as though it had been re-observed. It had not been. That removes the suspected double-feed and with it the possibility that it was masking the waveform work. THE REAL DEFECT THE CYCLE FOUND IS IN THE TIMESTAMP, AND IT IS A FACT RATHER THAN AN INFERENCE. The injected block carries a `TS_LARGE_DELTA` entry, and bhy2.c's parser does `*time_stamp += BHY2_LE2U16(buffer + pos + 1)` for it -- the field is a DELTA added to a running 64-bit counter. This command was writing an absolute millisecond counter into it, 10000 units per block, and then zeroing the counter whenever it passed 65000, which is wrong twice: the value was an absolute time in a field the part adds, and it sawtoothed back to zero every seventh block. THE UNIT IS IN NO HEADER THIS PORT VENDORS, SO IT WAS MEASURED RATHER THAN ASSUMED, AND MEASURING IT INSIDE AN INJECTED RUN WOULD HAVE BEEN CIRCULAR because the injected deltas are the thing in question. A new `imu clock` subcommand configures only the physical accelerometer at 50 Hz and reads the SDK's own parsed timestamp for consecutive samples: twelve samples advanced by 1282, 1283, 1282, 1283, 1282, 1283, 1283, 1282, 1283, 1282, 1283 ticks, so 20 ms is 1283 ticks and one tick is 15.59 microseconds, or 64130 ticks per second. The injected delta is therefore 641 units per 10 ms block, and the counter now wraps modulo 2^16 on its own, which is how the part's own arithmetic behaves, instead of being reset. The tap also records the SDK's parsed timestamp for each KLIO frame so a run can report the part's clock against real elapsed time. THE FIX IS CORRECT AND IT DOES NOT MAKE KLIO LEARN. Four runs with the corrected delta peaked at 20, 40, 40 and 40 with 15, 25, 22 and 16 frames, against a pre-fix baseline of 20, 40 and 40 with 9, 21 and 22 -- statistically the same distribution, same 3000 blocks accepted, zero overflows and zero sensor errors throughout. So a clock running 15.6 times fast with a deliberate backwards jump was a genuine defect worth fixing on its own merits and is not what blocks convergence. TWO SMALLER FACTS ESTABLISHED ALONG THE WAY. The 7-byte packets that do appear in `phys 1` runs decode as accelerations of six to eight g on a single axis, which is not physical for a wrist and is more evidence that running the physical sensors during injection is the wrong configuration. And a repaint sequence sent to force the display mirror to refresh can leave escape residue in the shell's input line, which produced `tdsh: command not found: ^[[?2026himu` and cost a run; a Ctrl+C before typing clears it. THE BOARD IS HEALTHY AND ON THE FINAL IMAGE: the app flashed and verified, the module relinked against addresses re-read from that image and reflashed, and `music` plays a 5:58 track at 290304 frames, 0 errors, 0 short writes, confirmed by the operator by ear. Entry 75's other open item, cycle-to-cycle sameness of the waveform, is now the only live lead and is untouched by this cycle.
+
+#### Next Steps:
+
+THE WAVEFORM'S CYCLE-TO-CYCLE SAMENESS IS NOW THE ONLY UNTESTED VARIABLE. With transport, timestamp, sensors, waveform timing and rest duration all eliminated or corrected, what remains is that consecutive cycles may not be identical enough for a segmentation engine to match them: the waveform is recomputed each block from `fmodf(t, period)` on a 10 ms grid, which does not land on the same samples every cycle, and the swing is a one radian arc on two axes while the rest is a constant one gravity on z. The cheapest decisive test is a waveform generated ONCE into a table and then replayed exactly, so that every cycle is bit-identical and the only cycle-to-cycle difference is numerical noise; if the engine still resets progress at the same point, the waveform's shape rather than its repeatability is the problem and the next thing to vary is a single-axis swing. A SECOND AND CHEAPER CHECK COMES FIRST: the peak now ranges from 20 to 80 across runs of the same command on the same image -- 80 in entry 74, 40 here, 20 in several runs -- and that spread has never been characterised. Before any cycle-to-cycle claim, one configuration should be run at least six times and its distribution reported, because an effect smaller than that spread cannot be seen at all. THE PROJECT'S HONEST POSITION IS UNCHANGED IN THE WAY THAT MATTERS: `read_pattern` has never returned 157 bytes from injected data, so the architecture is unproven on synthetic input, while the graded similarity metric from real motion (1.000 / 0.795 / 0.475 / negative) remains measured and reproducible and is not affected by anything here. UNCHANGED AND STILL OPEN: no public KLIO+DataInject image exists, patterns do not survive a reboot, `klio save` and `klio restore` are instruments rather than a durable store, the two unidentified header fields at 0x2c and 0x44 still gate custom firmware, the guest stacks are internal DRAM, `update.url` is unset, and entries 66 through 73 still carry fenced code blocks inside Outcome which the syntax forbids.
+
+#### Files Modified:
+
+None.
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: PASS
+
+---
+
 ## 75 COMMIT Unreleased 2026-11-18T12:11:06-07:00
 
 #### Coming From:
