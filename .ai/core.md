@@ -4,7 +4,7 @@
 
 ## Purpose
 
-Escapement is a port of linux to the Lilygo T Watch Ultra
+Escapement is a TinyDesk port to the Lilygo T Watch Ultra. The earlier attempt to port Linux to the same board is closed and kept in this repository as an archive.
 
 ---
 

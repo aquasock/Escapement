@@ -31,6 +31,8 @@ record_kinds:
   - TOOLCHAIN   # crosstool-NG Xtensa/uClibc, ESP-IDF, esptool
   - EXTERNAL    # interface contracts owned by other projects
   - EMU         # the SPLB32 emulator: interpreter cost, PSRAM latency, core choice
+  - IMU         # BHI260AP: host-loaded firmware, KLIO frames, injection, meta events
+  - AUD         # audio playback, decoding and volume
 
 statuses:
   VERIFIED:   "Primary source cited AND confirmed on this project's hardware or tools."
@@ -142,6 +144,10 @@ Topic IDs are the `record_id` prefix. An entry reserves a name; it does not clai
 - topic_id: AUD
   name: "Audio playback, decoding and volume"
   description: "How a sample reaches the speaker or the DAC's analog output and what happens to it on the way: compressed-audio decoding on this CPU and the memory cost that decides which decoder fits, volume as a taper law rather than a percentage, the perceptual and hardware conventions behind those laws, and the resolution cost of attenuating in the samples."
+
+- topic_id: IMU
+  name: "BHI260AP IMU, KLIO and host data injection"
+  description: "The Bosch BHI260AP on the shared I2C bus: the host-loaded firmware image and its container, the KLIO pattern-learning algorithm's frame layout and learning semantics, the data-injection command's payload rules and ids, the meta-event vocabulary, and the FIFO behaviour when injected blocks and physical sensors share one queue."
 ```
 
 ---
@@ -270,6 +276,15 @@ Topic IDs are the `record_id` prefix. An entry reserves a name; it does not clai
 | Why does a kernel patch silently go missing? | TOL | TOL-003 |
 | What can an emulator measured on this board achieve? | EXT | EXT-001 |
 | Where can a large read-only blob live without RAM? | EXT | EXT-002 |
+| Where does the IMU's firmware live, and in what container? | IMU | IMU-001 |
+| What do the bytes in a KLIO output frame mean? | IMU | IMU-002 |
+| What does injected data have to look like, and which ids does it take? | IMU | IMU-003 |
+| How do I know KLIO actually learnt a pattern? | IMU | IMU-004 |
+| What are the part's meta event codes, and can they be trusted? | IMU | IMU-005 |
+| Why does the FIFO overflow while injecting? | IMU | IMU-006 |
+| Why does KLIO stop emitting frames partway through a learning run? | IMU | IMU-007 |
+| Which ttyACM device is the watch, and which is the TinyTang? | TOL | TOL-005 |
+| Why is the console dead after an esptool read with --after no_reset? | TOL | TOL-006 |
 | Why does a fullscreen app flicker against the console? | EXT | EXT-003 |
 
 ---
@@ -435,6 +450,16 @@ MOD-001: "A blob in the modules partition is mapped as INSTRUCTIONS (0x42000000.
 AUD-001: "A volume percentage is a loudness scale, not an amplitude, and the three conventions differ: -10 dB at half is the psychoacoustic half-loudness result, -18 dB at half is what a 15A audio-taper pot and VLC's cubic law both give, and linear-in-dB spends an even 3.6 dB per 10% over a 36 dB range; a power law is accurate at one point and inverts the feel"
 AUD-002: "FLAC decoding fits because micro-flac (Apache-2.0) sizes one PSRAM working buffer from the file's own STREAMINFO and has Xtensa LPC assembly, costing 31.7 KB of flash; Rockbox's decoder cannot run here at all because it reserves ~190 KB of internal SRAM as static 7-channel buffers"
 USB-006: "VERIFIED: the USB-C DAC's playback FU MUTE refuses SET_CUR with a STALL, so its silent first stream cannot be unmuted from the host; a streaming alternate-setting cycle (dac_wake(), `uac2 wake`) re-arms it, and its hardware volume barely changes loudness on headphones"
+
+IMU-001: "The BHI260AP runs firmware the HOST loads into its RAM: the image sits in `moddata` at 0xE10000 as a multi-segment container whose first segment loads at 0x124000, and its header carries a SHA-256 of the payload at offset 0x08; nothing about it is a fixed mask ROM program"
+IMU-002: "A KLIO learning frame is 11 bytes; byte 1 is the pattern index (int8, -1 = none), byte 2 is progress 0..100 (100 learns a pattern), byte 3 is change_reason: 0 progressing, 1 interrupted by non-repetitive activity, 2 interrupted by no significant movement"
+IMU-003: "Injected payloads must be a multiple of four bytes (0x7C ERR_INPUT_CHANNEL_NOT_WORD_ALIGNED) and are addressed by DEDICATED inject ids 55 (ACCEL_INJECT_ID) and 58 (GYRO_INJECT_ID), never by sensor ids; a malformed block returns 0xE2 ERR_SENSOR_DATA_INJECTION"
+IMU-004: "KLIO learning succeeds only when bhy2_klio_read_pattern() returns BHY2_OK with a 157-byte pattern; rc -2 with the 244-byte buffer size filled in means no pattern exists, and the progress byte alone is not evidence of anything"
+IMU-005: "bhy2_defs.h meta codes are 1,2,3,5..16,18,19,20 (11 = SENSOR_ERROR, 12 = FIFO_OVERFLOW, 20 = SPACER); with the physical sensors streaming, the meta callback also receives packets that are not meta events at all (observed lead byte 0xF5), so meta counts are only interpretable with those sensors off, where a run yields 12-15 packets all code 20"
+IMU-006: "Accelerometer and gyroscope at 50 Hz alongside injected blocks at 100 Hz overflow the part's one FIFO: measured 42 FIFO_OVERFLOW and 30 SENSOR_ERROR events attributed to sensor 4, against 0 and 0 with both physical sensors off -- injection replaces their contribution, it does not supplement it"
+IMU-007: "With a quiet FIFO and zero errors, KLIO climbs 20/40/60/80 in about 5 s, then returns to 0 with change_reason 1 and STOPS EMITTING FRAMES ENTIRELY (15 frames, then silence for 1400 more accepted blocks), and the peak is not reproducible between identical runs (80 then 20)"
+TOL-005: "The watch and the TinyTang both appear as ttyACM devices and swap numbers between reboots: the watch is 303a:1001 (Espressif USB JTAG/serial debug unit) and the TinyTang is ffff:5454 (TinyTang CDC), so identity must come from /dev/serial/by-id or udev, never from the ttyACM number"
+TOL-006: "esptool's --after no_reset leaves the ESP32-S3 in its ROM bootloader, so the board's console emits nothing and every later command reads stale state until a --after hard_reset chip_id or a power cycle"
 ```
 
 ---
@@ -2433,6 +2458,121 @@ USB-006: "VERIFIED: the USB-C DAC's playback FU MUTE refuses SET_CUR with a STAL
     - "tinydesk-twatch ports/twatchultra/main/musicdec.cpp, components/micro-flac/CMakeLists.txt and README.vendored.md"
   verification: "Measured on hardware 2026-11-16 (core-log entry 24). Flash: the real decode path was compiled for xtensa-esp32s3 into both an empty ESP-IDF app and the watch's firmware, and the image grew 31.7 KB in isolation (206,576 to 239,008 bytes) with 55 micro_flac symbols in the final ELF and no FLACEncoder symbol, confirming the encoder is dropped. RAM: sizeof(drflac) was measured at 4,512 bytes on the host; micro-flac's buffer arithmetic was checked against its source (max_block_size x channels x sizeof(int32_t) in decode_frame). Behaviour on the watch: 352800 frames for an 8 s 44.1 kHz stereo tone and 192000 for a 4 s 48 kHz one, both exact, and a 5:58 track played with 0 errors and 0 short writes while the frame counter advanced 548352 frames over an interval matching wall-clock time; internal RAM returned to its starting figure after the task ended. Rockbox's figures are read from its source rather than measured on this board, because its static reservation is what makes it unbuildable here."
 
+- record_id: IMU-001
+  kind: IMU
+  topic_id: IMU
+  status: VERIFIED
+  verified_date: 2026-11-18
+  title: "The BHI260AP's firmware is host-loaded into the part's RAM from the `moddata` partition, in a multi-segment container whose first segment lands at 0x124000"
+  statement: "The BHI260AP is an ARC core running compiled firmware supplied by the host, not a fixed mask-ROM part: the image is stored in flash at 0xE10000 (the `moddata` partition plus 64 KB) and streamed into the part by `imu boot upload`. The container is multi-segment rather than a flat blob; a segment's load address is carried in the image rather than implied, and the image measured here loads its first segment at 0x124000. The header carries a SHA-256 of the payload at offset 0x08, and that check is real: one flipped payload byte is rejected."
+  consequence: "A custom algorithm image is therefore a software problem, not a silicon one -- but the part verifies what it is given, so a modified payload must carry a matching digest, and two further fields at header offsets 0x2c and 0x44 remain unidentified and are enforced. The firmware lives in `components/imu/bhi260_klio.img` in the fork and is flashed separately from the app and the codec (`make imu`), sharing `moddata` with the codec's .rodata without overlapping because the codec occupies offset 0 and the IMU image starts 64 KB in."
+  sources:
+    - "tinydesk-twatch ports/twatchultra/components/imu/bhi260_klio.img, ports/twatchultra/main/imu.c (cmd_imu_boot, firmware load path)"
+    - "tinydesk-twatch ports/twatchultra/modules/Makefile (IMU_IMG, IMU_AT = 0xE10000)"
+    - "Bosch BHI260AP firmware container layout, established by inspection of shipped images (core-log entries 62-65)"
+  verification: "Verified on hardware 2026-11-17 and 2026-11-18 (core-log entries 62-65, 71-74): `imu boot upload` reports BOOTED, `chip 70 boot 38 err 00`, and 35 virtual sensors are enumerable. Multi-segment loading and the 0x124000 first-segment address were established by comparing shipped images; the digest at 0x08 was confirmed by flipping one payload byte and observing rejection. Two fields at 0x2c and 0x44 are enforced but not identified, and are recorded here as open rather than guessed."
+
+- record_id: IMU-002
+  kind: IMU
+  topic_id: IMU
+  status: VERIFIED
+  verified_date: 2026-11-18
+  title: "A KLIO learning frame is 11 bytes, and its progress, index and change_reason bytes have defined meanings: 100 learns a pattern, and an interruption is explained by the reason byte"
+  statement: "Bosch's bhy2_klio_defs.h defines `bhy2_klio_sensor_frame_learning_t` as `uint8_t instance; int8_t index; uint8_t progress; uint8_t change_reason;` with these documented meanings: index -1 means no new learning has occurred and any value >= 0 means a pattern has been learnt and may be read; progress counts from 0 to 100 while learning and reaching 100 learns a new pattern, with the documented behaviour that 'if learning is interrupted, this progress will return to 0, and change reason will be set to indicate why'; change_reason is 0 = learning is progressing, 1 = learning was interrupted by a non-repetitive activity, 2 = learning was interrupted because no significant movement was detected. The frame as it arrives in the FIFO is 11 bytes, with the index at byte 1, progress at byte 2 and change_reason at byte 3."
+  consequence: "A learning frame is self-describing, so a run can be judged from its frames rather than from a guessed threshold. It also means `progress` returning to 0 is the documented signal of an interruption and not a bug, and that the reason byte distinguishes the two interruptions Bosch describes -- non-repetitive motion from undetected motion -- which are different problems with different fixes. Any tool that reports progress alone throws away the field that says why."
+  sources:
+    - "tinydesk-twatch ports/twatchultra/components/bhy2/include/bhy2_klio_defs.h (bhy2_klio_sensor_frame_learning_t, progress and change_reason doc comments)"
+  verification: "Verified on hardware 2026-11-18 (core-log entries 73, 74). The 11-byte size is enforced by the tap in ports/twatchultra/main/imu.c, which rejects any other length after an earlier defect decoded 7-byte accelerometer frames as KLIO and produced impossible progress values such as 246. Byte offsets were confirmed against captured frames, and the documented reason vocabulary was observed directly: a run produced progress 20, 40, 60, 80 with reason 0, followed by a frame with progress 0 and reason 1."
+
+- record_id: IMU-003
+  kind: IMU
+  topic_id: IMU
+  status: VERIFIED
+  verified_date: 2026-11-18
+  title: "Data injection needs a word-aligned payload and the dedicated inject ids 55 and 58, not sensor ids; its two error codes are 0x7C for misalignment and 0xE2 for rejected content"
+  statement: "The part's data-injection handler enforces two rules that are stated in Bosch's BHI360 SDK rather than in the BHI2xy SDK this port vendors. First, a payload whose length is not a multiple of four bytes is rejected with `BHI360_ERR_INPUT_CHANNEL_NOT_WORD_ALIGNED` = 0x7C, before the handler is reached. Second, the ids a payload carries are dedicated injection ids, not sensor ids: `dinject_defs.h` defines `ACCEL_INJECT_ID` = 55, `GYRO_INJECT_ID` = 58, `ACCEL_INJECT_EVENT_SIZE` = 7 and `GYRO_INJECT_EVENT_SIZE` = 7. A payload that reaches the handler and is refused returns `BHI360_ERR_SENSOR_DATA_INJECTION` = 0xE2. Bosch's own reference tool sends a 6-byte full timestamp as one injection call and then a 17-byte data block as another, and its SDK zero-pads an unaligned length to a multiple of four."
+  consequence: "Both rules are invisible in the BHI2xy SDK this port uses, and each cost this project multiple cycles: every attempt before entry 67 sent an unaligned payload and read 0x7C as 'the part ignores injection', and every attempt before entry 71 used a sensor id and read 0xE2 as 'the content is wrong'. The instrumented command in ports/twatchultra/main/imu.c therefore pads every block and builds it from ids 55 and 58, and reports the error register per block so framing and content failures stay distinguishable."
+  sources:
+    - "Bosch BHI360 SensorAPI, source/bhi360_defs.h (BHI360_ERR_INPUT_CHANNEL_NOT_WORD_ALIGNED 0x7C, BHI360_ERR_SENSOR_DATA_INJECTION 0xE2)"
+    - "Bosch BHI2xy SensorAPI, examples/swim/swim_data_injection and dinject_defs.h (ACCEL_INJECT_ID 55, GYRO_INJECT_ID 58, event size 7)"
+    - "Bosch BHI2xy SensorAPI, bhy2_hif_exec_cmd_generic() (rounds to four bytes, zero-fills the tail)"
+  verification: "Verified on hardware 2026-11-18 (core-log entries 67, 71): a block built from id 4 returns 0xE2 while the same block built from id 55 returns 0x00, six times in a row; and an unaligned 17-byte payload returns 0x7C where the same payload padded to 20 bytes reaches the handler. Every attempt to resume this work should start from these two constants rather than re-deriving them."
+
+- record_id: IMU-004
+  kind: IMU
+  topic_id: IMU
+  status: VERIFIED
+  verified_date: 2026-11-18
+  title: "A learnt KLIO pattern is proven by bhy2_klio_read_pattern() returning a 157-byte pattern; rc -2 means there is none, and the progress byte is not evidence"
+  statement: "`bhy2_klio_read_pattern()` takes a caller buffer and a length in/out parameter. On success it returns BHY2_OK and reports a 157-byte pattern. When no pattern has been learnt it returns -2 (an invalid-parameter class error, as documented for 'trying to read a learnt pattern when no pattern has been learnt') and leaves the length unchanged at whatever the caller passed, which is why the size that comes back in a failed call is the buffer size and not a pattern size."
+  consequence: "The 157-byte return is the only gate this project accepts for a learnt pattern, because the `progress` byte has been observed at 1, 20, 35, 43, 96 and 246 and cannot be trusted. Reading a pattern must also happen immediately after the engine announces one: any reset of the engine clears it, so a `klio save` issued after the fact reported 'invalid param' on a pattern that had just existed."
+  sources:
+    - "tinydesk-twatch ports/twatchultra/components/bhy2/include/bhy2_klio.h (bhy2_klio_read_pattern), bhy2_klio_defs.h (invalid-pattern error)"
+  verification: "Established as a negative result on hardware across core-log entries 71-74: read_pattern has returned rc -2 with a 244-byte buffer on every injected run, including runs with zero FIFO overflows and zero sensor errors, and has never returned 157 bytes from injected data. A 157-byte pattern HAS been read from a gesture trained by hand, which is what makes the gate meaningful rather than hypothetical."
+
+- record_id: IMU-005
+  kind: IMU
+  topic_id: IMU
+  status: VERIFIED
+  verified_date: 2026-11-18
+  title: "Meta event codes are 1,2,3,5-16,18,19,20; with the physical sensors streaming the meta callback also receives packets that are not meta events, so its counts are only interpretable with those sensors off"
+  statement: "bhy2_defs.h defines the meta event ids as 1 FLUSH_COMPLETE, 2 SAMPLE_RATE_CHANGED, 3 POWER_MODE_CHANGED, 5 ALGORITHM_EVENTS, 6 SENSOR_STATUS, 7-9 the BSX step counters, 10 RESERVED1, 11 SENSOR_ERROR, 12 FIFO_OVERFLOW, 13 DYNAMIC_RANGE_CHANGED, 14 FIFO_WATERMARK, 15 RESERVED2, 16 INITIALIZED, 18 SENSOR_FRAMEWORK, 19 RESET and 20 SPACER. Meta packets arrive on two channels, the normal FIFO (id 254) and the wakeup FIFO (id 248), so both must be registered or a rejection looks like silence. Observed on this board: with the accelerometer and gyroscope switched off, a 30-second run produced 12-15 meta packets, every one of them code 20 (SPACER); with those sensors streaming, the same callback received thousands of packets whose first bytes were spread across 0-31 and included at least one packet that was not a meta event at all (first byte 0xF5, sensor byte 253)."
+  consequence: "A meta-event count taken while the physical sensors are running is not a measurement of meta events, and an instrument built on one should either switch those sensors off or attribute packets by sensor id before counting. Bosch's own CLI activates only the algorithm during injection (`actse 114:100`), which is the configuration in which the meta channel behaves coherently on this board."
+  sources:
+    - "tinydesk-twatch ports/twatchultra/components/bhy2/include/bhy2_defs.h (BHY2_META_EVENT_* values, BHY2_SYS_ID_META_EVENT 254, BHY2_SYS_ID_META_EVENT_WU 248)"
+  verification: "Verified on hardware 2026-11-18 (core-log entry 74) by instrumenting the meta callback in ports/twatchultra/main/imu.c to count each code into a histogram and record the first four packets verbatim. Sensors off: 12 and 13 packets, all code 20. Sensors on: 4122 packets with codes 0 and 31 dominant, and a final packet of ev 245 / sensor 253, which is a sensor id rather than an event code. The verbatim packets captured are `14 01 00 f7` (code 20 = SPACER) and `10 67 17 00` (code 16 = INITIALIZED), both consistent with the SDK."
+
+- record_id: IMU-006
+  kind: IMU
+  topic_id: IMU
+  status: VERIFIED
+  verified_date: 2026-11-18
+  title: "Accelerometer and gyroscope at 50 Hz alongside 100 Hz injection overflow the part's single FIFO; with both switched off the overflows and sensor errors are zero"
+  statement: "The injected blocks and the physical sensors' own samples share one FIFO on this part. Measured with the accelerometer and gyroscope configured at 50 Hz while 3000 injection blocks were sent at 100 Hz over 30 seconds: 42 `FIFO_OVERFLOW` and 30 `SENSOR_ERROR` meta events, attributed to sensor 4 (the accelerometer), with only 9 KLIO frames and a last error of 0xE2 on the data path. Measured with both physical sensors explicitly disabled and every other variable unchanged: 0 overflows, 0 sensor errors, 16 KLIO frames, and 12-15 meta packets in the whole run."
+  consequence: "Injection replaces the physical sensors' contribution rather than supplementing it, so an injected experiment should disable both physical sensors -- which is also what Bosch's own CLI does. A drain-tightening change is not the fix for this and was the wrong next step before it was measured: the FIFO is being over-fed, not under-drained, and the port's own imu_poll() records two earlier attempts at a tighter drain that wedged the shell task."
+  sources:
+    - "tinydesk-twatch ports/twatchultra/main/imu.c (cmd_imu_inject, `phys` argument; imu_poll; imu_drain_hard)"
+    - "Bosch BHy2CLI flow: actse <sensor>:<rate> dmode s dinject <log> dmode n actse <sensor>:0 -- the algorithm is activated and the physical sensors are not"
+  verification: "Verified on hardware 2026-11-18 (core-log entry 74) as a single-variable comparison: identical waveform (`imu inject 30 1 112 1` against `imu inject 30 1 112 0`), identical block count and rate, differing only in whether the accelerometer and gyroscope were configured. This supersedes the earlier and now void comparison recorded in entries 71 and 72, which ran while the frame tap was still decoding accelerometer packets as KLIO frames."
+
+- record_id: IMU-007
+  kind: IMU
+  topic_id: IMU
+  status: VERIFIED
+  verified_date: 2026-11-18
+  title: "With a clean FIFO, KLIO climbs 20/40/60/80 in about 5 s, then returns to 0 with change_reason 1 and stops emitting frames entirely; the peak is not reproducible between identical runs"
+  statement: "Two identical 30-second runs of the designed gesture (a 1.5 s cycle of 60 percent swing and 40 percent rest, injected at 100 Hz into sensor 112 with both physical sensors disabled) produced the following. Run A: progress 0 until 9 s, then 20 at 10 s, 40 at 12 s, 60 at 14 s, 80 at 15 s, and a frame with progress 0 and change_reason 1 immediately after; 15 KLIO frames in total, after which the engine emitted no further frames for the remaining 1400 accepted blocks. Run B: the same progression through 80 at 15 s, 15 frames, and the same silence. Across these and the earlier sine runs, every completed run reported 12-16 frames and a frozen frame count for the second half. The recorded peak differed between two runs that should have been identical: 80 in one, 20 in another, with the same 3000 blocks, the same 15 frames, zero overflows and zero sensor errors in both, and 0 `change_reason 2` (no movement) frames in any run."
+  consequence: "The interruption is the engine's own judgement, not transport: with the FIFO quiet and no errors, KLIO increments progress by 20 per repetition, reaches 80, and then decides the activity is non-repetitive (reason 1) and stops producing output rather than reporting stillness (reason 2 is never seen). Any further attempt should therefore vary the waveform's stillness and repetition boundary -- the two things reason 1 and reason 2 are about -- rather than the transport. The run-to-run variance in peak means a single run is not evidence about convergence, so a future cycle should record several runs per configuration."
+  sources:
+    - "tinydesk-twatch ports/twatchultra/main/imu.c (cmd_imu_inject waveform, step_ms, klio_tap_cb, peer_progress, trace writer)"
+    - "/fs/root/inject-<shape>-p<phys>.txt on the board, recovered off the `storage` partition with esptool"
+  verification: "Verified on hardware 2026-11-18 (core-log entry 74). The operator watched one run live and described it before the trace was read -- 0 at first, a slow climb to 60 about halfway through the cycle, then a drop to 0 that held for the rest of the run -- and the trace recovered off the chip shows exactly that shape with the peak samples at 80. The frame count freezes at 15 in both runs and in the earlier sine runs, which is the observation that distinguishes 'the engine stopped talking' from 'the engine is still evaluating'."
+
+- record_id: TOL-005
+  kind: TOOLCHAIN
+  topic_id: TOL
+  status: VERIFIED
+  verified_date: 2026-11-18
+  title: "The watch and the TinyTang are both ttyACM devices and swap numbers between reboots; identify them by USB id, never by ttyACM number"
+  statement: "On this workstation two unrelated boards enumerate as /dev/ttyACM devices. The watch's ESP32-S3 USB-Serial-JTAG presents as USB vendor 303a model 1001 (`Espressif USB JTAG/serial debug unit`, serial 80:45:6B:46:DF:54). The TinyTang presents as vendor ffff model 5454 (`TinyTang CDC`, serial 0.1.3). Which one is ttyACM0 depends on enumeration order and has been observed on either number."
+  consequence: "Any host tool that opens a ttyACM path by number can write to the wrong board, and a write is not harmless: a terminal repaint sequence lands in the other board's shell. Tools must resolve the watch through /dev/serial/by-id or by checking the device's USB ids, and should refuse rather than guess. read_modaddr.py in the fork already resolves by-id for this reason; tools/watch-screen.py now does the same and refuses any device that is not the Espressif JTAG unit."
+  sources:
+    - "udevadm info -q property -n /dev/ttyACM0 and /dev/ttyACM1 on the operating workstation, 2026-11-18 (ID_VENDOR_ID/ID_MODEL_ID as above)"
+    - "/dev/serial/by-id/usb-Espressif_USB_JTAG_serial_debug_unit_80:45:6B:46:DF:54-if00 and usb-TinyTang_TinyTang_CDC_0.1.3-if00"
+  verification: "Verified on the workstation 2026-11-18 (core-log entry 74) after tools/watch-screen.py, which defaulted to /dev/ttyACM0, sent its Ctrl+L repaint to the TinyTang while the operator was flashing that board. The by-id resolution and the refuse-if-not-Espressif guard were then exercised against both devices: the guard rejects /dev/ttyACM0 (TinyTang) and accepts /dev/ttyACM1 (watch)."
+
+- record_id: TOL-006
+  kind: TOOLCHAIN
+  topic_id: TOL
+  status: VERIFIED
+  verified_date: 2026-11-18
+  title: "esptool --after no_reset leaves the ESP32-S3 in its ROM bootloader, so the console is silent and later reads are stale until a hard reset"
+  statement: "An esptool operation on this board with `--after no_reset` leaves the chip in the ROM download loader rather than starting the application. In that state the USB-Serial-JTAG carries the loader, not the desktop, so reading the port returns nothing and any host tool that expects the application's terminal output sees an empty stream."
+  consequence: "A sequence that reads flash and then wants to observe the running firmware must end with a hard reset -- `--after hard_reset chip_id`, or a power cycle -- before trusting anything the console reports. Without it a command typed into the board is silently discarded and the last thing written to flash is read back as if it were new, which is indistinguishable from a command that ran and produced no output."
+  sources:
+    - "esptool 4.13.0 `--after` option semantics (hard_reset | soft_reset | no_reset | no_reset_stub)"
+  verification: "Verified on hardware 2026-11-18 (core-log entry 74): after `read_flash ... --after no_reset` the watch returned zero bytes on the serial port and two separate command sequences appeared to run without effect, while the traces recovered from flash were older than the runs being attempted. A `--after hard_reset chip_id` restored the desktop immediately."
+
 ```
 
 ---
@@ -2466,7 +2606,7 @@ USB-006: "VERIFIED: the USB-C DAC's playback FU MUTE refuses SET_CUR with a STAL
 - A `core-syntax.md` audit is required whenever this file changes, per `.ai/core.md`.
 
 ```yaml
-last_reviewed: 2026-11-12
+last_reviewed: 2026-11-18
 ```
 
 ---
