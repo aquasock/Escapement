@@ -1,4 +1,4 @@
-# Handoff — Escapement / TinyDesk on T-Watch Ultra, 2026-11-18T07:45
+# Handoff — Escapement / TinyDesk on T-Watch Ultra, 2026-11-18T09:45
 
 Orientation, not authority. **Verify before acting on it.** The files, the
 coredump partition and the board are the fact; this file is a claim.
@@ -6,10 +6,12 @@ coredump partition and the board are the fact; this file is a claim.
 ## One line
 
 **The BHI260AP's "AI engine" is an ARC processor running ordinary compiled
-software, and a public GNU toolchain for it exists — but the firmware payload
-layout is undocumented and reverse engineering is where this stopped.** Before
-that, the metric was proven: KLIO scores pattern similarity on a graded scale,
-1.000 / 0.795 / 0.475 / negative, reproducible to four decimals. The IMU works as
+software. Custom firmware is closer than it has ever been: the load address
+(`0x124000`), the multi-segment container, and the primary integrity check
+(SHA-256 at header `0x08`) are all solved — one gate remains, two unidentified
+20-byte fields at `0x2c`/`0x44`.** The metric is proven: KLIO scores pattern
+similarity on a graded scale, 1.000 / 0.795 / 0.475 / negative, reproducible to
+four decimals. The IMU works as
 before: accel at ~97 Hz, a posture vocabulary pinned by a host test, an IMU
 window, and KLIO learning and recognising a gesture trained by hand. `music` plays FLAC on the built-in speaker with the
 decoder out of the `modules` partition. Bluetooth has a controller slot and the
@@ -19,8 +21,8 @@ are equal, and **the app is at 0x20000, not 0x10000**. The flash is four equal
 
 ## Where things live
 
-- Project-control repo: `/run/media/vash/GIT/Escapement`, `main`, at `6c1e4af`
-  (core-log **entry 61**). `.ai/core.md` is RESTRICTED — do not edit without an
+- Project-control repo: `/run/media/vash/GIT/Escapement`, `main`, at `69a7218`
+  (core-log **entry 64**). `.ai/core.md` is RESTRICTED — do not edit without an
   explicit request. Reference records live in `.ai/core-reference.md`.
 - **`.ai/core.md`'s Purpose line is stale and deliberately untouched.** It says
   "Escapement is a port of linux". The project is TinyDesk; the Linux line
@@ -410,6 +412,60 @@ than the two packed structs account for — log all 11, not the first 6.
 
 **Patterns are volatile.** The firmware is uploaded to RAM each boot, so LEARN AND
 DETECT MUST HAPPEN IN THE SAME BOOT.
+
+## CUSTOM FIRMWARE — WHERE IT ACTUALLY STANDS (entries 62-64)
+
+**Read this before touching the ARC work. Three of four sub-problems are solved.**
+
+### Solved: the load address (entry 62)
+
+`address = file offset + 0x123f84`, so file offset `0x7c` maps to `0x124000`.
+Found with an anchor that needs no full decode: SWIM's `jl [limm]` call sites
+(124 distinct targets) must each land on a function prologue (`push_s blink`,
+`f1 c0`). One candidate offset scored 45/124; the next best 7; median 0.
+
+Working inference: **ROM at `0x100000..0x123FFF` (144 KB), uploaded firmware
+directly above at `0x124000`.** Unconfirmed against a datasheet.
+
+### Solved: the container format (entry 62)
+
+**Multi-segment.** Each segment has its own `0x7C`-byte header starting `2b 66`;
+the u32 at header offset `0x58` is that segment's payload length and points
+exactly at the next `2b 66`. Verified: SWIM `0x7C + 0x4E58 = 0x4ED4` = segment 2's
+magic; segments account for the file with no slack.
+
+### Solved: the primary integrity check (entry 64)
+
+**Field `0x08` is SHA-256 of the segment payload.** Reproduces exactly on all
+four local images:
+
+```python
+hashlib.sha256(d[0x7C : 0x7C + u32(d[0x58:0x5C])]).digest() == d[0x08:0x28]
+```
+
+**Not a signature.** Entry 63's fear that this route was blocked on a Bosch key
+was wrong for this field.
+
+### UNSOLVED, and it is the gate: the 40 bytes at `0x2c`/`0x44`
+
+Two 20-byte fields, each preceded by 4 zero bytes. **A modified image with `0x08`
+recomputed correctly STILL does not boot** — `err 12` becomes `err 11`, a
+different gate. Not SHA-1/224/256-truncated/MD5/RIPEMD-160 over segment 1,
+segment 2, whole file, header alone, header-with-field-zeroed-plus-payload, or
+segment 1 + segment 2 header, either byte order.
+
+**Next move is data, not guessing:** download all 23 BHI260AP images from
+`boschsensortec/BHI2xy_SensorAPI` and correlate those fields against payloads.
+
+### Practical state
+
+- **Toolchain is GONE** — `/tmp/arctc` was cleared between sessions. Re-fetch to
+  a durable path before any compile work.
+- Board is healthy on the KLIO image: `boot 38`, err `00`, 35 sensors.
+- Fork commit `8c2e7c9` is built and **not flashed**.
+- If no digest is found and those fields are keyed output, the honest answer is
+  this silicon will not run authored firmware — and the ESP32-S3 with 985 KB free
+  becomes the real path, not the fallback.
 
 ## THE FUSER CORE IS ARC — AND THAT IS AS FAR AS IT GOES (entries 59-61)
 

@@ -1,3 +1,33 @@
+## 64 COMMIT Unreleased 2026-11-18T09:30:00-07:00
+
+#### Coming From:
+
+Unreleased 69a7218
+
+#### Purpose:
+
+Identify the integrity field entry 63 proved is enforced, which entry 63 named as the gating question ahead of any ARC code: a digest keeps the from-scratch route open, a signature closes it.
+
+#### Outcome:
+
+THE FIELD AT HEADER OFFSET 0x08 IS SHA-256 OF THE SEGMENT PAYLOAD, AND IT REPRODUCES ON ALL FOUR IMAGES. Not a signature. `hashlib.sha256(d[0x7C : 0x7C + seg1_len]).digest()` equals the 32 bytes at 0x08 exactly for `DataInject_SWIM.fw` (seg1 20,056 B), `DataInject.fw` and `DataInject_nobsx.fw` (92,560 B each) and `bhi260_klio.img` (112,352 B), where seg1_len is the little-endian u32 at header offset 0x58 and the payload begins at 0x7C. FOUR OF FOUR, WITH NO TUNING: the first digest tried, over the range entry 62 already located. So the primary integrity check is an ordinary unkeyed digest over bytes we can generate, and **entry 63's fear that the route might be blocked on a Bosch-held key is wrong for this field.** THERE IS A SECOND GATE, AND IT WAS FOUND BY DISTINGUISHING TWO ERROR CODES RATHER THAN BY ASSUMING ONE. A control image with one payload byte flipped at 0x3f55 and Bosch's header untouched reproduced entry 63: `upload refused (-5)`, `boot 78`, `err 12`, VERIFY-ERROR. THE TEST IMAGE was the same flip with 0x08 RECOMPUTED correctly and 0x2c/0x44 left stale: it gave `boot 78` with **`err 11`**, a different reason code. Passing one check by fixing 0x08 and then failing differently is the evidence that 0x08 was the thing err 12 complained about and that something else rejects the image afterwards. **THE REMAINING GATE IS THE 40 BYTES AT 0x2c AND 0x44** -- two 20-byte fields, each preceded by four zero bytes as entry 62 noted, which is a tagged-field shape rather than two loose values. WHAT THEY ARE NOT, tested and eliminated: not SHA-1, not SHA-224, not SHA-256 truncated to 20, not MD5, not RIPEMD-160, over segment 1's payload, segment 2's payload, the whole file, the header alone, the header with the field in question zeroed and the payload appended, or segment 1 followed by segment 2's header, in both byte orders. Twenty bytes is exactly a 160-bit digest and none of the obvious ones over the obvious ranges matches, so either the covered range or the function is unusual -- a keyed hash, a hash over a structure not yet identified, or truncated asymmetric output. THE SECOND SEGMENT IS CONFIRMED STRUCTURALLY while testing that: SWIM's segment 1 header gives a payload length of 20,056, so `0x7C + 0x4E58 = 0x4ED4`, and the two bytes there are `2b 66` -- segment 2's own magic, exactly as entry 62 predicted from the length field. Segment 2's header gives 84,396, and `0x4ED4 + 0x7C + 84396` lands on the file size 0x198FC, so the two segments account for the whole image with no slack. WHERE THIS LEAVES THE FROM-SCRATCH ROUTE, stated without spin: the check that a first-time author would have expected to be hard is SOLVED and is a plain SHA-256 over a range that entry 62 had already mapped; the check nobody knew about is unsolved and is not a standard digest over any range tried. That is progress but it is not a green light -- an image with a correct 0x08 still does not boot. THE OPERATOR'S CONSTRAINT IS UNCHANGED and matters here: Bosch will not engage, and patching their images is rejected because the goal is full control. Everything above is static analysis plus one flash of a modified-copy image to measure the verifier, which is a measurement rather than a patch route. THE BOARD IS HEALTHY AND ON THE KLIO IMAGE, verified after the tests: `imu boot upload` reports booted, 35 virtual sensors, `chip 70 boot 38 err 00`. THE ARC TOOLCHAIN IS GONE and must be re-fetched before any compile work -- `/tmp/arctc` was cleared between sessions, exactly the durability risk entry 63 flagged. Nothing in either repository changed this entry.
+
+#### Next Steps:
+
+THE 40 BYTES AT 0x2c/0x44 ARE THE WHOLE PROBLEM NOW, and the next move is to gather data rather than guess: download every BHI260AP image in `boschsensortec/BHI2xy_SensorAPI` -- 23 files, 21 of them not yet local -- and tabulate those two fields across all of them alongside segment sizes and header words that are already known identical, looking for any field that correlates with a payload the way 0x08 does. A field that is constant across images sharing a payload is a digest of it; a field constant across unrelated payloads is not. THAT ALSO TESTS THE SIMPLEST REMAINING HYPOTHESIS, which is that 0x2c/0x44 cover the SECOND segment, since the first segment's hash is at 0x08 and the header has room for a second digest pair -- the ranges tried so far assumed both segments were hashed by the same function, which may not be true. IF A DIGEST IS FOUND, the next milestone is the one entry 62 defined: build the smallest image that boots at 0x124000 with its own vector table and entry point, and have it copy the ROM range out to the host, because full control means driving the hardware directly and the ROM is the only record of how Bosch's code does it. IF NO DIGEST IS FOUND and the fields behave like keyed output, the honest conclusion returns to entry 63's: this silicon will not run firmware we can author, and the ESP32-S3 doing the classification with 985 KB free of app slot becomes the realistic path rather than the fallback. NOTHING SHOULD BE COMPILED UNTIL THE GATE IS UNDERSTOOD, and the toolchain should be re-fetched to a durable location first -- `/root` or the fork's tree, not `/tmp`. UNCHANGED AND STILL OPEN: fork commit 8c2e7c9 is built and not flashed, no public KLIO+DataInject image exists, patterns do not survive a reboot, `klio save`/`restore` are instruments and not a durable store, the guest stacks are internal DRAM, `update.url` is unset, and `.ai/core.md`'s Purpose line still calls this a port of Linux.
+
+#### Files Modified:
+
+None.
+
+#### Status:
+
+- Build: N/A
+- Deployment: PASS (test images flashed and the good image restored; board verified healthy)
+- User Test: N/A
+
+---
+
 ## 63 COMMIT Unreleased 2026-11-17T19:16:07-07:00
 
 #### Coming From:
