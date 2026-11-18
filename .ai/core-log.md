@@ -1,3 +1,33 @@
+## 62 COMMIT Unreleased 2026-11-17T19:02:46-07:00
+
+#### Coming From:
+
+Unreleased 38958c6
+
+#### Purpose:
+
+Review where the custom Fuser-core firmware question stood after entry 61 and look for a cheaper route to the image layout than recursive-descent disassembly.
+
+#### Outcome:
+
+THE LOAD ADDRESS IS SOLVED FOR SWIM, AND ENTRY 61'S "LAYOUT IS THE REAL BLOCKER" IS NOW HALF ANSWERED. The method uses an anchor that does not depend on decoding the whole image: SWIM calls functions with `jl [limm]` (`0x20220F80` followed by a 32-bit absolute target in ARC's high-halfword-first order), 165 sites and 124 distinct targets, and every real call target must land on a function prologue (`push_s blink`, bytes `f1 c0`). Sweeping every candidate offset from `0x0e0000` to `0x140000` scores one offset at 45 of 124 targets, the next best at 7, and the median at 0, so the other offsets serve as the control. THE RESULT IS `address = file offset + 0x123f84`, which puts file offset `0x7c` at exactly `0x124000`. `0x124000 - 0x100000` is `0x24000`, 144 KB, which appears to match the BHI260's documented ROM size. The working inference is ROM at `0x100000..0x123FFF` with uploaded firmware loaded directly above it, but that is from memory and has not been checked against the datasheet. Three things support it independently of the base: all three images (SWIM, DataInject, KLIO) call the same absolute addresses `0x1239d0` and `0x122aec`, the vector table that follows the header in every image uses `0x1029d0` as its repeated default handler, and SWIM's few out-of-image call targets (`0x11efa4`, `0x11a638`, `0x103160`) all fall below `0x124000`. The word at header offset `0x7c` (`0x128044` in SWIM) lands inside the image and is probably the entry point, but that is unverified. THE IMAGES ARE MULTI-SEGMENT CONTAINERS, AND ENTRY 61'S READING OF THE HEADER IS CORRECTED. Each segment has its own `0x7C`-byte header beginning `2b 66`, and the word at header offset `0x58` is that segment's payload length. In all four images it points exactly at the next `2b 66` magic: SWIM at `0x4ed4`, DataInject at `0x16a0c`, KLIO at `0x1b75c`. The second segment's header carries flags `0002 0002` where the first carries zeros. That explains a fact nothing else did: `DataInject.fw` and `DataInject_nobsx.fw` are byte-identical for their first 92,692 bytes and share an identical first header, because they share segment 1 and differ only in segment 2 (offset `0x16a14` onward). The `u16` at offset 6 that entry 61 tested as a code offset is the same value (`0x1767`) in DataInject and KLIO despite different sizes, so it is more likely a build or version number. Header words `0x64` (`0x142e`) and `0x6c` (`0xf0`) are identical in all four images. WHAT IS NOT KNOWN AND MATTERS MOST: the header has a 32-byte high-entropy field at `0x08..0x27` and two 20-byte fields at `0x2c` and `0x44`, each preceded by four zero bytes, which could be a hash and a signature. CRC32 and inverted CRC32 over every plausible range match none of the header words. Whether the part enforces those fields, and therefore whether a from-scratch image can boot at all, is open. THE TWO BUILDS ARE DIFFERENT, AND ENTRY 59'S FIGURE APPLIES TO SWIM ONLY: KLIO and DataInject share an instruction fingerprint and identical pointer tables (`0x13ecb8`/`0x11ecc4` 117 times each) and use `jl [limm]` only three times each, while SWIM's `j_s [blink]` count of 2,558 is SWIM's alone (KLIO 128, DataInject 86). Relative `bl` in SWIM never reaches below `0x124000` except as single-use decoding noise (1,035 sites, no target repeated), so this build reaches the ROM mostly through absolute calls or some other path. A `jli_s` count from linear disassembly produced round-number offsets typical of data decoded as code and is not used as evidence. THE OPERATOR SET TWO CONSTRAINTS THAT RESHAPE THE PLAN: Bosch will not engage, so the SDK and vendor routes named in entries 55, 59, 60 and 61 are closed; and patching Bosch's images is rejected as the route to custom firmware because the goal is full control, so the image is to be written from scratch. Everything here is static analysis of the four images in the fork's `ports/twatchultra/components/imu/`, using the ARC toolchain still at `/tmp/arctc` from entry 60.
+
+#### Next Steps:
+
+TWO CHECKS COME FIRST, BOTH APPROVED BY THE OPERATOR, AND EITHER CAN CHANGE THE PLAN. FIRST, settle whether the part verifies the payload by flipping one byte inside SWIM's main code with every header byte left untouched, wrapping it in the port's FUMI header, uploading it and reading `imu boot`. That modified image is a measurement and not the patching route the operator rejected. The part loads firmware into RAM at every boot, so a rejected image costs only a re-upload of the good one. A boot means the header fields are not enforced on the payload and a from-scratch image is a format problem. `VERIFY_ERROR` means they are enforced, and what they cover becomes the blocking question before any code is written. Entry 59's interrupted version of this test should be considered superseded by this one. SECOND, read the public BHI260AP datasheet for the Fuser core's named CPU (believed but unconfirmed to be ARC EM4 with an FPU, which would set `-mcpu` without the hardware variant test of entry 60) and for its memory map, which would confirm or refute ROM at `0x100000` and RAM from `0x124000`. AFTER THAT THE FROM-SCRATCH PATH is: decode the remaining header words by comparing the four local images, plus every other BHI260AP image in `boschsensortec/BHI2xy_SensorAPI`, segment by segment; build the smallest image that boots at `0x124000` with its own vector table and entry point; and make that first program copy the ROM range out to the host, because full control means driving the hardware directly, and the ROM is the only available record of how Bosch's own code does it. If no ROM dump is possible, the hardware register map has to be recovered from the shipping images instead. UNCHANGED AND STILL OPEN: fork commit 8c2e7c9 is built and not flashed, the ARC toolchain lives only in `/tmp` and will not survive a reboot, no public KLIO+DataInject image exists, patterns do not survive a reboot, `klio save`/`restore` are instruments and not a durable store, the guest stacks are internal DRAM, `update.url` is unset, and `.ai/core.md`'s Purpose line still calls this a port of Linux.
+
+#### Files Modified:
+
+None.
+
+#### Status:
+
+- Build: N/A
+- Deployment: N/A
+- User Test: N/A
+
+---
+
 ## 61 COMMIT Unreleased 2026-11-18T07:30:00-07:00
 
 #### Coming From:
