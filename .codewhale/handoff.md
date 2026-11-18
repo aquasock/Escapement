@@ -1,15 +1,17 @@
-# Handoff — Escapement / TinyDesk on T-Watch Ultra, 2026-11-18T03:30
+# Handoff — Escapement / TinyDesk on T-Watch Ultra, 2026-11-18T07:45
 
 Orientation, not authority. **Verify before acting on it.** The files, the
 coredump partition and the board are the fact; this file is a claim.
 
 ## One line
 
-**Bosch ships a data-injection firmware for the BHI260AP and it boots on this
-board — that is the door to feeding the AI engine synthetic data, and it was
-found by looking in Bosch's API repo rather than SensorLib.** The IMU otherwise
-works as before: accel at ~97 Hz, a posture vocabulary pinned by a host test, an
-IMU window, and KLIO learning and recognising a gesture trained by hand. `music` plays FLAC on the built-in speaker with the
+**The BHI260AP's "AI engine" is an ARC processor running ordinary compiled
+software, and a public GNU toolchain for it exists — but the firmware payload
+layout is undocumented and reverse engineering is where this stopped.** Before
+that, the metric was proven: KLIO scores pattern similarity on a graded scale,
+1.000 / 0.795 / 0.475 / negative, reproducible to four decimals. The IMU works as
+before: accel at ~97 Hz, a posture vocabulary pinned by a host test, an IMU
+window, and KLIO learning and recognising a gesture trained by hand. `music` plays FLAC on the built-in speaker with the
 decoder out of the `modules` partition. Bluetooth has a controller slot and the
 pad lives there. Both TinyDesk 0.5.2 fixes are in. NVS is 64 KB, the OTA slots
 are equal, and **the app is at 0x20000, not 0x10000**. The flash is four equal
@@ -17,15 +19,15 @@ are equal, and **the app is at 0x20000, not 0x10000**. The flash is four equal
 
 ## Where things live
 
-- Project-control repo: `/run/media/vash/GIT/Escapement`, `main`, at `5f6ada9`
-  (core-log **entry 58**). `.ai/core.md` is RESTRICTED — do not edit without an
+- Project-control repo: `/run/media/vash/GIT/Escapement`, `main`, at `6c1e4af`
+  (core-log **entry 61**). `.ai/core.md` is RESTRICTED — do not edit without an
   explicit request. Reference records live in `.ai/core-reference.md`.
 - **`.ai/core.md`'s Purpose line is stale and deliberately untouched.** It says
   "Escapement is a port of linux". The project is TinyDesk; the Linux line
   closed 2026-11-11. Fixing it needs the operator's word, because that file may
   only be edited when asked.
 - **Active code is the fork: `/run/media/vash/GIT/tinydesk-twatch`, branch
-  `t-watch-ultra`, clean at `7e92be8`.** Push to `fork`
+  `t-watch-ultra`, clean at `8c2e7c9`.** Push to `fork`
   (`aquasock/tinydesk`) only — **never** `origin` (upstream
   `tinydesk-project/tinydesk`).
 - `/run/media/vash/ROCKBOX` is the operator's source backup. **Never write to it
@@ -408,6 +410,56 @@ than the two packed structs account for — log all 11, not the first 6.
 
 **Patterns are volatile.** The firmware is uploaded to RAM each boot, so LEARN AND
 DETECT MUST HAPPEN IN THE SAME BOOT.
+
+## THE FUSER CORE IS ARC — AND THAT IS AS FAR AS IT GOES (entries 59-61)
+
+**Established, each with a control:**
+- It is an **ARC** processor. `j_s [blink]` (ARC's return, `0x7EE0`) appears
+  **2,558×** in a 104 KB image against **2×** in random data — 1,279× separation.
+- It is the **ARCv2** generation — the 16-bit density and loop usage exercise
+  modern encoding throughout.
+- A **public GNU toolchain exists**: `foss-for-synopsys-dwc-arc-processors/toolchain`,
+  release arc-2026.09, `arc_gnu_2026.09_prebuilt_elf32_le_linux_install.tar.xz`.
+  Multilib: `arc-elf32-gcc` builds `em`, `hs`, `arc700` from one install.
+  Verified working: *"ARCompact/ARCv2 elf32 toolchain 2.45.1"*.
+- The images are **plaintext compiled programs** — `"Hello world!"` and `printf`
+  format strings are readable in Bosch's shipping firmware. KLIO and SWIM are two
+  programs for one core, not two hardware engines.
+
+**Not established: which variant, where code starts, and how firmware talks to
+Bosch's sensors.** Bosch does not document the payload format: `fw2h` is a
+binary→C-array converter, `load_firmware` streams raw bytes, `bhy2_hif` checks
+only the `0x662B` magic. The structure is opaque to the host and interpreted by
+the part.
+
+### THREE FALSE POSITIVES — read this before disassembling anything
+
+1. **"ARM Cortex-M"** — from counting Thumb `push` patterns. Refuted by its own
+   control: real firmware has *fewer* `push` than random data (162 vs 410).
+2. **Five variant-scoring methods** — decode-failure rate, ARCv2-only mnemonics,
+   register width, chi-square on opcode histograms, code density. All run against
+   a disassembly that was never valid. None separates em/hs/arc700.
+3. **"Decodes cleanly at 0x8225"** — an **odd** address, impossible for a 16-bit
+   stream. One byte of shift made a data table decode as 40 `ld_s` + 37 `st_s` of
+   256 bytes: a copy loop, not code.
+
+**ARC's 16-bit encoding space is dense enough that almost any alignment yields
+something plausible.** A plausible disassembly is not evidence. The only checks
+that worked had an external control.
+
+### If this is resumed
+
+The one test that would settle the variant is **on hardware**, not in static
+analysis: build a minimal program for `em` and for `hs`, wrap in the FUMI header,
+flash, read `imu boot`. A wrong `-mcpu` faults immediately. Thirty seconds each.
+
+That does not solve the **layout**, which is the real blocker — a minimal program
+has no way to be placed correctly without knowing how the part interprets the
+payload. That needs a real recursive-descent disassembler (Ghidra/radare2 with
+ARC support), a week, no guarantee, and the Bosch API discovery sits behind it.
+
+**Alternatives, unchanged:** the ESP32-S3 doing the arithmetic with 985 KB free
+and no RE, or engaging Bosch.
 
 ## THE SIMILARITY SCORE — MEASURED, GRADED, AND NOT -1..+1 (entry 58)
 

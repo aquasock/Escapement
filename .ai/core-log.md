@@ -1,3 +1,33 @@
+## 61 COMMIT Unreleased 2026-11-18T07:30:00-07:00
+
+#### Coming From:
+
+Unreleased 6c1e4af
+
+#### Purpose:
+
+Look for Bosch's firmware payload documentation before committing to reverse engineering, as the cheaper of the two routes entry 60 left open.
+
+#### Outcome:
+
+BOSCH DOES NOT DOCUMENT THE PAYLOAD FORMAT, AND THE TWO CHEAP ROUTES ARE NOW CLOSED BY CHECKING RATHER THAN BY ASSUMPTION. Three sources, all read: `examples/fw2h/fw2h.c` is a binary-to-C-array converter and nothing more -- `#define N_ROWS 12`, a read loop, an `fprintf`; `examples/load_firmware/load_firmware.c` streams raw bytes in 256-byte chunks through `bhy2_upload_firmware_to_ram_partly()` with no header parsing at all; and `bhy2_hif.c` checks only that the first two bytes are `0x662B` before transmitting. SO THE PAYLOAD STRUCTURE IS OPAQUE TO THE HOST AND INTERPRETED BY THE PART. There is no published format to read because none is published, and the host never needs to know it -- which is also why nothing in the SDK reveals it. THE HYPOTHESIS THAT IT WAS A CODE-OFFSET FIELD WAS TESTED AND REFUTED: the `u16` at offset 6 differs per image (0x1767 for KLIO, 0x175A for SWIM) and looked like a header length, but disassembling from exactly that offset decodes no better than from zero -- 15.5 percent undecoded against 15.1. THREE FALSE POSITIVES IN A ROW, AND THE PATTERN IS NOW NAMED. First "the Fuser core is an ARM Cortex-M" from counting Thumb `push` patterns, refuted when the same count came out lower than random data. Then five variant-scoring methods run against a disassembly that was never valid. Then "the code decodes cleanly at offset 0x8225", which is an ODD address and therefore impossible for a 16-bit instruction stream -- one byte of shift made a data table decode as 40 `ld_s` and 37 `st_s` out of 256 bytes, which is a copy loop or a table, not code. THE GENERAL LESSON IS ABOUT ARC SPECIFICALLY: its 16-bit encoding space is dense enough that almost any byte alignment yields something that looks like an instruction, so a plausible disassembly is not evidence and needs a test that can fail. The checks that worked were the ones with an external control -- `j_s [blink]` against random data gave 1279x, which is why ARC itself is solid where the variant and the offset are not. WHAT IS ESTABLISHED AND WHAT IS NOT, stated precisely because the difference matters: it IS ARC (1279x separation from chance); it IS the ARCv2 generation (the firmware's 16-bit density and loop usage exercise modern encoding throughout); the GNU toolchain IS available, multilib for em/hs/arc700, verified working (entry 60); and the firmware IS plaintext compiled ARC code with readable `printf` strings. It is NOT known which ARC variant, NOT known where code starts or how segments are laid out, and NOT known how firmware on that core talks to Bosch's sensors. THE REMAINING WORK IS DEEP REVERSE ENGINEERING AND SHOULD NOT BE STARTED CASUALLY: a recursive-descent disassembler with ARC support -- Ghidra or radare2 -- following control flow from a known entry point rather than sweeping linearly, mapping segment structure, and only then recovering the Bosch application API from call sites. A week with no guarantee, and the API discovery sits behind it. THE ALTERNATIVES ARE UNCHANGED AND SHOULD BE WEIGHED AGAINST IT: the ESP32-S3 doing the arithmetic with 985 KB of free app slot and no reverse engineering at all, or engaging Bosch directly. THE OPERATOR'S ARCHITECTURE IS NOT IN DOUBT -- entry 58 measured the graded certainty float and it is reproducible -- so what remains unsolved is only whether custom firmware is worth the RE, not whether the concept works.
+
+#### Next Steps:
+
+IF THIS IS EVER RESUMED, the starting points are all recorded: the toolchain path and its multilib capabilities in entry 60, the ARC identification method that works (`j_s [blink]` with a random-data control) in entry 59, and the falsified hypotheses so nobody repeats them -- ARM Cortex-M is wrong, the five static variant-scoring methods discriminate nothing, offset 6 is not a code offset, and linear disassembly of the image is invalid because data is interleaved throughout with the longest undecoded run being only 84 bytes across 3,773 separate runs in all 13 regions. THE ONE TEST THAT WOULD SETTLE THE VARIANT IS STILL ON HARDWARE, not in static analysis: build the same minimal program for `em` and for `hs`, wrap each in the FUMI header, flash, and read `imu boot` -- a wrong `-mcpu` faults immediately rather than subtly. That is thirty seconds per attempt and it answers by measurement what five disassembly methods could not answer by argument. IT DOES NOT SOLVE THE LAYOUT, which is the real blocker: without knowing how the part interprets the payload, a minimal program has no way to be placed correctly, and that is the piece that needs the proper disassembler. THE BOARD IS HEALTHY AND ON THE KLIO IMAGE, verified after this session's firmware experiments: `imu boot upload` reports `boot 38` with err `00` and 35 virtual sensors. THE FORK CARRIES ONE UNFLASHED COMMIT -- fork commit 8c2e7c9 adds Bosch's 6-byte full-timestamp step to `klio inject`, which was built during entry 60's investigation and never verified against hardware; it is labelled as such in its own message. UNCHANGED AND STILL OPEN: no public KLIO+DataInject image, patterns do not survive a reboot, `imu feed` reaches nothing on KLIO, `klio save`/`restore` are instruments and not a durable store, the guest stacks are internal DRAM, `update.url` is unset, and `.ai/core.md`'s Purpose line still calls this a port of Linux.
+
+#### Files Modified:
+
+None in this repository; the fork carries 8c2e7c9 (ports/twatchultra/main/klio.c, modules/moddata.at), built and not flashed.
+
+#### Status:
+
+- Build: PASS
+- Deployment: N/A (nothing flashed this entry)
+- User Test: N/A
+
+---
+
 ## 60 COMMIT Unreleased 2026-11-18T06:30:00-07:00
 
 #### Coming From:
