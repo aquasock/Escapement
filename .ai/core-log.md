@@ -1,3 +1,33 @@
+## 70 COMMIT Unreleased 2026-11-18T18:30:00-07:00
+
+#### Coming From:
+
+Unreleased a63e48e
+
+#### Purpose:
+
+Search for a Bosch field trial log, which entry 69 named as the one remaining lead with real weight, and in the process apply two more corrections derived from Bosch's own arithmetic.
+
+#### Outcome:
+
+NO FIELD TRIAL LOG IS PUBLICLY OBTAINABLE, AND THE INJECTION FORMAT REMAINS UNRESOLVED. Searched: both Bosch SDKs (`BHI2xy_SensorAPI`, `BHI360_SensorAPI`), the whole COINES tree (5,743 files), GitHub code search (which now requires authentication and returned nothing usable), and three web search front ends -- DuckDuckGo lite, Marginalia, and direct HTML queries. The example's own README requires a `field_trial_log_hex_converted.txt` produced by Bosch during validation, and **no such file ships with any public Bosch repository**. The format exists only as C code. TWO MORE CORRECTIONS WERE APPLIED FROM READING THAT CODE, AND NEITHER CHANGED THE OUTCOME. FIRST, THE BLOCK IS 17 BYTES, NOT A STREAM OF EVENTS, and this is derivable from Bosch's own constants: the first line of the log is 19 characters for `TIMESTAMP_LENGTH` 6 (6 x 3 + newline) and every data line is 52 characters for `SENSOR_DATA_SIZE` 17 (17 x 3 + newline), so each value is two hex digits and one separator and a block is seventeen plain bytes. Seventeen decomposes as one sensor id plus sixteen, and sixteen is accel xyz (6) + gyro xyz (6) + a four-byte timestamp -- the only arrangement that uses all of it. Every earlier block carried three separate ids and therefore only twelve bytes of sample data. SECOND, BOSCH WAITS FOR THE CONFIGURATION ACKNOWLEDGEMENT: `bhy2_hif_wait_status_ready()` then `bhy2_hif_get_status_fifo()` after `set_virt_sensor_cfg`, where this port was calling `imu_poll()` and moving on. Both are in the fork at fce508c. THE RESULT IS UNCHANGED: 0 blocks accepted, `last error 0xe2`, zero KLIO frames. THE COMPLETE LIST OF WHAT HAS NOW BEEN TRIED, so no future attempt repeats it: five block layouts (three-id event stream, single-id plus sixteen, float frames, id-prefixed floats, bare six-byte accel); two padding schemes (0xFF and 0x00, the second being what the SDK actually does); with and without a separate preceding timestamp injection; three different sensor ids (4, 55, 76); two firmware images (KLIO, SWIM); and drained versus undrained configuration acknowledgements. Every combination returns 0xe2. **THE HONEST CONCLUSION IS THAT THE PAYLOAD FORMAT REQUIRES THE ARTIFACT BOSCH DID NOT PUBLISH.** `0xe2` is `ERR_SENSOR_DATA_INJECTION`, the handler is reached, the configuration sequence is clean -- and the content is refused. Without a real log to compare bytes against, further attempts are a search over an unknown 16-byte layout with a flash cycle each. THE BOARD IS HEALTHY AND ON THE KLIO IMAGE: `imu boot upload` reports BOOTED, `chip 70 boot 38 err 00`, 35 virtual sensors, and `klio` reports algorithm version 3.0.2 with the pattern engine intact.
+
+#### Next Steps:
+
+THIS LINE OF WORK SHOULD STOP HERE UNLESS A FIELD TRIAL LOG SURFACES. It is not in Bosch's public repositories, and the honest expectation is that it lives in application notes, distributor material, or internal Bosch documentation reachable only through engagement -- which entry 66 established is closed. FOUR ENTRIES (67 through 70) have gone into injection. They were justified: entry 67 found the word-alignment defect that had made every earlier test meaningless, and that is a real result. But the remaining gap is a specific binary layout with no documentation and no example, and the cost of each further attempt is a build, a flash, and a risk of the console instruments misreporting as three earlier attempts did. THE PRAGMATIC END IS THE ONE RECORDED SINCE ENTRY 60 AND IT HAS NOT CHANGED: the ESP32-S3 doing the classification. It has 985 KB of free app slot since entry 43, six IMU channels already read reliably at 97 Hz, no signature gate, and no undocumented payload. **THE OPERATOR SHOULD BE TOLD PLAINLY THAT THE ARCHITECTURE THEY DESIGNED IS SOUND AND HAS BEEN HALF DEMONSTRATED** -- the graded similarity metric is measured and reproducible at 1.000 / 0.795 / 0.475 / negative, four decimals stable -- but the half that needs synthetic input requires either a firmware Bosch will not license or a payload format Bosch did not publish. IF INJECTION IS EVER RESUMED, the only untried hypotheses worth a flash are: that the injected block must carry the KLIO sensor id rather than a physical one, on the theory that the handler keys on the consumer; and that step-by-step mode requires one injected block per drained output rather than a free-running stream. UNCHANGED AND STILL OPEN: fork commit fce508c, no public KLIO+DataInject image exists, patterns do not survive a reboot, `klio save`/`restore` are instruments and not a durable store, the guest stacks are internal DRAM, `update.url` is unset, and `.ai/core.md`'s Purpose line still calls this a port of Linux.
+
+#### Files Modified:
+
+None in this repository; the fork carries fce508c (ports/twatchultra/main/imu.c).
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: N/A (negative result, instrument sound)
+
+---
+
 ## 69 COMMIT Unreleased 2026-11-18T17:00:00-07:00
 
 #### Coming From:
