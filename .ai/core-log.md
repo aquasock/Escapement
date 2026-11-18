@@ -1,3 +1,42 @@
+## 71 COMMIT Unreleased 2026-11-18T20:00:00-07:00
+
+#### Coming From:
+
+Unreleased 6db8b01
+
+#### Purpose:
+
+The operator's observation that stopped a wrong conclusion dead: *"why can we send synthetic data to SWIM but KLIO? ... its the same sensor. they speak the same language."* It was right, and following it found the answer.
+
+#### Outcome:
+
+**INJECTION WORKS. THE EVENT IDS ARE 55 AND 58, AND THEY ARE NOT SENSOR IDS.** Bosch's `dinject_defs.h` names them under identifiers that read like sensor ids:
+
+```c
+#define ACCEL_INJECT_ID           INT8_C(55)
+#define GYRO_INJECT_ID            INT8_C(58)
+#define ACCEL_INJECT_EVENT_SIZE   INT8_C(7)
+#define GYRO_INJECT_EVENT_SIZE    INT8_C(7)
+```
+
+Every attempt in this project used a *sensor* id -- 4 (ACC), 13 (GYRO), 3 (ACC_RAW), 12 (GYRO_RAW), or the driver ids 76 and 79 -- and every one returned `0xe2`. The published Bosch CLI help had been sitting in plain text the whole time: `dinject_defs.h` was in the same repository as the `swim_data_injection.c` that was read four times. **THE PROOF IS THE ERROR REGISTER, ONE BLOCK AT A TIME: id 4 gives `0xe2`; id 55 gives `0x00`, six times in a row, on the SWIM image with sensor 114 configured.** AND BOTH ALGORITHMS NOW PRODUCE OUTPUT UNDER INJECTION: **SWIM (114) emitted 998 frames in ten seconds**, which is 100 Hz and matches the configured rate exactly, with every block accepted; **KLIO (112) emitted frames too** -- 9, then 25, then 34 in the 20-second run -- before `0xe2` appeared on later blocks. A SECOND DEFECT IN THIS PORT'S OWN INSTRUMENT WAS FOUND AND FIXED IN THE SAME PASS: `imu_poll()` returns immediately unless `s_sensor_on` is set, a guard that exists so a one-shot command leaves the part quiet, and `cmd_imu_inject()` never set it. **THE FIFO WAS NEVER DRAINED DURING INJECTION AT ALL** -- five hundred blocks in, nothing out, the FIFO overflowed and the final error was `0xc0` (CMD_ERROR) rather than the `0x00` that a single block returns. That one missing assignment is why every earlier run reported zero frames even after the alignment defect was fixed, and it is the second time this session that a zero was the instrument's fault rather than the part's. TWO FURTHER FACTS ESTABLISHED: Bosch's own CLI documents the flow as `actse 114:100 dmode s dinject field_log.txt dmode n actse 114:0`, so **the ALGORITHM's own sensor id must be configured** before injection, which this command now does; and the SWIM image carries sensors **3, 8, 12, 17 and 114** -- it has no sensor 4 and no sensor 13 at all, which made every earlier block reference an id that did not exist on that image. THE ENGINEER'S EARLIER CLAIM THAT SWIM PROVED THE MECHANISM WAS NEVER TRUE, and this entry is the first time it has been. Entry 57 asserted *"host sine in, algorithm consumes it, answer out"* on the strength of a run on the plain DataInject image that returned a constant payload; that was inference written as measurement and the operator caught it. What is true now is measurable and reproduced twice: injected blocks with ids 55/58 are accepted with error `0x00`, and both algorithms emit frames in response to them. WHAT REMAINS is why KLIO stops after a handful of frames with `0xe2` where SWIM runs indefinitely. Candidates, none tested: the acceleration values may exceed a plausible range for the KLIO handler, since the synthetic gesture reaches 1 g of lateral swing; the block rate may outpace what KLIO's 100 Hz input expects; or KLIO may require its own algorithm sensor to be configured differently from SWIM's. THE BOARD IS ON THE KLIO IMAGE and healthy: `imu boot upload` reports BOOTED, `chip 70 boot 38 err 00`, 35 virtual sensors.
+
+#### Next Steps:
+
+**THE FRAMING IS SOLVED; THE REMAINING PROBLEM IS THE WAVEFORM OR THE RATE.** Next, on KLIO with sensor 112: reduce the amplitude to something a wrist could physically produce (0.3 g rather than 1.0 g) and slow the block rate toward the 50 Hz the learning loop already uses, since SWIM's acceptance at 100 Hz does not prove KLIO tolerates it. If KLIO then runs without `0xe2`, its `progress` becomes the measurement the operator originally asked for -- a synthetic waveform trained and graded, with no hand involved. **THE OPERATOR'S ARCHITECTURE IS NOW UNBLOCKED IN PRINCIPLE**: KLIO is a 25-pattern fuzzy matcher that accepts host data, so the certainty sweep can be run on synthetic input rather than on wrist motion, and the BHI360 and ESP32-S3 alternatives are no longer needed for it. THE CORRECTION THIS ENTRY OWES THE RECORD: entries 55, 57, 65 and 70 all concluded injection was dead or required an undocumented payload. It required two constants that Bosch published, in a header that had already been read. The lesson is specific and worth carrying -- when a vendor names something `X_INJECT_ID` next to `X_SENSOR_ID`, they are different things, and the difference is the whole interface. UNCHANGED AND STILL OPEN: fork commit ca9d0df, no public KLIO+DataInject image exists and may not be needed, patterns do not survive a reboot, `klio save`/`restore` are instruments and not a durable store, the guest stacks are internal DRAM, `update.url` is unset, and `.ai/core.md`'s Purpose line still calls this a port of Linux.
+
+#### Files Modified:
+
+None in this repository; the fork carries ca9d0df (ports/twatchultra/main/imu.c, modules/moddata.at).
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: PASS (SWIM emitted 998 frames; KLIO emitted frames)
+
+---
+
 ## 70 COMMIT Unreleased 2026-11-18T18:30:00-07:00
 
 #### Coming From:
