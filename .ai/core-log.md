@@ -1,3 +1,33 @@
+## 68 COMMIT Unreleased 2026-11-18T15:30:00-07:00
+
+#### Coming From:
+
+Unreleased 02b8f2c
+
+#### Purpose:
+
+Build the instrument entry 67 said was the real problem: a firmware command that constructs injection frames itself rather than sending hex through a 40-column console, so payload lengths cannot be miscounted and the sticky error register cannot be cleared wrongly.
+
+#### Outcome:
+
+THE INSTRUMENT EXISTS AND THE ALIGNMENT BLOCK IS GONE; THE HANDLER STILL REJECTS THE CONTENT. `imu inject <seconds> [wave]` builds FIFO-format blocks, pads them to a multiple of four, clears and reports the error per block, and prints progress every two seconds. **On the glass: 0 blocks sent, last error 0xe2, klio frames 0, peak progress 0%.** So the framing defect entry 67 found is genuinely fixed -- the response is 0xe2 (`ERR_SENSOR_DATA_INJECTION`, from inside the handler) rather than 0x7c (`ERR_INPUT_CHANNEL_NOT_WORD_ALIGNED`, a rejection before it), and that distinction is what the command's per-block error reporting exists to show. WHAT IS NOW KNOWN PRECISELY: the part accepts the injection command, accepts word-aligned payloads, reaches the injection handler, and the handler refuses them. It is content, not framing, and not the waveform -- the waveform never gets that far. WHAT REMAINS UNKNOWN is what the handler wants that this block does not carry. The block is an accelerometer event (id + three int16), a gyroscope event, and a large-delta timestamp -- the ordinary FIFO sample format, 17 bytes padded to 20 with 0xFF filler. Bosch's own tool sends 17-byte blocks too and its callback expects 15-byte OUTPUT events, so the block and the event are different sizes and the padding is a guess: 0xFF filler may be read as an event id the parser does not expect, where zero padding might be read as a zero-length event and skipped. THAT IS THE NEXT THING TO TRY AND IT IS ONE LINE. Other candidates, in order of cheapness: the two-step injection Bosch's tool performs (a six-byte timestamp as its own call, THEN the data block) rather than one combined block; whether the accelerometer and gyroscope must be individually configured *and confirmed* before injection is accepted, since `set_virt_sensor_cfg` returns before the part's acknowledgement arrives and this command does not wait for it; and whether KLIO specifically requires its own sensor id in the block rather than the physical sensor ids. THE WAVEFORM IS CORRECTLY SHAPED AND WAS NOT THE PROBLEM HERE, but it is worth recording what it does: a 1.5-second cycle with a 60 percent swing and 40 percent rest, because KLIO segments motion into repetitions and a continuous sine gives it no boundary. `imu inject 30 1` keeps the pure sine as a control, since the sine failing and the gesture failing mean different things. WHAT DID NOT CHANGE AND MATTERS: `klio learn`, `klio detect`, `klio save`, `klio restore` and `klio compare` all still work, the board boots the KLIO image to `boot 38 err 00` with 35 virtual sensors, and `music` is untouched. The command is additive -- `imu inject` did not exist as a subcommand before and nothing else was modified except one include line for `bhy2_klio.h`. THE HONEST ASSESSMENT AFTER THREE ENTRIES OF THIS: the alignment discovery in entry 67 was real and important, and it moved the failure from "the part ignores injection" to "the handler rejects this specific block". But the handler has now rejected every block tried, across two images and several framings, and each further attempt costs a flash cycle. The next attempt should be made on PAPER first -- reading `dinject_parse_file()` and the 15-versus-17 size question against Bosch's own tool -- rather than by trying another payload shape on hardware.
+
+#### Next Steps:
+
+FIRST, ON PAPER: reconcile `SENSOR_DATA_SIZE` (17, what Bosch's tool injects) with the callback's `data_size != 15` check (what comes back out), and determine whether the 17-byte block is padded internally, whether the alignment rule applies to Bosch's own tool at all, and what the trailing bytes of a field-trial log line are. That settles the padding question and possibly the whole block layout without another flash. SECOND, THE ZERO-PADDING VARIANT, one line, since 0xFF may be being parsed as an event id. THIRD, THE TWO-CALL SEQUENCE -- timestamp alone, then the block -- which is what Bosch's tool actually does and what this command was already changed to do in entry 67's earlier firmware experiment but not in this one. IF ALL THREE FAIL, the conclusion is that injection content requires something not derivable from the published material, and the pragmatic end is the ESP32-S3 doing the classification -- which was already the recorded alternative in entries 60 through 66 and needs nobody's permission. THE OPERATOR SHOULD DECIDE WHETHER THIS IS WORTH MORE FLASH CYCLES. Three entries have gone into injection; the alignment finding justified them, but the remaining unknown is a payload format with no documentation behind it. UNCHANGED AND STILL OPEN: fork commit cd6adee carries the new command, no public KLIO+DataInject image exists, patterns do not survive a reboot, `klio save`/`restore` are instruments and not a durable store, the guest stacks are internal DRAM, `update.url` is unset, and `.ai/core.md`'s Purpose line still calls this a port of Linux.
+
+#### Files Modified:
+
+None in this repository; the fork carries cd6adee (ports/twatchultra/main/imu.c, modules/moddata.at).
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: N/A (instrument built and run; result negative)
+
+---
+
 ## 67 COMMIT Unreleased 2026-11-18T14:00:00-07:00
 
 #### Coming From:
