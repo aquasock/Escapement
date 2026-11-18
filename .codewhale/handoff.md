@@ -1,4 +1,4 @@
-# Handoff — Escapement / TinyDesk on T-Watch Ultra, 2026-11-18T14:15
+# Handoff — Escapement / TinyDesk on T-Watch Ultra, 2026-11-19T01:00
 
 Orientation, not authority. **Verify before acting on it.** The files, the
 coredump partition and the board are the fact; this file is a claim.
@@ -21,8 +21,8 @@ are equal, and **the app is at 0x20000, not 0x10000**. The flash is four equal
 
 ## Where things live
 
-- Project-control repo: `/run/media/vash/GIT/Escapement`, `main`, at `3851fb8`
-  (core-log **entry 67**). `.ai/core.md` is RESTRICTED — do not edit without an
+- Project-control repo: `/run/media/vash/GIT/Escapement`, `main`, at `856e323`
+  (core-log **entry 73**). `.ai/core.md` is RESTRICTED — do not edit without an
   explicit request. Reference records live in `.ai/core-reference.md`.
 - **`.ai/core.md`'s Purpose line is stale and deliberately untouched.** It says
   "Escapement is a port of linux". The project is TinyDesk; the Linux line
@@ -412,6 +412,50 @@ than the two packed structs account for — log all 11, not the first 6.
 
 **Patterns are volatile.** The firmware is uploaded to RAM each boot, so LEARN AND
 DETECT MUST HAPPEN IN THE SAME BOOT.
+
+## INJECTION WORKS AND KLIO LEARNS FROM IT — THEN GETS INTERRUPTED (entry 73)
+
+**Where this actually stands tonight, in one paragraph.** Injected blocks are
+accepted with error `0x00`. KLIO consumes them and emits frames. Learning
+advances — 20%, 40% — and then **resets to 0**. The reason is in the frame's
+fourth byte, the engine's own vocabulary: `0 = ok, 1 = interrupted, 2 = no
+movement`. Captured directly: `progress 20 reason 0`, then `progress 0 reason 1`.
+**The engine is learning and being knocked over partway**, and interruption is
+what `meta 12 fifo overflow` does — the same failure entry 52 diagnosed from the
+other side.
+
+### Two instrument defects found, one of them the reason for every bad number
+
+The KLIO tap accepted **any frame ≥ 3 bytes**. Raw dump:
+
+```
+11: 00 ff 14 00 00 ff 00 00 00 00 fd   KLIO: progress 0x14 = 20, reason 0
+ 7: 43 03 01 07 11 0e 0d               ACCEL: 0.20 / 0.44 / 0.88 g
+```
+
+A 7-byte accel event had its axis values decoded as progress. **That is where
+246, 96, 43 and 35 came from.** A KLIO frame is **exactly 11 bytes**; the tap now
+requires it. And results now go to `/root/inject.txt` with the first six raw
+frames verbatim, because the display mirror garbled that trace four separate
+times this session.
+
+### The numbers that are trustworthy
+
+```
+1500-3000 blocks sent, every one err 0x00
+KLIO frames arrive, learning advances then resets
+read_pattern: never 157 bytes -- no pattern has been completed
+```
+
+### Next experiment — the drain, not the data
+
+Make the drain outrun the input: drain to empty between every block, not once
+per block. **And re-run the accel+gyro on/off comparison now that the tap is
+honest** — the earlier "removing them was worse" result is void, because it was
+measured while accel frames were being counted as KLIO. Bosch's own CLI
+configures only the algorithm.
+
+**Success condition: `read_pattern` returns 157 bytes.**
 
 ## INJECTION WORKS — THE BLOCKER WAS WORD ALIGNMENT (entry 67)
 
@@ -1127,7 +1171,14 @@ measurement about one game and one ROM.
 ## Backups taken and verified
 
 ```
-inject-swim-2026-11-17-1653.bin      16,777,216 B   THE CURRENT BOARD
+inject-klio-2026-11-18-0027.bin      16,777,216 B   THE CURRENT BOARD
+   sha256 8338a492d7b71915ee8abf15320a5980432c09016ebc9ff3ef689271eedf5689
+   app 0x20000 = d3502c28e88d731a, module text 0xC00000 = 463514fb9b7b51fc,
+   module data, IMU fw -- all four byte-identical to the build. verify OK.
+   Has the honest KLIO tap (11-byte filter), the /root/inject.txt trace, and
+   the injection instrument with ids 55/58.
+
+inject-swim-2026-11-17-1653.bin      STALE -- predates all the injection work
    sha256 38ecbce7b445347b9f718ab1ab9d99a344b7247c426dd3bfee106828aef3cb9c
    app 0x20000 = 9103bec7ed8f344f, module text 0xC00000 = af5c5ca5d5f07345,
    module data, IMU fw -- all four byte-identical to the build.

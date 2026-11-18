@@ -1,3 +1,42 @@
+## 73 COMMIT Unreleased 2026-11-19T00:45:00-07:00
+
+#### Coming From:
+
+Unreleased 856e323
+
+#### Purpose:
+
+Run the single-variable test entry 72 prescribed -- block interval 20 ms to 10 ms to match the 100 Hz the algorithm is configured for -- and find out why the progress figures were unreliable.
+
+#### Outcome:
+
+**THE PROGRESS FIGURES WERE UNRELIABLE BECAUSE THE TAP WAS DECODING ACCELEROMETER FRAMES AS KLIO, AND THE OPERATOR SPOTTED THE REAL BEHAVIOUR BEFORE ANY INSTRUMENT DID.** Raw frames, dumped for the first time:
+
+```
+11: 00 ff 14 00 00 ff 00 00 00 00 fd   KLIO, d[2] = 0x14 = progress 20, d[3] = 0
+ 7: 43 03 01 07 11 0e 0d               accel x/y/z = 0.20 / 0.44 / 0.88 g
+11: 00 ff 00 01 00 ff 00 00 00 00 fd   KLIO, d[2] = 0, d[3] = 1
+ 7: 92 07 89 ff 70 0f 0d               accel
+```
+
+The tap accepted **any frame of three bytes or more** and read `d[1]`/`d[2]` as index and progress. A seven-byte accelerometer event therefore had its axis values decoded as engineering units -- which is where 246, 43 and 96 came from. **A KLIO frame is exactly 11 bytes and the tap now requires that**, and the count of "frames" was likewise inflated with samples that were never KLIO output. THE OPERATOR'S OWN OBSERVATION IS THE FINDING: *"it got to 40% and then dropped back to 0."* That is not noise, it is the engine's documented vocabulary in the fourth byte -- `0 = ok, 1 = interrupted, 2 = no movement` -- and the captured frames show it directly: **progress 20 with reason 0, then progress 0 with reason 1.** THE ENGINE IS LEARNING AND THEN BEING INTERRUPTED. Progress climbs to 20, 40, and is then reset by an interruption, which is the same failure entry 52 diagnosed from the other direction: a FIFO overflow during a learning run drops the frames the algorithm needs and the accumulation restarts. `meta 12 fifo overflow` is present in these runs, on sensor 0, and the injected stream shares one FIFO with accelerometer and gyroscope output. SO THE REMAINING PROBLEM IS NAMED PRECISELY AND IT IS NOT THE PAYLOAD: the blocks are accepted with error `0x00`, the engine consumes them, learning advances, and an overflow interrupts it before 100 percent. What is needed is not a better waveform or a different block layout but **a drain fast enough to keep the FIFO from overflowing while 100 blocks a second go in and two physical sensors stream alongside them.** THE 10 ms RUN ITSELF WAS INCONCLUSIVE BY DESIGN AND ITS RESULT IS RECORDED AS SUCH: 2500 blocks, 16 frames, peak 4, `read_pattern` 244 bytes. Doubling the injection rate produced FEWER KLIO frames than the 50 Hz run's 46 -- consistent with the overflow interrupting sooner, not with the rate being wrong. TWO INSTRUMENT DEFECTS FIXED: the tap's frame-size filter, and the run's output now goes to `/root/inject.txt` with the first six raw frames recorded verbatim, because the display mirror garbles a scrolling trace and this session misread that trace four separate times. THE HONEST POSITION TONIGHT: injection works, KLIO consumes it, learning advances and is interrupted. The chain from host sine to engine has been walked end to end up to the interruption. THE BOARD IS ON THE KLIO IMAGE AND HEALTHY: `imu boot upload` reports BOOTED, `chip 70 boot 38 err 00`, KLIO algorithm 3.0.2. A full 16 MiB backup was taken with the board in the stub and verified: `inject-klio-2026-11-18-0027.bin`, sha256 `8338a492d7b71915ee8abf15320a5980432c09016ebc9ff3ef689271eedf5689`, all four code regions byte-identical to the build.
+
+#### Next Steps:
+
+**THE NEXT CHANGE IS THE DRAIN, NOT THE DATA.** The engine is being starved by overflow, not fed wrongly, so the experiment is to make the drain outrun the input: drain between every injected block until the FIFO reads empty rather than once per block, and consider whether the accelerometer and gyroscope need to be configured at all while injecting -- Bosch's own CLI configures only the algorithm, and while removing them measured worse earlier, that test was run while the tap was still decoding accel frames and its numbers cannot be trusted. **RE-RUN THAT COMPARISON NOW THAT THE TAP IS HONEST**: accel and gyro on against off is a clean single-variable test and the earlier result is void. IF THE INTERRUPTION STOPS, `read_pattern` returning 157 bytes is the success condition and the whole architecture is then proven on synthetic input. **THE OPERATOR SHOULD BE TOLD THE SHORT VERSION**: the sine is reaching the engine, the engine is learning it, and something is knocking it over partway. That is a much better place than "the payload is wrong", which is where the last five entries thought this stood. UNCHANGED AND STILL OPEN: no public KLIO+DataInject image exists, patterns do not survive a reboot, `klio save`/`restore` are instruments and not a durable store, the guest stacks are internal DRAM, `update.url` is unset, and `.ai/core.md`'s Purpose line still calls this a port of Linux.
+
+#### Files Modified:
+
+None in this repository; the fork carries the tap and trace changes.
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: PASS (the operator observed 40 percent then a drop to 0, which is the finding)
+
+---
+
 ## 72 COMMIT Unreleased 2026-11-18T22:30:00-07:00
 
 #### Coming From:
