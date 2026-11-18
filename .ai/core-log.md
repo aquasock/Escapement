@@ -1,3 +1,33 @@
+## 77 COMMIT Unreleased 2026-11-18T12:47:42-07:00
+
+#### Coming From:
+
+Unreleased cb828a9
+
+#### Purpose:
+
+Test entry 76's last remaining hypothesis -- that consecutive injected cycles are not identical enough for a segmentation engine to match them -- and, while checking it, examine the waveform's physics.
+
+#### Outcome:
+
+THE CYCLE-SAMENESS HYPOTHESIS IS VOID AND WAS DISPROVED ON THE HOST BEFORE ANY FLASH CYCLE WAS SPENT, AND THE WAVEFORM TURNED OUT TO CONTAIN A REAL PHYSICS ERROR INSTEAD. Entry 76 named cycle-to-cycle sameness as the last untested variable, on the reasoning that the waveform is recomputed each block from a float phase accumulator and therefore cannot land on the same samples every cycle. A table-replay shape was built for it -- one cycle computed once from an integer index and then replayed modulo the cycle length, so cycles are identical by construction -- and the table reproduces identically, with zero mismatches across four cycles. But reproducing the REAL code path on the host, with the same `t = (float)i * step_ms / 1000.0f` and the same `fmodf`, showed the existing loop already produces cycles that differ by AT MOST ONE LSB out of 4096, on 24 samples out of 2850 in a 30-second run and 170 of 11850 in a 120-second one. One LSB is 0.00024 g. An effect that small cannot plausibly matter to a segmentation engine, so the table shape tests something already true, it was left in the tree unreached, and the flash cycle a hardware test would have cost was not spent. THE PHYSICS CHECK FOUND SOMETHING WORSE THAN THE HYPOTHESIS IT REPLACED. The injected acceleration is gravity rotated by theta in the y-z plane -- ay is sin(theta) and az is cos(theta) -- and the rotation that carries plus-z toward plus-y is a rotation ABOUT X, whose angular velocity is (dtheta, 0, 0). The code has always written that rate into gy, about the y axis. EVERY INJECTED BLOCK HAS THEREFORE ASSERTED TWO CONTRADICTORY MOTIONS AT ONCE: an accelerometer reporting a tilt about x and a gyroscope reporting a spin about y. No wrist can produce that, and an engine whose job is deciding whether two movements are the same movement is entitled to reject it. A `shape 4` was added that moves the rate to the axis the acceleration implies and changes nothing else -- same swing, same rest, same amplitude, same rate -- so that shape 0 remains the baseline every entry since 73 has used and the comparison stays single-variable. THE AXIS FIX IS CORRECT AND IT DOES NOT RAISE THE CEILING. Six runs alternating within one boot: shape 0 peaked 20, 40 and 40 with 15, 22 and 19 frames, and shape 4 peaked 40, 40 and 40 with 19, 19 and 25. Both configurations cap at 40 and neither ever reaches 60, 80 or 100. Zero FIFO overflows, zero sensor errors, `read_pattern` rc -2 at 244 bytes throughout. So the wrong gyro axis was a genuine defect worth fixing and it is not what stops the engine finishing. WHAT IS NOW ELIMINATED, and it is nearly the whole list: transport framing, block alignment, the inject ids, the FIFO (overflows are zero with the physical sensors off), the injection rate, the timestamp unit and its delta encoding, the rest duration, the cycle-to-cycle repeatability, and now the gyro axis. The engine counts one repetition, reports progress 20, and resets to 0 on the following frame with change_reason 1 -- meaning it judges the next movement non-repetitive -- and no variation of the injected waveform has moved it past 40. THE PEAK SPREAD REMAINS UNCHARACTERISED AND IS THE ONE MEASUREMENT THAT UNDERPINS EVERY CLAIM ABOVE: across this project the same command on the same image has now peaked at 80, at 40 with three-figure frame counts and at 20 with 15 frames, and the honest reading is that a single 30-second run is a noisy sample. No claim in this entry depends on a difference smaller than that spread, which is why the conclusions are stated as "no improvement to the ceiling" rather than as measurements of effect size. THE BOARD IS HEALTHY AND ON THE FINAL IMAGE: the app flashed and verified, the module relinked against addresses re-read from that image and reflashed, and `music` plays a 5:58 track at 253440 frames with 0 errors after the relink. THE HONEST POSITION AFTER FIVE ENTRIES ON THIS: injection is proven end to end -- blocks accepted with error 0x00, the engine consuming them, learning advancing and reporting its own interruption reason -- and every physical property of the injected signal that can be checked has now been checked and corrected, without reaching a learnt pattern.
+
+#### Next Steps:
+
+THE NEXT EXPERIMENT SHOULD STOP SYNTHESISING AND START REPLAYING SOMETHING KNOWN TO WORK, because that is the only remaining way to separate "injection cannot drive this engine" from "our waveform is still wrong". A gesture trained BY HAND already learns and recognises -- that is this project's measured result -- so recording the accelerometer and gyroscope during a hand-trained gesture and replaying those exact samples through injection would answer the question decisively: if a recording of a real, learnable gesture also fails to produce a 157-byte pattern, injection is not equivalent to the sensor path and no amount of waveform design will fix it, which is a firm negative result and the honest end of this line; if it succeeds, the synthesis was the problem all along and the waveform becomes a tuning exercise. That needs one record command writing 100 Hz accel and gyro pairs to a file in PSRAM or on the card, and one shape that replays such a file instead of generating samples -- a build of moderate size and the obvious next cycle. BEFORE ANY OF IT, CHARACTERISE THE SPREAD: one configuration, six or more runs, report the distribution, because peaks ranging from 20 to 80 on identical inputs mean no waveform experiment can currently be read. UNCHANGED AND STILL OPEN: `read_pattern` has never returned 157 bytes from injected data, so the architecture is unproven on synthetic input, while the graded similarity metric from real motion (1.000 / 0.795 / 0.475 / negative) remains measured and reproducible and is unaffected; no public KLIO+DataInject image exists; patterns do not survive a reboot; `klio save` and `klio restore` are instruments rather than a durable store; the two unidentified header fields at 0x2c and 0x44 still gate custom firmware; the guest stacks are internal DRAM; `update.url` is unset; and entries 66 through 73 still carry fenced code blocks inside Outcome which the syntax forbids.
+
+#### Files Modified:
+
+None.
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: PASS
+
+---
+
 ## 76 COMMIT Unreleased 2026-11-18T12:30:49-07:00
 
 #### Coming From:

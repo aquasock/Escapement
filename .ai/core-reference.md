@@ -284,6 +284,7 @@ Topic IDs are the `record_id` prefix. An entry reserves a name; it does not clai
 | Why does the FIFO overflow while injecting? | IMU | IMU-006 |
 | Why does KLIO stop emitting frames partway through a learning run? | IMU | IMU-007 |
 | What unit is the IMU timestamp in, and how is it encoded? | IMU | IMU-008 |
+| How is the injected gesture waveform built, and what was wrong with it? | IMU | IMU-009 |
 | Which ttyACM device is the watch, and which is the TinyTang? | TOL | TOL-005 |
 | Why is the console dead after an esptool read with --after no_reset? | TOL | TOL-006 |
 | How do I open a Terminal on the watch from a host, reliably? | TOL | TOL-007 |
@@ -461,6 +462,7 @@ IMU-005: "bhy2_defs.h meta codes are 1,2,3,5..16,18,19,20 (11 = SENSOR_ERROR, 12
 IMU-006: "Accelerometer and gyroscope at 50 Hz alongside injected blocks at 100 Hz overflow the part's one FIFO: measured 42 FIFO_OVERFLOW and 30 SENSOR_ERROR events attributed to sensor 4, against 0 and 0 with both physical sensors off -- injection replaces their contribution, it does not supplement it"
 IMU-007: "With a quiet FIFO and zero errors, KLIO climbs 20/40/60/80 in about 5 s, then returns to 0 with change_reason 1 and STOPS EMITTING FRAMES ENTIRELY (15 frames, then silence for 1400 more accepted blocks), and the peak is not reproducible between identical runs (80 then 20)"
 IMU-008: "The part's timestamp tick is ~15.6 us (64130 ticks/second, MEASURED): a TS_LARGE_DELTA field is a DELTA that bhy2.c ADDS to a running 64-bit counter, not an absolute time, and the physical accelerometer at 50 Hz advances the parsed timestamp by exactly 1282-1283 ticks per 20 ms sample"
+IMU-009: "The injected gesture rotates gravity in the y-z plane (ay=sin(theta), az=cos(theta)), so its angular velocity belongs on X: writing it into gy, as the waveform did from entry 73 to 76, makes every block assert a tilt about x and a spin about y at once -- a motion no wrist can produce"
 TOL-005: "The watch and the TinyTang both appear as ttyACM devices and swap numbers between reboots: the watch is 303a:1001 (Espressif USB JTAG/serial debug unit) and the TinyTang is ffff:5454 (TinyTang CDC), so identity must come from /dev/serial/by-id or udev, never from the ttyACM number"
 TOL-006: "esptool's --after no_reset leaves the ESP32-S3 in its ROM bootloader, so the board's console emits nothing and every later command reads stale state until a --after hard_reset chip_id or a power cycle"
 TOL-007: "The desktop Start menu remembers its last selection, so F10 then Enter is only deterministic after a reboot: the sequence that works is reboot, F10, Enter, and the window that appears must be verified to be `tdsh` before typing, or the keys land in whichever app was selected last"
@@ -2604,6 +2606,19 @@ TOL-007: "The desktop Start menu remembers its last selection, so F10 then Enter
     - "tinydesk-twatch ports/twatchultra/main/imu.c: on_accel timestamp capture and the `imu clock` subcommand"
   verification: "Measured on hardware 2026-11-18 (core-log entry 76) with `imu clock`, which configures ONLY the physical accelerometer at 50 Hz and reads the SDK's parsed timestamp for consecutive samples -- deliberately outside any injection, because the injected deltas are what is in question and an injected run would be circular. Ten consecutive intervals all reported 1282 or 1283 ticks, giving 64130 ticks/s. The consequence was then applied: the injected delta was changed from an absolute 10000-per-block counter that reset at 65000 to a 641-per-block delta with natural 16-bit wraparound. Four subsequent runs with the corrected delta peaked at 20/40/40/40, statistically unchanged from the 20/40/40 baseline, so the fix is correct and is not what blocks learning."
 
+
+- record_id: IMU-009
+  kind: IMU
+  topic_id: IMU
+  status: VERIFIED
+  verified_date: 2026-11-18
+  title: "The injected gesture waveform rotated gravity in the y-z plane but put the gyro rate on Y; the consistent axis is X"
+  statement: "The gesture this port injects synthesises a tilt by rotating gravity in the y-z plane: the lateral component is `sin(theta) * 4096` and the vertical one `cos(theta) * 4096` in 1/4096 g, so the acceleration vector sweeps from +z toward +y as theta goes 0 to 1 radian. The angular velocity that produces that sweep is the derivative of the rotation, (dtheta, 0, 0) -- a rotation ABOUT X. The code wrote that rate into the gyro's Y component, with X held at zero."
+  consequence: "Every injected block between the introduction of this waveform and entry 77 described two contradictory motions at once: an accelerometer implying a tilt about x and a gyroscope reporting a spin about y. That is not a motion a wrist can make, and an algorithm that decides whether successive movements are the same movement may reasonably reject it. `shape 4` in `imu inject` writes the rate to X and leaves the acceleration untouched, so the motion is self-consistent; the corrected axis does not raise the observed progress ceiling (both configurations peak at 40), so it is a correctness fix rather than the blocker."
+  sources:
+    - "tinydesk-twatch ports/twatchultra/main/imu.c: cmd_imu_inject waveform, the ay/az/gy construction and shape 4"
+    - "bhy2_defs.h / the BHI260AP FIFO sample format: accelerometer and gyroscope as three int16 per axis, 1/4096 g and 16.4 LSB per dps"
+  verification: "Verified by inspection and on hardware 2026-11-18 (core-log entry 77). The physics is elementary: differentiating (0, sin theta, cos theta) with respect to theta gives (0, cos theta, -sin theta), which is the velocity field of a rotation about x, so omega = (dtheta, 0, 0). On the board, six alternating runs in one boot gave shape 0 peaks of 20, 40 and 40 and shape 4 peaks of 40, 40 and 40 -- both capped at 40, with zero FIFO overflows, zero sensor errors and read_pattern rc -2 throughout. Separately established on the host in the same entry: the existing float-phase loop already yields cycles that differ by at most 1 LSB of 4096 on 0.8 percent of samples, so cycle-to-cycle repeatability was never a plausible cause and no hardware test of it was run."
 ```
 
 ---
