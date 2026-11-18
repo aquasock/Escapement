@@ -1,0 +1,324 @@
+BOSCH SENSORTEC GMBH
+General Terms and Conditions of Delivery (version 05/2025)
+1.     Scope of application, conclusion of contract
+1.1    The sale and delivery of goods, including any software contained therein               in this case to perform any still outstanding Deliveries only against ad-
+       or delivered together with the goods (hereinafter collectively referred to             vance payment or provision of adequate security.
+       as "Deliveries") to our customers is performed exclusively on the basis of       2.7   If, after conclusion of the contract, it becomes apparent (e.g. in case the
+       these General Terms and Conditions of Sale and Delivery (hereinafter                   Customer files for insolvency proceedings or similar proceedings) that
+       "Delivery Conditions"), provided that the customer is an entrepreneur, a               our purchase price claim is jeopardized because of the customer’s inabil-
+       legal entity under public law or a special fund under public law. Any                  ity to pay, we are entitled to exercise our right to retention and – if neces-
+       terms and conditions of the customer, which are contrary to or deviate                 sary, after setting a grace period – to rescind the contract (Rücktritt). In
+       from our Delivery Conditions or from statutory provisions, shall not ap-               case of contracts concerning the production of non-fungible items (unver-
+       ply, unless we expressly agree to their validity in writing. Our Delivery              tretbare Sachen), we are entitled to rescind the contract immediately; the
+       Conditions shall also apply, if we carry out Deliveries to the customer                statutory provisions concerning the dispensability of setting a grace peri-
+       without any reservation in the knowledge that the terms and conditions of              od shall remain unaffected.
+       the customer conflict with or deviate from this Delivery Conditions or           2.8   The customer shall only be entitled to offset counterclaims or withhold
+       statutory provisions.                                                                  payments to the extent that his counterclaims (i) are undisputed or have
+1.2    These Delivery Conditions shall also apply within the framework of an                  been established with legally binding effect, or (ii) are ready for decision
+       ongoing business relationship to all our future Deliveries to the customer,            after lis pendens, or (iii) are in a reciprocal relationship to our claim.
+       even if we do not refer to these Delivery Conditions in each individual
+       case.                                                                            3.    Delivery, delivery periods and dates, delay in delivery
+1.3    Our quotations are - unless otherwise specified - binding and may only be        3.1   Unless agreed otherwise, our Deliveries are performed "FCA shipping
+       accepted by the customer within 30 days of receipt.                                    point of our supplying plant/warehouse" (Incoterms 2020), which is also
+1.4    Changes to the Deliveries at the request of the customer (e.g. in design               the place of performance for our Deliveries and any subsequent perfor-
+       and process) are performed exclusively on the basis of a written agree-                mance.
+       ment, in which the consequences of such a change are to be resolved, es-         3.2   Delivery periods and dates are agreed on a case-by-case basis or deter-
+       pecially with respect to additional or reduced costs or delivery dates.                mined in our quotation. The commencement of and compliance with the
+1.5    If our Deliveries contain software (see Section 1.1), our license condi-               agreed delivery periods and dates shall be subject to customer’s fulfil-
+       tions shall take precedence; if our Deliveries contain open source soft-               ment of all cooperation obligations, in particular the timely provision of
+       ware (hereinafter "OSS"), the respective OSS license conditions shall                  all documents, permits, investigations, releases, provisions and custom-
+       take precedence over all conflicting license and other conditions relating             er’s compliance with the agreed payment terms. If these prerequisites are
+       to the Deliveries. We provide these license conditions together with the               not properly fulfilled in good time, delivery periods shall be extended,
+       Deliveries and, upon customer’s request, make them available to the cus-               and delivery dates postponed accordingly. Our other statutory claims
+       tomer in advance.                                                                      shall remain unaffected.
+1.6    Unless statutory law provides for stricter formal requirements, legally          3.3   We are entitled to make partial deliveries and to issue corresponding
+       relevant declarations and notifications of the customer in relation to the             invoices, provided that these are reasonable for the customer. Partial de-
+       contract (e.g. setting of deadlines, notification of defects) shall be made            liveries are reasonable if (i) the partial delivery can be used by the cus-
+       in writing (written or text form, e.g. email).                                         tomer within the scope of the contractual purpose, (ii) the delivery of the
+1.7    References to statutory provisions are for clarification purposes only.                remaining ordered Deliveries is ensured and (iii) the customer does not
+       Even without such a clarification, the statutory provisions shall apply, un-           incur any considerable additional work or additional costs as a result (un-
+       less they are amended or expressly excluded in these Delivery Condi-                   less we declare to bear these costs).
+       tions.                                                                           3.4   The occurrence of our delay in delivery shall be determined in accord-
+                                                                                              ance with statutory provisions. The customer may withdraw from the
+2.     Prices, terms of payment, invoicing                                                    contract (Rücktritt) according to these statutory provisions only, if we are
+2.1    Unless otherwise agreed, our prices are net prices in USD on the basis of              responsible for the delay. Section 7 shall apply to claims for damages due
+       "FCA shipping point of our supplying plant/warehouse" (Incoterms                       to delay.
+       2020) plus packaging, storage, insurance and legally owed value added            3.5   If non-compliance with agreed delivery periods is due to force majeure or
+       tax/sales tax as well as any other taxes and duties.                                   other unpreventable events beyond our reasonable control (non-
+2.2    Value-added tax/sales tax is not charged, if the conditions for a tax                  availability of performance e.g. due to epidemics, war, terrorist attacks,
+       exemption are met. In case of deliveries to EU member states (intra-                   including those affecting our suppliers), the delivery periods and delivery
+       Community deliveries), the customer shall cooperate in a suitable manner               dates provided for the execution of the Deliveries shall be extended ac-
+       in providing evidence of the intra-Community delivery in line with the                 cordingly, plus a reasonable period for the (re-)start of production. This
+       requirements with the local law without undue delay. In particular, we                 also applies to industrial actions affecting our suppliers or us. If force
+       can demand a dated and signed confirmation of receipt of the intra-                    majeure events or equivalent events continue for more than 3 months,
+       Community delivery. The receipt shall contain at least the name and ad-                each party has the right to withdraw from the contract, provided that an
+       dress of the consignee of the Deliveries, the quantity and usual descrip-              adjustment of the contract is not possible.
+       tion of the Deliveries and the place and date of receipt of the Deliveries.      3.6   If a customer is in default of acceptance or if a customer culpably violates
+       In addition, the customer shall provide his valid VAT ID number. If the                its collaboration duties, we have the right to demand compensation for
+       relevant documents are not provided to us, the tax exemption of intra-                 the damage incurred by us in this respect including further additional ex-
+       Community deliveries shall not apply; in addition, the customer shall re-              penditure in an amount of 0.5 % of the price of the Deliveries for delivery
+       imburse us for any official surcharges.                                                but not exceeding, on aggregate 10 % of the price of the Deliveries for
+2.3    If no fixed price, but our list or catalog price is agreed, the following              every affected delivery (e.g. 20 boxes in the 100 boxes shipment that a
+       applies: If, in accordance with the agreement, the delivery takes place                customer fails to comply the collaboration duties, 10% will be charged on
+       more than four months after conclusion of the contract, our list prices val-           20 boxes). The contracting parties reserve the right to prove higher or
+       id at the time of delivery shall apply (in each case less any agreed dis-              lower costs of additional expenditure. The right to raise further claims on
+       count). If the delivery takes place within the framework of a continuous               account of a delayed acceptance shall remain unaffected hereby.
+       supply obligation, the list price valid at the time of delivery shall apply in   3.7   The customer may not refuse to take delivery on account of minor de-
+       each and any case.                                                                     fects.
+2.4    If, after conclusion of the contract, cost reductions or cost increases occur
+       (e.g. but not limited to changes in wages, material prices, or exchange          4. Scope of delivery, condition of the Deliveries
+       rate), each party may demand negotiations on a price adjustment.                 4.1 The quality of our Deliveries is conclusively described in the product
+2.5    Payments by the customer shall be made to one of our bank accounts                   datasheet, performance descriptions, specifications and labels. Any quality
+       within 30 days of the invoice date. We are entitled to perform deliveries            of the Deliveries deviating from this shall be deemed accepted by the cus-
+       only against reciprocally and simultaneously payment (e.g. by cash on                tomer, if and to the extent the customer releases the Deliveries.
+       delivery or direct debit) or on an advance payment; we communicate a             4.2 The responsibility for the integration of the Deliveries into the overall
+       corresponding reservation in our order confirmation at the latest.                   system (e.g. smartphone) lies with the customer. We do not assume any
+2.6    In the event of default of payment, we are entitled - without prejudice to           warranty for the quality of the Deliveries (in particular with regard to con-
+       further claims - to accelerate all claims under this contract so that they are       struction) including the materials used, if and to the extent as these were
+       due immediately or to demand adequate securities. We also have the right             directed by the customer. If and to the extent the customer has developed
+
+Edition 01/2024
+    the Deliveries and we manufacture the Deliveries developed by the cus-                          out success or is dispensable according to statutory provisions, the cus-
+    tomer according to specifications of the customer, the customer shall en-                       tomer may withdraw (Rücktritt) from the contract or reduce the price in
+    sure that the Deliveries comply with all applicable legal regulations. If the                   accordance with statutory provisions.
+    customer obtains knowledge that the Deliveries do not comply with appli-                 5.10   Warranty claims are excluded, if the failure occurred after the transfer of
+    cable legal regulations, he shall inform us immediately. We are entitled to                     risk because of e.g. but not limited to, natural wear and tear, the violation
+    carry out a respective analysis ourselves. In cases of doubt, the customer is                   of operating, maintenance and installation instructions, unsuitable or im-
+    obliged to prove conformity with all applicable legal regulations. We are                       proper use, non-reproducible software errors, incorrect or negligent han-
+    entitled to retain Deliveries until the customer provides evidence for the                      dling, storage or installation or because of interventions in the Deliveries
+    conformity of the Deliveries with these legal regulations. In the event of a                    by the customer or third parties.
+    claim by third parties due to the customer's violation of the obligations                5.11   In any case, the specific statutory provisions applying in the case of a
+    mentioned in this Section 4.2, the customer shall release us internally from                    final delivery of the unprocessed Deliveries to a consumer shall remain
+    any liability.                                                                                  unaffected, even if the consumer has further processed the Deliveries
+4.3 If our Deliveries contain software (see Section 1.1), to which our license                      (Lieferantenregress).
+    conditions or Section 4.4 do not apply, upon transfer of risk the customer               5.12   In case of a breach of duty other than relating to a defect, the customer
+    shall be granted non-exclusive rights to use the software, to the extent the                    may only withdraw or terminate the contract in accordance with statutory
+    software is required for the use of the Deliveries intended under the con-                      provisions, if we are responsible for the breach of duty.
+    tract.                                                                                   5.13   Claims for defects shall become statute-barred 12 months after delivery
+4.4 To the extent our Deliveries contain Integrated Electronics, licenses for the                   to the customer, unless mandatory law provides for a longer period of
+    use of the industrial property rights of third parties and patent pools, which                  limitation.
+    we may designate in the product or service descriptions or specifications,               5.14   The customer's claims for damages and reimbursement of expenses, even
+    are not part of the Deliveries; the customer is obliged to obtain these di-                     in case of defects, shall only exist in accordance with the provisions of
+    rectly from the owners of the property rights or from the administrator of                      Section 7 and is excluded in all other cases.
+    the respective patent pool. "Integrated Electronics" means components im-                5.15   Sections 5.4 and 5.5 shall not apply insofar as our Deliveries was proved
+    plementing standards, and/or related software, supplied or provided by                          to be sold by the customer or customer of the customer to a consumer
+    suppliers. "Standards" means a technical specification or function adopted                      without being processed or installed into another Deliveries.
+    by a standardization body (such as ETSI or IEEE). The Deliveries also do
+    not include licenses for other industrial property rights of third parties, of           6.    Intellectual property rights
+    which the Integrated Electronics contained in the Deliveries make use; the               6.1 We shall not be liable for claims arising from the infringement of indus-
+    provisions for damages according to Section 7.2 shall apply accordingly to                   trial property rights or copyrights of third parties (hereinafter "Property
+    any liability of us. At the request of the customer, we will inform him                      Rights") if the customer or companies in which the customer directly or
+    about the Integrated Electronics contained in the Deliveries and give exist-                 indirectly holds a majority of the capital or voting rights have or had the
+    ing information on third party industrial property rights, to the extent this                Property Right or the right to use.
+    is actually and legally possible for us and the information is necessary for             6.2 We shall only be liable for claims arising from the infringement of Proper-
+    the customer to obtain licenses for the third party industrial property rights               ty Rights, if at least one Property Right of the same Property Rights family
+    concerned.                                                                                   has been published either by the European Patent Office or in either the
+                                                                                                 Federal Republic of Germany, France, the U.K., Austria or the U.S.
+5.      Material defects and defects of title                                                6.3 The customer shall inform us immediately on infringement risks and
+5.1     Unless otherwise provided for in these Delivery Conditions, including the                alleged infringements that become known to him, and give us the oppor-
+        following provisions, the statutory provisions shall apply in the event of               tunity to jointly oppose such claims. At our request – as far as possible and
+        material defects and defects of title. Section 6 shall apply to defects of ti-           permissible – the customer shall allow us to conduct the litigation (includ-
+        tle caused by the infringement of industrial property rights and copyrights              ing out of court).
+        of third parties.                                                                    6.4 At our discretion, we are entitled (i) to obtain a right of use for the Deliver-
+5.2     The customer must notify us in writing immediately, no later than 15                     ies, which infringe a Property Right, (ii) to modify the Deliveries in such a
+        days after receipt of the goods Deliveries, of any recognisable defects.                 way that they no longer infringe the Property Right, or (iii) to replace De-
+        Adhesive labels on the boxes, labels showing the contents and the control                liveries by an equivalent substitute, which no longer infringes the Property
+        slips enclosed with the shipment shall be submitted to us together with                  Right. We reserve the right to take these measures even if the infringement
+        the notification of the defect. Any other defects must be notified by the                of Property Rights has not yet been legally established or acknowledged
+        customer in writing immediately after discovery thereof.                                 by us.
+5.3     The date of receipt by us of notification of a defect shall determine                6.5 Any claims of the customer shall be excluded (i) to the extent that the
+        whether or not notification is in good time.                                             customer is responsible for or has caused the infringement of Property
+5.4     Claims on account of defects shall be excluded if the notification of the                Rights, (ii) if the customer does not reasonably support us in the defense
+        defect is not received in good time.                                                     against claims asserted by third parties, (iii) if the Deliveries have been
+5.5     At our request, the customer shall return allegedly defective Deliveries to              manufactured in accordance with the specifications or instructions of the
+        us at his own expense. In the event the complaint is justified, we reim-                 customer, (iv) if the infringement of Property Rights results from use in
+        burse the costs of the most favorable manner of transport; this shall not                combination with another product (including software) not stemming from
+        apply if the costs increase because the Deliveries are located at a place                us or released by us, or (v) if the Deliveries are not used in accordance
+        other than the place of intended use. In the event of unjustified notifica-              with the contract.
+        tion of defects, we are entitled to demand reimbursement from the cus-               6.6 The customer's claims for damages and reimbursement of expenses shall
+        tomer for the expenses incurred by us (e.g. transport, labor and material                exist in the case of Property Right infringements only in accordance with
+        costs), unless the lack of defect was not recognizable to the customer.                  the provisions of Section 7. Sections 5.13 and 7.4 shall apply accordingly
+5.6     Subsequent performance shall be effected at our discretion by rectifica-                 to the limitations for claims based on infringements of Property Rights.
+        tion of defect or replacement delivery. In the case of software, we fulfil               Any further claims of the customer due to the infringement of Property
+        our obligation to remedy the defect, if we provide a software version,                   Rights other than those regulated in this Section 6 are excluded.
+        which no longer contains the defect. The installation of the software,
+        which is provided within the scope of the subsequent performance, is the             7.     Compensation for damages and expenses
+        responsibility of the customer, insofar as the installation is technically           7.1    Unless otherwise provided for in these Delivery Conditions, including the
+        possible for the customer. In the case of software, the rectification of de-                following provisions or a separate liability agreement, we shall be liable -
+        fects may also be carried out by pointing out a possibility of circumvent-                  irrespective of the legal basis (contract, tort, indemnity or any other legal
+        ing the defect, provided that this is reasonable for the customer taking in-                basis) - for damages and reimbursement of expenses (hereinafter "Dam-
+        to account the effects of the defect and the circumstances of the circum-                   ages") in accordance with statutory provisions.
+        venting solution pointed out. Our right to refuse subsequent performance             7.2    We shall be liable for Damages in cases of intent and gross negligence
+        according to statutory provisions remains unaffected.                                       (grobe Fahrlässigkeit). In the case of simple negligence (einfache Fahr-
+5.7     Claims for subsequent performance do not exist in case of merely incon-                     lässigkeit), we shall only be liable - subject to a lesser level of liability
+        siderable deviation from the quality agreed upon that will not affect the                   existing in accordance with statutory provisions (e.g. due care in our own
+        use of the Deliveries. Further rights shall remain unaffected hereby.                       matters) - (i) for damages resulting from injury to life, body or health,
+5.8     We may remedy defects or carry out replacement deliveries as a gesture                      and (ii) for damages resulting from the breach of a material contractual
+        of goodwill and without any recognition of a legal obligation. An ac-                       obligation (obligation whose fulfillment is essential for the proper execu-
+        knowledgment of the defect, which may lead to a new start of the limita-                    tion of the contract and on whose compliance the contractual partner reg-
+        tion period, shall only exist if we expressly declare this to the customer.                 ularly relies and may rely); in these cases, however, our liability shall be
+5.9     If the supplementary performance fails or if a reasonable period of time                    limited to compensation for the foreseeable, typically occurring damage.
+        set by the customer for the supplementary performance has expired with-
+
+Edition 05/2025                                                                          2
+7.3     The limitations of liability resulting from Section 7.2 shall not apply if         9. Export control and customs
+        we have fraudulently concealed a defect or have assumed a guarantee for            9.1 Each party is entitled to refuse to perform its obligations under this con-
+        the quality of the goods, and for claims of the customer under the Product             tract insofar as the foreign trade law, including, without limitation, nation-
+        Liability Act (Produkthaftungsgesetz).                                                 al and international (re-)export control and customs regulations, including
+7.4     Contractual and non-contractual claims of the customer for damages                     embargos and other sanctions, which is applicable to this contract and/or
+        based on a defect in the Deliveries shall become statute-barred 12 months              the performance of the contract (hereinafter “Foreign Trade Law”) render
+        after delivery, unless statutory law mandatorily provides for a longer pe-             impossible or prohibit the fulfilment of obligations under this contract. In
+        riod of limitation. In the cases of Sections 7.2 (i) and 7.3, the claims of            such cases, either party is entitled to terminate this contract in whole or in
+        the customer for Damages shall become statute-barred in accordance with                part to the extent that the Foreign Trade Law makes it impossible or pro-
+        statutory provisions.                                                                  hibits the proper fulfilment of obligations under this contract. If, in the
+7.5     Insofar as our liability for Damages is excluded or limited in accordance              event of partial termination, a partial performance is excluded for technical
+        with the above provisions, this also applies with regard to the personal li-           or legal reasons or if one party has no interest in a partial performance, the
+        ability for damages of our associates, representatives and vicarious                   termination will end the contract in its entirety.
+        agents.                                                                            9.2 In case of delay in the performance of obligations under this contract
+                                                                                               caused by licensing, authorization or similar requirements under Foreign
+8.   Reservation of title                                                                      Trade Law (hereinafter “Authorization”), the agreed deadlines and dates
+8.1  We reserve title to the Deliveries until all claims to which we are and will              shall be extended/postponed by the period between the conclusion of the
+     be entitled under the business relationship have been fulfilled in full                   contract and the granting of the Authorization. In the event an Authoriza-
+     (hereinafter "Reserved Property").                                                        tion be denied or not granted within 12 months after filing the application,
+8.2 Insofar as maintenance and inspection work is required on the Reserved                     either party is entitled to terminate or rescind from the contract in whole or
+     Property, the customer shall carry this out in good time at his own ex-                   in part insofar as the performance of the obligation requires this Authoriza-
+     pense.                                                                                    tion. If a partial performance is excluded for technical or legal reasons or if
+8.3 The customer shall be entitled to process or combine our Reserved Prop-                    one party has no interest in a partial performance, the termination will end
+     erty in the course of his normal business operations. We shall acquire co-                the contract in its entirety.
+     ownership of the products resulting from the processing or combination                9.3 Each party shall notify the other party within a reasonable time period
+     in order to secure our claims as set out in Section 8.1, which the customer               upon becoming aware of a Foreign Trade Law, which may prohibit or ren-
+     hereby assigns to us; they shall also become our Reserved Property. The                   der impossible performance according to clause 9.1, or delay performance
+     customer shall store the Reserved Property free of charge as a contractual                according to clause 9.2.
+     accessory obligation. The amount of our co-property share is determined               9.4 Upon request, the customer shall provide any information and documents
+     by the ratio of the value of our Deliveries (calculated according to the fi-              that we require to comply with Foreign Trade Law or that authorities re-
+     nal invoice amount including VAT) to the value of the products resulting                  quest from us. This includes information and documentation including,
+     from the processing or combination at the time of processing or combina-                  without limitation, on the end user, the destination and the intended (end-
+     tion.                                                                                     )use of the Deliveries and Services. We may, in its sole discretion, refuse
+8.4 The customer is entitled to resell in the ordinary course of business                      to perform its obligations under this contract or terminate the contract, if
+     against cash payment or under reservation of title. The customer hereby                   the customer does not provide us with such information or documents
+     assigns to us in full all receivables with ancillary rights to which he is en-            within a reasonable time period set by us.
+     titled from the resale of the Reserved Property, irrespective of whether              9.5 In the event that the customer provides to any third party (specifically
+     our Reserved Property has been further processed or not. The assigned                     including any affiliate of the customer) any Deliveries and Services, the
+     receivables serve to secure our claims in accordance with Section 8.1.                    customer shall comply with applicable Foreign Trade Law, insofar as cus-
+     The customer is entitled to collect the assigned receivables. We may re-                  tomer’s non-compliance could lead to a violation of our obligations to act
+     voke the customer's rights under this Section 8.4 if the customer does not                or to refrain under Foreign Trade Law. We are entitled to refuse to per-
+     properly fulfill his payment obligations to us, defaults on payment, ceases               form its obligations under this contract to the extent that customer’s
+     payment, or if the customer applies for the opening of insolvency pro-                    breach of duty could lead to a breach of our obligation to act or refrain un-
+     ceedings or comparable proceedings for the settlement of debts on his as-                 der Foreign Trade Law, or to terminate the contract for cause, if the cus-
+     sets. We may also revoke the customer's rights under this Section 8.4 if a                tomer breaches this obligation.
+     significant deterioration in the customer's financial circumstances occurs            9.6 Insofar as the customer purchases products from us that fall under the
+     or threatens to occur or if the customer is in a state of insolvency or over-             scope of Article 12g of Regulation (EU) No. 833/2014 or Article 8g of
+     indebtedness.                                                                             Regulation (EC) No. 765/2006 as amended, the following shall apply:
+8.5 At our request, the customer shall inform us immediately in writing to                     (i) The customer shall not sell, export or re-export, directly or indirectly,
+     whom he has sold the Reserved Property and which receivables he is en-                    to the Russian Federation or Belarus or for use in the Russian Federation
+     titled to from the resale, as well as issue us at his expense with publicly               or Belarus any goods or technology supplied under or in connection with
+     certified documents on the assignment of the receivables.                                 this contract that fall under the scope of Article 12g of Council Regulation
+8.6 The customer shall not be entitled to dispose of our Reserved Property or                  (EU) No 833/2014 or Article 8g of Regulation (EC) No. 765/2006, as
+     of the receivables assigned to us in any other way. The customer shall in-                amended from time to time.
+     form us immediately of any attachments or other legal impairments of the                  (ii) The customer shall undertake its best efforts to ensure that the pur-
+     Reserved Property or the receivables. The customer shall bear all costs,                  pose of clause 9.6 (i) is not frustrated by any third parties further down the
+     which must be incurred to cancel the access of third parties to our Re-                   commercial chain, including by possible resellers.
+     served Property and to regain the Reserved Property, unless they can be                   (iii) The customer shall set up and maintain an adequate monitoring
+     collected by third parties.                                                               mechanism to detect conduct by any third parties further down the com-
+8.7 If the value of the securities existing for us exceeds our receivables by a                mercial chain, including by possible resellers, that would frustrate the pur-
+     total of more than 10%, we shall release securities of our choice at cus-                 pose of clause 9.6 (i).
+     tomer's request.                                                                          (iv) If the customer breaches clause 9.6 (i), (ii) or (iii), at least negligent-
+8.8 If the customer acts in breach of contract, in particular if he fails to pay               ly, this shall entitle us to immediately cease further deliveries to the cus-
+     the due purchase price, we shall be entitled to withdraw from the contract                tomer and to terminate this contract and any contracts concluded under
+     in accordance with the statutory provisions and/or to demand the return                   this contract at any time, insofar as these have not yet been fully per-
+     of the Deliveries on the basis of the reservation of title. The demand for                formed. In this case, a previous warning letter to be issued before the ter-
+     return does not at the same time include the declaration of withdrawal;                   mination notice shall not be required. The statutory right of both parties to
+     we are rather entitled to demand only the return of the Deliveries and re-                terminate this contract for cause shall not be affected by this.
+     serve the right to withdraw from the contract. If the customer does not                   (v) The customer shall immediately inform us about any problems in
+     pay the due purchase price, we may only assert these rights if we have                    applying clauses 9.6 (i), (ii) or (iii), including any relevant activities by
+     previously set the customer a reasonable deadline for payment without                     third parties that could frustrate the purpose of clause 9.6 (i). The customer
+     success or if such setting of a deadline is dispensable according to the                  shall make available to us information concerning compliance with the ob-
+     statutory provisions.                                                                     ligations under clauses 9.6 (i), (ii) or (iii) within two weeks of the simple
+8.9 After declaration of such withdrawal, the customer shall immediately                       request of such information.
+     grant us or our agents access to the Deliveries to which we have retained             9.7 For delivery of goods across customs borders to us, the customer is
+     title and surrender them. After respective notification in good time we                   obliged to provide us with all required documents and information such as
+     may also otherwise market the Deliveries to which we have retained title                  commercial invoice and delivery note, for a complete and correct import
+     in order to satisfy our due claims against the customer.                                  customs declaration to the shipment. In the case of free of charge deliver-
+8.10 Statutory rights and claims shall not be restricted by the provisions con-                ies to us, the customer is obliged to declare a value, which reflects a fair
+     tained in this clause 8.                                                                  market price as well as the note “For Customs Purpose Only” in the pro
+
+
+Edition 05/2025                                                                        3
+    forma invoice. The value has to contain all components of the good such
+    as hardware and respectively software.
+9.8 Unless explicitly agreed otherwise in written form in the delivery or
+    quotation documents, the customs-cross-border supply or provision of
+    software, technology or other data (e.g. map data) shall be performed ex-
+    clusively by electronic means (e.g. e-mail or download). This clause does
+    not cover the supply of embedded software (software which is flashed on
+    hardware).
+
+10. Confidentiality, data protection
+10.1 "Confidential Information" shall mean all trade secrets and business or
+     technical information (including features, which can be inferred from any
+     objects, documents or software handed over, as well as other knowledge or
+     experience) made accessible by us, irrespective of whether it is marked as
+     confidential or not. With regard to the protection of trade secrets in ac-
+     cordance with the German Trade Secrets Act, the customer acknowledges
+     that our secrecy measures are appropriate.
+10.2 Confidential Information shall be kept secret from third parties as long as
+     and to the extent, it is not proven to be public knowledge or has not been
+     designated by us for disclosure by the customer. It may only be made
+     available in the customer's own business to those persons who necessarily
+     have to be involved in their use and who are also obliged to maintain con-
+     fidentiality; the information shall remain our exclusive property. Confiden-
+     tial Information may not be duplicated or used commercially without our
+     written consent; the customer is also not entitled to reverse engineer the
+     Deliveries without our explicit consent.
+10.3 The customer shall inform us immediately, if he becomes aware that
+     Confidential Information has been disclosed in violation of these Delivery
+     Conditions. In this case, the customer must use his best efforts to ensure
+     that this disclosed Confidential Information is not passed on/used by the
+     unauthorized receiver and is deleted. At our request, all Confidential In-
+     formation (including any copies or records made, if applicable) and loaned
+     items must be returned to us immediately and completely, destroyed or de-
+     leted. We reserve all rights to the Confidential Information (including cop-
+     yrights and the right to apply for industrial property rights, such as patents,
+     utility models, and semiconductor protection). Insofar as Confidential In-
+     formation has been made available to us by third parties, this reservation
+     of rights also applies in favor of these third parties.
+10.4 If personal data is processed, we observe the legal regulations for data
+     protection. In this case, the details of the data collected and their respective
+     processing are set out in a data protection declaration provided by us or in
+     a separate agreement on data processing.
+
+11. Compliance
+    The customer is committed to the principle of strict legal compliance in all
+    activities, measures, contracts and other procedures.
+
+12. Applicable law, place of jurisdiction, other information
+12.1 The law of the Federal Republic of Germany applies exclusively, exclud-
+     ing the United Nations Convention on Contracts for the International Sale
+     of Goods of 04/11/1980 (CISG).
+12.2 Exclusive place of jurisdiction for all disputes arising from or in connec-
+     tion with the business relationship between the customer and us is
+     Stuttgart (for local court proceedings the local court [Amtsgericht] in
+     70190 Stuttgart). However, we are also entitled to sue the customer (i) at
+     the location of our business premises executing the order, (ii) at the cus-
+     tomer's registered office, or (iii) at the place of performance of the deliv-
+     ery obligation. Mandatory exclusive places of jurisdiction remain unaf-
+     fected.
+12.3 When determining the amount of the compensation claims to be met by
+     us in accordance with Sections 4 to 7, our economic circumstances, the
+     nature, scope and duration of the business relationship, any causation
+     and/or fault contributions by the customer in accordance with § 254 BGB
+     (contributory negligence) and a particularly unfavorable installation sit-
+     uation of the Deliveries shall be taken into account appropriately in our
+     favor. In particular, compensation, costs and expenses to be borne by us
+     must be in reasonable proportion to the value of the Deliveries.
+12.4 Should a provision of these Delivery Conditions or any other agreement
+     entered into be or become invalid, the validity of the remaining provi-
+     sions shall not be affected. The parties are obliged to replace the invalid
+     provision with a provision that comes as close as possible to the invalid
+     provision in terms of its economic success.
+
+
+
+
+Edition 05/2025                                                                         4
+

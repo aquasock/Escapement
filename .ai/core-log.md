@@ -1,3 +1,34 @@
+## 66 COMMIT Unreleased 2026-11-18T12:30:00-07:00
+
+#### Coming From:
+
+Unreleased 87a8f86
+
+#### Purpose:
+
+The operator's hypothesis, after entry 65 established that the 0x2c/0x44 fields are a keyed check: that Bosch must publish a separate developer key which relieves them of liability. Find their published terms and test it.
+
+#### Outcome:
+
+THE TERMS ARE FOUND, ARCHIVED, AND THEY SETTLE IT: THERE IS NO DEVELOPER-KEY PROVISION ON THIS PART. The document is Bosch Sensortec GmbH's *General Terms and Conditions of Delivery, version 05/2025*, fetched from `bosch-sensortec.com/media/boschsensortec/downloads/footer_files/bosch_sensortec_general_terms_and_conditions_of_delivery_version_05-2025.pdf` and now stored in this repository as `docs/bosch-sensortec-delivery-terms-2025-05.pdf` with a text extraction beside it, so the claim can be checked without the network. THE ONE CLAUSE THAT MATTERS is 4.3: *"the customer shall be granted non-exclusive rights to USE the software, to the extent the software is required for the use of the Deliveries intended under the contract."* A right to use, not a right to modify. Section 1.5 defers to separate licence conditions for software and states they are provided with the Deliveries and available on request in advance -- so the delivery terms are not the whole story, but the whole story is not published where this project can reach it, and nothing in the delivery terms points at a developer programme. AND 10.2 IS EXPLICIT ABOUT THE OTHER DIRECTION: *"the customer is also not entitled to reverse engineer the Deliveries without our explicit consent."* Recorded plainly rather than buried: the disassembly work in entries 59 to 65 is against that term. It is a contract between Bosch and a commercial purchaser rather than a law, and it has not stopped the technical work, but anyone continuing should know it is there and should read the archived document before deciding what to do next. THE OPERATOR'S HYPOTHESIS WAS HALF RIGHT AND THE HALF THAT FAILED IS THE USEFUL PART. The instinct that a readable-but-unverifiable image is exactly the shape that limits Bosch's liability while hiding nothing is CORRECT, and the BSD-3-Clause SDK published on GitHub is unambiguously developer-facing -- Bosch wants people building on this silicon. But a delegated signing programme would be an auditable, documented arrangement with a contract and a key ceremony attached, and THERE IS NO TRACE OF ONE: not a permissive version, not a restrictive version, not even a contact route. THE EXPLANATION THAT FITS EVERYTHING is that the BHI260AP is sold as a finished component rather than a platform, which section 4.3 states directly, and the MAC enforces that the firmware is the one Bosch shipped. Supporting evidence rather than proof: `BHy2CLI`, Bosch's own development tool, supports the **BHI360 and BHI385** and not the BHI260AP. The AP suffix denotes the application-specific variant. THE ACTIONABLE CONCLUSION IS THEREFORE A DIFFERENT PART AND NOT A DIFFERENT ATTACK: if programmability is the goal, the family member with a toolchain is the BHI360 -- same vendor, same ecosystem, a documented development flow. That should be priced before any further effort is spent on ROM extraction or key hunting, because it may be the cheap answer the whole line of work was looking for. WHAT WAS ESTABLISHED EARLIER AND IS NOT AFFECTED: the metric is graded and reproducible (1.000 / 0.795 / 0.475 / negative, four decimals stable, entry 58); the load address, container format and primary SHA-256 are all solved (entries 62, 64); the toolchain is durable and verified at `~/opt/arctc/arc-multilib-elf32/` compiling em/hs/arc700 (entry 65); and the gate is an authentication tag whose construction is keyed and not recoverable from the twelve published images (entry 65). THE BOARD IS HEALTHY AND ON THE KLIO IMAGE. Nothing in the fork changed. The legal analysis here is a reading of a document and not advice; whether its terms bind any particular reader is not a question this log can answer.
+
+#### Next Steps:
+
+PRICE AND INVESTIGATE THE BHI360 before anything else. It is the same vendor and the same sensor-hub idea, it has a public toolchain (`BHy2CLI` supports it, `BHI360_SensorAPI` is on GitHub), and if its development flow includes custom algorithms and data injection then the operator's entire architecture becomes buildable there without any reverse engineering, ROM extraction, or terms difficulty. The questions to answer, in order: does BHI360 support loading firmware the customer built; what is the per-unit cost against the BHI260AP; is it pin- and package-compatible enough to consider for a watch; and does its development flow need a signed agreement. THAT LAST ONE IS THE ONE TO ASK BOSCH DIRECTLY, and it is a commercial question with a commercial answer -- the operator has said Bosch will not engage, but that was in the context of asking for help with the BHI260AP rather than asking to buy a development part. THE ALTERNATIVE THAT NEEDS NOBODY'S PERMISSION is the ESP32-S3 doing the classification: 985 KB of free app slot since entry 43, six IMU channels already read reliably at 97 Hz, and no gate of any kind. IF CUSTOM FIRMWARE IS EVER RESUMED ON THIS PART, the honest description is that it needs either a signing arrangement Bosch does not advertise, or a ROM attack on an object that section 10.2 says not to reverse engineer -- and neither is a weekend. UNCHANGED AND STILL OPEN: fork commit 8c2e7c9 is built and not flashed, no public KLIO+DataInject image exists, patterns do not survive a reboot, `klio save`/`restore` are instruments and not a durable store, the guest stacks are internal DRAM, `update.url` is unset, and `.ai/core.md`'s Purpose line still calls this a port of Linux.
+
+#### Files Modified:
+
+- docs/bosch-sensortec-delivery-terms-2025-05.pdf
+- docs/bosch-sensortec-delivery-terms-2025-05.txt
+
+#### Status:
+
+- Build: N/A
+- Deployment: N/A
+- User Test: N/A (documentary finding)
+
+---
+
 ## 65 COMMIT Unreleased 2026-11-18T11:00:00-07:00
 
 #### Coming From:

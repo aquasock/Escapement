@@ -1,4 +1,4 @@
-# Handoff — Escapement / TinyDesk on T-Watch Ultra, 2026-11-18T11:15
+# Handoff — Escapement / TinyDesk on T-Watch Ultra, 2026-11-18T12:45
 
 Orientation, not authority. **Verify before acting on it.** The files, the
 coredump partition and the board are the fact; this file is a claim.
@@ -21,8 +21,8 @@ are equal, and **the app is at 0x20000, not 0x10000**. The flash is four equal
 
 ## Where things live
 
-- Project-control repo: `/run/media/vash/GIT/Escapement`, `main`, at `a82bc54`
-  (core-log **entry 65**). `.ai/core.md` is RESTRICTED — do not edit without an
+- Project-control repo: `/run/media/vash/GIT/Escapement`, `main`, at `87a8f86`
+  (core-log **entry 66**). `.ai/core.md` is RESTRICTED — do not edit without an
   explicit request. Reference records live in `.ai/core-reference.md`.
 - **`.ai/core.md`'s Purpose line is stale and deliberately untouched.** It says
   "Escapement is a port of linux". The project is TinyDesk; the Linux line
@@ -467,6 +467,37 @@ check at all.** The from-scratch route would be blocked on this silicon.
 
 **The only thing that would reopen it:** a Bosch-built BHI260AP image with a
 known payload, so the fields can be solved against a known-good input.
+
+### BOSCH'S TERMS — read this before continuing (entry 66)
+
+Archived in this repo: `docs/bosch-sensortec-delivery-terms-2025-05.pdf` (+ `.txt`).
+*General Terms and Conditions of Delivery, version 05/2025.*
+
+- **§4.3** — *"non-exclusive rights to **use** the software, to the extent the
+  software is required for the use of the Deliveries intended under the contract."*
+  **A right to use, not to modify.**
+- **§10.2** — *"the customer is also **not entitled to reverse engineer** the
+  Deliveries without our explicit consent."*
+
+**The disassembly in entries 59–65 is against that term.** It's a contract between
+Bosch and a commercial purchaser, not a law — but know it's there.
+
+**There is no developer-key provision.** Not a permissive one, not a restrictive
+one, not a contact route. A delegated signing programme would be documented; this
+isn't.
+
+### The conclusion that actually helps
+
+**The BHI260AP is sold as a finished component, not a platform** (§4.3 says so
+directly). The MAC enforces "this is the firmware Bosch shipped."
+
+**Supporting evidence:** `BHy2CLI`, Bosch's own dev tool, supports **BHI360 and
+BHI385** — *not* the BHI260AP. The `AP` suffix denotes the application-specific
+variant.
+
+**So the actionable path is a different part, not a different attack.** If
+programmability is the goal, the family member with a toolchain is the **BHI360**:
+same vendor, public toolchain (`BHI360_SensorAPI`), documented dev flow.
 
 ### Practical state
 
