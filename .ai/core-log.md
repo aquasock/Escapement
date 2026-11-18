@@ -1,3 +1,33 @@
+## 63 COMMIT Unreleased 2026-11-17T19:16:07-07:00
+
+#### Coming From:
+
+Unreleased ea6db3f
+
+#### Purpose:
+
+Run the byte-flip test entry 62 named, to settle whether the BHI260AP verifies the firmware payload and therefore whether a from-scratch image can boot at all.
+
+#### Outcome:
+
+THE PART VERIFIES THE PAYLOAD, AND A SINGLE FLIPPED BYTE IS REJECTED. Two images were built from `DataInject_SWIM.fw`, each wrapped in the port's 12-byte FUMI header with its own recomputed SHA-256 check: a control that is Bosch's bytes unchanged, and a test image identical except for one byte toggled at payload offset `0x3f55`, inside segment 1's readable-text region, with every one of Bosch's own header fields left untouched. The two wrapped images differ in exactly five bytes -- the one payload byte and the four FUMI checksum bytes the wrapper recomputes -- which was confirmed with `cmp -l` before flashing. The flipped image was written to `0xE10000` (esptool hash verified) and `imu boot upload` reported `upload refused (-5)`, then `chip 70 boot 78 err 12 iface-ready verify-done VERIFY-ERROR`. So the part received the image in full, ran verification, and failed it on nothing but one changed payload byte. THIS IS A SHARPER NEGATIVE THAN ENTRY 56's BHI360 RESULT, and the difference is the control. The BHI360 image gave `boot 78 err 14` because it was the wrong silicon (`chip 7A` against this board's `0x70`); here the silicon matches and the only defect is payload integrity, and the reason code is different, `err 12` rather than `err 14`. Both sit in the verify stage, but `err 12` is specifically a correct-silicon payload-integrity rejection. THE INTEGRITY CHECK IS ONE OF THE HEADER FIELDS ENTRY 62 COULD NOT IDENTIFY: the 32-byte field at header offset `0x08` and/or the two 20-byte fields at `0x2c` and `0x44`, each preceded by four zero bytes. Entry 62 already ruled out CRC32 over every plausible range, so the field is a longer digest or a signature, and it is enforced. THE GOOD KLIO IMAGE WAS REFLASHED AND THE PART IS HEALTHY: `bhi260_klio.img` (123,708 bytes on disk, 123,696-byte payload) written to `0xE10000`, and `imu boot upload` reports booted in 3258 ms, 35 virtual sensors, `result BOOTED`, `chip 70 boot 38 err 00`. The watch was on the rejected image between the two flashes and the IMU was non-functional during that window; it is fully restored now. WHAT THIS CHANGES: a from-scratch image, which is the operator's chosen route, cannot boot on this silicon until the integrity field is reproduced, and if that field is a cryptographic signature over a Bosch-held key rather than a plain digest, the from-scratch route is blocked on this part entirely. Identifying which it is becomes the gating question ahead of any ARC code. All work used the four firmware images and the ARC toolchain already present from entries 60-62; nothing in either repository changed.
+
+#### Next Steps:
+
+IDENTIFY THE INTEGRITY FIELD BEFORE WRITING ANY ARC CODE, because everything downstream depends on whether it is a plain digest or a signature. The method is to determine which payload bytes each header field covers and what function produces it, by comparing the four local images field-by-field against Bosch's other BHI260AP images in `boschsensortec/BHI2xy_SensorAPI`, and by testing candidate digests -- SHA-256, SHA-1, SHA-224, and their variants over each segment's payload range and over the whole-image range -- against the `0x08`, `0x2c` and `0x44` fields. If a digest reproduces a field, the from-scratch route stays open and the next step is building a minimal image that passes it. If no digest matches and the field behaves like a signature, the honest conclusion is that this silicon will not run unsigned firmware, and the ESP32-S3 doing the classification with 985 KB of free app slot becomes the realistic path rather than a fallback. STILL PENDING from entry 62 and unaffected by this result: read the public BHI260AP datasheet for the Fuser core's CPU and memory map to confirm the `0x124000` load address and the ROM-below inference. STILL TRUE AND NOW MORE URGENT: the ARC toolchain lives only in `/tmp/arctc` and will not survive a reboot, so it should be moved somewhere durable before the digest work begins. UNCHANGED AND STILL OPEN: fork commit 8c2e7c9 is built and not flashed, no public KLIO+DataInject image exists, patterns do not survive a reboot, `klio save`/`restore` are instruments and not a durable store, the guest stacks are internal DRAM, `update.url` is unset, and `.ai/core.md`'s Purpose line still calls this a port of Linux.
+
+#### Files Modified:
+
+None.
+
+#### Status:
+
+- Build: N/A
+- Deployment: PASS
+- User Test: N/A
+
+---
+
 ## 62 COMMIT Unreleased 2026-11-17T19:02:46-07:00
 
 #### Coming From:
