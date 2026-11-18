@@ -1,3 +1,33 @@
+## 78 COMMIT Unreleased 2026-11-18T13:18:36-07:00
+
+#### Coming From:
+
+Unreleased 83ad1d1
+
+#### Purpose:
+
+Replace five entries of synthesised waveforms with a recorded one: capture a gesture performed by hand, replay those exact samples through injection, and settle whether injection can drive KLIO at all.
+
+#### Outcome:
+
+A REAL GESTURE WAS RECORDED, REPLAYED THROUGH INJECTION FIVE TIMES, AND DID NOT PRODUCE A LEARNT PATTERN -- SO THE ANSWER TO THE QUESTION FIVE ENTRIES WERE ASKING IS NO, AND IT IS NOW ANSWERED WITH A KNOWN-GOOD INPUT RATHER THAN WITH SYNTHESIS. The control was established first and on the same image: `klio learn` reaches 100 percent from hand motion, reports 12 frames, announces a learnt pattern, and `klio detect` then reports `read_pattern: ok (0), 157 bytes` -- the exact gate this project has never once passed from injected data. That makes a recording of the same gesture a known-good input, which is what the synthetic waveforms never were. `imu record <seconds>` was added: it configures the accelerometer and gyroscope at 100 Hz, samples the latest raw triple from each every 10 ms into a PSRAM buffer, and writes `/root/gesture.bin` as six int16 per sample -- ax, ay, az, gx, gy, gz, the part's own integers, with no float round trip. A new gyro sink was needed because nothing in this port had ever kept gyro values; only the accelerometer was decoded. A 30-second recording captured 3111 accelerometer and 3111 gyro samples for 3000 ticks, which is slightly more than one per tick and proves both streams genuinely ran at 100 Hz rather than the sampling loop outrunning them. The file was pulled off the chip and validated independently of the firmware: `|a|` is 0.97 g, the axes swing by thousands of counts, and the accelerometer and gyroscope agree with each other. `shape 5` replays it through the same step-by-step path every other shape uses, one recorded sample per injected block, all six values unfiltered, looping if the run outlasts the recording. THE FIVE REPLAYS GIVE PEAKS OF 20, 60, 40, 40 AND 20 WITH 3, 27, 26, 23 AND 12 FRAMES, AND `read_pattern` RETURNED rc -2 AT 244 BYTES IN ALL FIVE. THE 60 IS THE HIGHEST SINGLE PEAK THIS PROJECT HAS SEEN FROM INJECTION and it is recorded as one sample in a noisy distribution, not as an improvement: the same command on the same image has produced 3 frames and 27 frames, and the peak and frame count move together in a way that no run has controlled. So the honest reading is that a real, demonstrably learnable gesture replayed through injection behaves like the synthetic ones -- it gets read, it advances progress in steps of 20, it is interrupted, and it never converges -- which means the difference between the two paths is NOT the waveform's content. THE COMPARISON THE WHOLE EXERCISE WAS BUILT FOR NOW HAS ONE SIDE THAT IS KNOWN GOOD AND STILL FAILS, and the remaining differences between the paths are enumerable rather than open-ended: the sensor path has the part's own hardware timestamping while injection supplies a delta this project reconstructs; the sensor path delivers samples as the part's sensors produce them while injection writes blocks the host composed; and the sensor path runs the engine against a live FIFO rather than a step-by-step one. Everything else -- the waveform, the axis, the amplitude, the timing, the rate, the engine, the firmware, the board -- has been eliminated, most of it by measurement, some of it by finding real defects along the way. ENTRY 77 WAS CONFIRMED FROM THE OTHER DIRECTION AND IT IS A GOOD CHECK ON THAT CONCLUSION: the recorded real gesture rotates gravity in the x-z plane and puts its angular rate on gy, which is self-consistent because a rotation carrying z toward x IS about y. The synthetic waveform rotated gravity in the y-z plane -- about x -- while writing the rate into gy. So the synthetic signal was internally contradictory in the specific way entry 77 describes, and the real recording is not, which is independent evidence that the recording is physically sound and the synthesis was not. AUDIO, WHICH THIS CYCLE REBUILT TWICE, IS VERIFIED: after the final module relink `music` plays a 5:58 track at 258048 frames with 0 errors and 0 short writes, and the operator confirmed it by ear. THE BOARD IS HEALTHY AND ON THE FINAL IMAGE, app and module both flashed and verified, and `/root/gesture.bin` carries a 30-second recording of the operator's gesture that a future cycle can replay without asking for another performance.
+
+#### Next Steps:
+
+THE ONE REMAINING EXPERIMENT WORTH A CYCLE IS TO REMOVE THE STEP-BY-STEP MODE, because it is now the largest unexplained difference between a path that learns and a path that does not. Bosch's own CLI runs injection in step-by-step mode, but every hand-trained success this project has recorded ran the engine against a free-running FIFO fed by real sensors, and no injected run has ever been tried in normal mode. That is a single-variable change: `imu inject` currently calls `imu_inject_begin(BHY2_STEP_BY_STEP_INJECTION)`; a variant calling `BHY2_NORMAL_MODE` would test whether the engine segments differently when it is not being driven one block at a time. IF THAT FAILS, THE LINE SHOULD BE CLOSED WITH THE ENTRY THAT SAYS SO. Six entries have now eliminated the waveform, the axis, the amplitude, the rate, the timestamp, the transport, and finally the input data itself, which came from a real hand and is demonstrably learnable; a further failure would mean injection is not equivalent to the sensor path on this firmware and no amount of host-side work will change that, which is a firm negative result and worth recording rather than working around. BEFORE CLOSING, TWO CHEAP THINGS ARE WORTH DOING BECAUSE THEY WOULD MAKE ANY FUTURE ATTEMPT CHEAPER: `imu inject` should report how many injected samples the engine actually consumed per KLIO frame, since a ratio near zero would say the engine is discarding most of the stream and would explain a great deal; and the recorded gesture should be tried at a lower injection rate while keeping the file, since the engine may be being fed faster than it segments. THE PROJECT'S MEASURED RESULT IS UNCHANGED AND UNAFFECTED: the graded similarity metric from real motion at 1.000 / 0.795 / 0.475 / negative remains reproducible, `klio learn` and `klio detect` work, and the architecture is proven on the sensor path -- it is only the synthetic-input half that this line of work has failed to demonstrate.
+
+#### Files Modified:
+
+None.
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: PASS
+
+---
+
 ## 77 COMMIT Unreleased 2026-11-18T12:47:42-07:00
 
 #### Coming From:

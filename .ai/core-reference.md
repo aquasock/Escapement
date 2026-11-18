@@ -285,6 +285,7 @@ Topic IDs are the `record_id` prefix. An entry reserves a name; it does not clai
 | Why does KLIO stop emitting frames partway through a learning run? | IMU | IMU-007 |
 | What unit is the IMU timestamp in, and how is it encoded? | IMU | IMU-008 |
 | How is the injected gesture waveform built, and what was wrong with it? | IMU | IMU-009 |
+| Can a gesture recorded from a hand be replayed through injection, and does it learn? | IMU | IMU-010 |
 | Which ttyACM device is the watch, and which is the TinyTang? | TOL | TOL-005 |
 | Why is the console dead after an esptool read with --after no_reset? | TOL | TOL-006 |
 | How do I open a Terminal on the watch from a host, reliably? | TOL | TOL-007 |
@@ -463,6 +464,7 @@ IMU-006: "Accelerometer and gyroscope at 50 Hz alongside injected blocks at 100 
 IMU-007: "With a quiet FIFO and zero errors, KLIO climbs 20/40/60/80 in about 5 s, then returns to 0 with change_reason 1 and STOPS EMITTING FRAMES ENTIRELY (15 frames, then silence for 1400 more accepted blocks), and the peak is not reproducible between identical runs (80 then 20)"
 IMU-008: "The part's timestamp tick is ~15.6 us (64130 ticks/second, MEASURED): a TS_LARGE_DELTA field is a DELTA that bhy2.c ADDS to a running 64-bit counter, not an absolute time, and the physical accelerometer at 50 Hz advances the parsed timestamp by exactly 1282-1283 ticks per 20 ms sample"
 IMU-009: "The injected gesture rotates gravity in the y-z plane (ay=sin(theta), az=cos(theta)), so its angular velocity belongs on X: writing it into gy, as the waveform did from entry 73 to 76, makes every block assert a tilt about x and a spin about y at once -- a motion no wrist can produce"
+IMU-010: "A hand gesture recorded at 100 Hz and replayed through injection five times gave peaks 20/60/40/40/20 with 3-27 frames and read_pattern rc -2 every time, while the same gesture performed live learns and yields a 157-byte pattern -- so injection delivers data the engine reads but the input content is not what separates the two paths"
 TOL-005: "The watch and the TinyTang both appear as ttyACM devices and swap numbers between reboots: the watch is 303a:1001 (Espressif USB JTAG/serial debug unit) and the TinyTang is ffff:5454 (TinyTang CDC), so identity must come from /dev/serial/by-id or udev, never from the ttyACM number"
 TOL-006: "esptool's --after no_reset leaves the ESP32-S3 in its ROM bootloader, so the board's console emits nothing and every later command reads stale state until a --after hard_reset chip_id or a power cycle"
 TOL-007: "The desktop Start menu remembers its last selection, so F10 then Enter is only deterministic after a reboot: the sequence that works is reboot, F10, Enter, and the window that appears must be verified to be `tdsh` before typing, or the keys land in whichever app was selected last"
@@ -2619,6 +2621,21 @@ TOL-007: "The desktop Start menu remembers its last selection, so F10 then Enter
     - "tinydesk-twatch ports/twatchultra/main/imu.c: cmd_imu_inject waveform, the ay/az/gy construction and shape 4"
     - "bhy2_defs.h / the BHI260AP FIFO sample format: accelerometer and gyroscope as three int16 per axis, 1/4096 g and 16.4 LSB per dps"
   verification: "Verified by inspection and on hardware 2026-11-18 (core-log entry 77). The physics is elementary: differentiating (0, sin theta, cos theta) with respect to theta gives (0, cos theta, -sin theta), which is the velocity field of a rotation about x, so omega = (dtheta, 0, 0). On the board, six alternating runs in one boot gave shape 0 peaks of 20, 40 and 40 and shape 4 peaks of 40, 40 and 40 -- both capped at 40, with zero FIFO overflows, zero sensor errors and read_pattern rc -2 throughout. Separately established on the host in the same entry: the existing float-phase loop already yields cycles that differ by at most 1 LSB of 4096 on 0.8 percent of samples, so cycle-to-cycle repeatability was never a plausible cause and no hardware test of it was run."
+
+- record_id: IMU-010
+  kind: IMU
+  topic_id: IMU
+  status: VERIFIED
+  verified_date: 2026-11-18
+  title: "A hand-trained gesture learns and reads back a 157-byte pattern, but the same gesture recorded and replayed through injection does not"
+  statement: "The two paths to the KLIO engine are not equivalent on this firmware. Live: `klio learn` with the accelerometer and gyroscope at 100 Hz reaches progress 100 percent, reports 12 frames from the engine, announces a learnt pattern, and `klio detect` then reports `read_pattern: ok (0), 157 bytes`. Injected: the same gesture, recorded at 100 Hz by `imu record` (six int16 per sample -- ax, ay, az, gx, gy, gz, the part's own integers) and replayed by `imu inject ... 5` one sample per block through the same step-by-step path, was run five times and gave peaks of 20, 60, 40, 40 and 20 percent with 3, 27, 26, 23 and 12 frames; `read_pattern` returned rc -2 with a 244-byte buffer on all five. Every block was accepted with error 0x00 in both paths, and no FIFO overflow or sensor error occurred in any replay."
+  consequence: "The waveform's content is not what separates the two paths, so further host-side waveform design is not supported by evidence. The differences that remain are enumerable: the sensor path uses the part's own hardware timestamping while injection supplies a delta the host reconstructs; the sensor path delivers samples as the part's sensors produce them while injection writes blocks the host composed; and the sensor path runs the engine against a free-running FIFO while injection drives it step-by-step. The step-by-step mode is the largest of the three and the only one not yet tested, and it is a single-variable change."
+  sources:
+    - "tinydesk-twatch ports/twatchultra/main/imu.c: `imu record` (on_accel and on_gyro sinks, gesture.bin writer) and shape 5 (replay path)"
+    - "tinydesk-twatch ports/twatchultra/main/klio.c: `klio learn` and `klio detect` (imu_stream_on at 100 Hz, on_klio, read_pattern)"
+    - "Bosch BHy2CLI flow, which injects in step-by-step mode (dmode s ... dmode n)"
+  verification: "Verified on hardware 2026-11-18 (core-log entry 78), both paths on the same image and the same board. The recording itself was validated off the chip rather than from the firmware's report: 3111 accelerometer and 3111 gyroscope samples for 3000 ticks, |a| = 0.97 g, all six axes swinging by thousands of counts, and the accelerometer and gyroscope mutually consistent -- the real gesture rotates gravity in the x-z plane with its rate on gy, which is a rotation about y, whereas the synthetic waveform rotated y-z (about x) while writing gy. The 60 percent peak is recorded as a single sample of a noisy distribution, not as an improvement: the same command produced 3 and 27 frames on different runs."
+
 ```
 
 ---
