@@ -1,3 +1,33 @@
+## 59 COMMIT Unreleased 2026-11-18T05:00:00-07:00
+
+#### Coming From:
+
+Unreleased 61a05d5
+
+#### Purpose:
+
+The operator's question, after entry 58 settled that KLIO and SWIM are the only two algorithms Bosch ships: "whats stopping us from making our own?" Root cause rather than another probe.
+
+#### Outcome:
+
+THE FUSER CORE IS AN ARC PROCESSOR AND A PUBLIC GNU TOOLCHAIN EXISTS FOR IT. Neither claim had to be guessed: `j_s [blink]` -- ARC's function-return instruction, encoding 0x7EE0 -- appears 2,558 times in a 104 KB firmware, against 2 occurrences in the same-sized random buffer. **1,279 times above chance**, spread 340 to 400 per 8 KiB through the main code region and sparse in the boot region, which is what compiled code looks like and chance does not. THE FIRST ANSWER GIVEN WAS WRONG AND IS RECORDED BECAUSE IT WAS STATED WITH FALSE CONFIDENCE: an earlier pass counted Thumb `push`/`bx` patterns and concluded "the Fuser core is an ARM Cortex-M". Tested properly against random data, the real firmware has FEWER `push` patterns than noise (162 against 410) and no Cortex-M vector table anywhere in the first 4 KiB. It is not ARM. The operator's challenge -- "arm cortex-M? its an actual CPU? i thought it was some wacky ai processor?" -- is what forced the check, and the check is the reason the real answer was found. THE TOOLCHAIN: `foss-for-synopsys-dwc-arc-processors/toolchain`, release arc-2026.09, asset `arc_gnu_2026.09_prebuilt_elf32_le_linux_install.tar.xz`, 425 MB -- a prebuilt ARC GNU toolchain for bare-metal 32-bit little-endian, which is the shape this core needs. ARC has been in upstream binutils and GCC for years, so this is not a vendor-gated download, and `arc-elf32-gcc` is the compiler. WHAT COINES DOES NOT HAVE, checked across all 5,743 files: no occurrence of the string "fuser", no `.fw` firmware image, and every linker script targets the BOARD's MCU (nRF52, nicla, hear3x) rather than the sensor's core. So the public tooling builds host-side examples, not sensor firmware. That is the difference between "there is no compiler" and "the compiler is not in the SDK" -- and it is the second one. WHY THIS MATTERS AND WHAT IT CHANGES: the firmware images are PLAINTEXT COMPILED PROGRAMS, not encrypted blobs and not fixed-function silicon. The evidence is in the binary -- `"Hello world!"`, `"Param %u len %u time %llu."`, `"%d. Testing printf buffering test %u."` are readable strings in Bosch's own shipping image. So KLIO and SWIM are not hardware engines; they are two programs built for the same core, injection works on the images that include an injection handler because that program has the handler compiled in, and the 25 pattern slots and the certainty float are RAM and arithmetic in software. The part already boots whatever firmware is uploaded -- demonstrated three times this session with three different Bosch images -- so there is no cryptographic barrier either. THE REMAINING WORK IS REAL AND SHOULD BE SIZED HONESTLY. Three unknowns stand between this and our own algorithm: the exact ARC variant (ARCv1 ARCompact against ARCv2 HS/EM), which sets `-mcpu` and cannot be settled from the bytes alone with confidence; the entry point and link address conventions, partly inferable because the FUMI wrapper and its checksum are already understood -- 12-byte header, magic 0x494D5546, payload length, first four bytes of the SHA-256 of the payload, all verified by rebuilding Bosch's own image byte-for-byte in fetch.sh; and the largest one, Bosch's application framework API -- how firmware on that core reads the physical sensors and publishes a virtual sensor to the host. That API is visible in the disassembly as call sites even though it is not documented publicly, so it is recoverable by reverse engineering rather than by invention. NOTHING REGRESSED AND ONE THING WAS RESTORED: a deliberately corrupted KLIO image (one byte flipped at payload offset 60000, wrapper checksum recomputed so only the payload differed) was flashed to test whether the part verifies payload and was left on the board when that command was interrupted; the good image was rewritten and the part boots to kernel 23.103 again. The corrupted-image test itself did not reach a conclusion and should be rerun if it matters.
+
+#### Next Steps:
+
+THE CONCRETE PATH, in order, and each step is independently useful: FIRST, download the ARC toolchain and disassemble `DataInject_SWIM.fw`. That settles the variant, finds the entry point, and -- the valuable part -- exposes every call site into Bosch's sensor and virtual-sensor APIs, which is the thing that currently cannot be written from documentation. SECOND, build a minimal firmware that publishes ONE custom virtual sensor and does nothing else, to prove the toolchain, the link addresses, the FUMI wrapper and the boot path all work end to end before any algorithm is written. THIRD, and only then, the algorithm itself -- and at that point the operator's actual design becomes buildable, because a custom image can have BOTH injection and an arbitrary algorithm in one program, which is the combination no published Bosch image has. THE HONEST RISK: this is reverse engineering with no documented interface, and the API recovery in step one is the expensive part. It should not be started casually, and the operator should decide whether days of disassembly are worth it against the alternatives -- the ESP32-S3 doing the arithmetic with 985 KB of free app slot, or a Bosch engagement. THE THING THAT MAKES IT WORTH SERIOUS CONSIDERATION is that the concept is now proven on all sides: the metric is graded and reproducible (entry 58), the part accepts arbitrary firmware, and the core is a commodity architecture with a public compiler. What has never existed is a program of our own. UNCHANGED AND STILL OPEN: no public KLIO+DataInject image, patterns do not survive a reboot, the simulator/feeder in `imu feed` reaches nothing on KLIO, `klio save`/`restore` are instruments and not a durable store, the guest stacks are internal DRAM, `update.url` is unset, and `.ai/core.md`'s Purpose line still calls this a port of Linux.
+
+#### Files Modified:
+
+None in this repository. No code was changed; the finding is from reading Bosch's published binaries and repositories.
+
+#### Status:
+
+- Build: N/A
+- Deployment: N/A
+- User Test: N/A (an architectural finding)
+
+---
+
 ## 58 COMMIT Unreleased 2026-11-18T03:15:00-07:00
 
 #### Coming From:
