@@ -287,6 +287,7 @@ Topic IDs are the `record_id` prefix. An entry reserves a name; it does not clai
 | How is the injected gesture waveform built, and what was wrong with it? | IMU | IMU-009 |
 | Can a gesture recorded from a hand be replayed through injection, and does it learn? | IMU | IMU-010 |
 | Why does `read_pattern` fail against a pattern that is loaded and matching? Does a pattern survive a reboot? | IMU | IMU-011 |
+| What configuration lets KLIO learn to 100 percent, and what breaks it? | IMU | IMU-012 |
 | Which ttyACM device is the watch, and which is the TinyTang? | TOL | TOL-005 |
 | Why is the console dead after an esptool read with --after no_reset? | TOL | TOL-006 |
 | How do I open a Terminal on the watch from a host, reliably? | TOL | TOL-007 |
@@ -467,6 +468,7 @@ IMU-008: "The part's timestamp tick is ~15.6 us (64130 ticks/second, MEASURED): 
 IMU-009: "The injected gesture rotates gravity in the y-z plane (ay=sin(theta), az=cos(theta)), so its angular velocity belongs on X: writing it into gy, as the waveform did from entry 73 to 76, makes every block assert a tilt about x and a spin about y at once -- a motion no wrist can produce"
 IMU-010: "A hand gesture recorded at 100 Hz and replayed through injection five times gave peaks 20/60/40/40/20 with 3-27 frames and read_pattern rc -2 every time, while the same gesture performed live learns and yields a 157-byte pattern -- so injection delivers data the engine reads but the input content is not what separates the two paths"
 IMU-011: "The LEARN slot that read_pattern reads and the recognition table write_pattern fills are separate: once a pattern is written and enabled the learn slot is consumed, so read_pattern returns -2 with driver status 3 (invalid pattern operation), and the recognition table is RAM the firmware upload wipes at every boot and any learning_reset"
+IMU-012: "KLIO reaches progress 100 and reports a learnt pattern with accel and gyro at 100 Hz and the orientation sensors OFF for the duration; orientation streams at 50 Hz into the same single FIFO and that sharing is what produced the `meta 12 fifo overflow` of entries 73 and 74, so a learning pass must own the FIFO"
 TOL-005: "The watch and the TinyTang both appear as ttyACM devices and swap numbers between reboots: the watch is 303a:1001 (Espressif USB JTAG/serial debug unit) and the TinyTang is ffff:5454 (TinyTang CDC), so identity must come from /dev/serial/by-id or udev, never from the ttyACM number"
 TOL-006: "esptool's --after no_reset leaves the ESP32-S3 in its ROM bootloader, so the board's console emits nothing and every later command reads stale state until a --after hard_reset chip_id or a power cycle"
 TOL-007: "The desktop Start menu remembers its last selection, so F10 then Enter is only deterministic after a reboot: the sequence that works is reboot, F10, Enter, and the window that appears must be verified to be `tdsh` before typing, or the keys land in whichever app was selected last"
@@ -2651,6 +2653,20 @@ TOL-007: "The desktop Start menu remembers its last selection, so F10 then Enter
     - "tinydesk-twatch ports/twatchultra/components/bhy2/include/bhy2_klio_defs.h: KLIO_DRIVER_ERROR_INVALID_PATTERN_OPERATION = 3, and the parameter ids KLIO_PARAM_RECOGNITION_MAX_PATTERNS = 8 and KLIO_PARAM_PATTERN_BLOB_SIZE = 7 (ids, not values -- the values this part reports are 25 slots and 157 bytes)"
     - "tinydesk-twatch ports/twatchultra/main/klio_store.c and klio.c: klio_store_format header and klio_after_boot()"
   verification: "Verified on hardware 2026-11-20 (core-log entry 79). The learn slot's consumption was observed directly: after `klio save 0` succeeded, `klio detect` printed `driver status: 3` and `read_pattern: FAILED (-2), 244 bytes` while the same pattern was demonstrably live. The restore path was then proven in both directions -- a learned gesture, saved, rebooted and restored automatically (`restored 1 of 1 pattern(s) after boot`), matched with `klio recognise` reporting pattern 0 and its count climbing to 14.1 over 115 frames; and after `klio forget 0` recognition refused with nothing loaded, and a further reboot logged no restore. The part reported `max patterns 25` and `pattern blob size 157` in `klio status` on this image."
+
+- record_id: IMU-012
+  kind: IMU
+  topic_id: IMU
+  status: VERIFIED
+  verified_date: 2026-11-20
+  title: "KLIO learns to 100 percent with accel and gyro at 100 Hz and orientation off; orientation sharing the FIFO is what overflows it"
+  statement: "A learning pass on this board reaches progress 100 and the engine reports a learnt pattern when the accelerometer and gyroscope are both configured at 100 Hz and the orientation sensors (DEVICE_ORI, DEVICE_ORI_WU, which the IMU window configures at 50 Hz to give its heading readout) are left OFF for the duration. The FIFO is emptied before the pass begins, the report watermark is set to 32 bytes, and the KLIO virtual sensor is subscribed BEFORE it is configured so the first frames are not missed. Under that configuration a hand-performed gesture reached 100 percent with no FIFO overflow and no sensor error. The orientation sensors are the difference: they stream at 50 Hz into the same one FIFO the injected and algorithm traffic uses, which is the mix that produced `meta 12 fifo overflow` in entries 73 and 74."
+  consequence: "Anything that drives a learning pass must take the FIFO for itself for the duration rather than sharing it with a heading readout. That includes the IMU window, which is why its sensor setup defers to a running pass instead of reconfiguring the accelerometer to 50 Hz and turning orientation back on -- doing so mid-pass would both change the rate the engine expects and refill the FIFO with a second stream. Orientation comes back when the pass ends."
+  sources:
+    - "tinydesk-twatch ports/twatchultra/main/klio.c: klio_learn_begin (quiesce, accel 100 Hz, gyro 100 Hz, wmark 32, subscribe, then configure KLIO at 50 Hz) and learn_keep_pattern"
+    - "tinydesk-twatch ports/twatchultra/main/imu.c: ops_start, which returns early while klio_learn_active(), and ori_enable"
+    - "tinydesk-twatch ports/twatchultra/components/bhy2/include/bhy2_defs.h: BHY2_SENSOR_ID_DEVICE_ORI and _WU, BHY2_SENSOR_ID_KLIO"
+  verification: "Verified on hardware 2026-11-20 (core-log entry 80). The operator pressed the IMU window's Learn button and performed the gesture; the bar filled and the window reported `learned and kept`, `klio stored` then reported slot 0 at 157 bytes, and after a reboot the pattern was restored automatically and matched over 88 frames from the engine. No FIFO overflow or sensor error appeared in that pass. The contrasting configuration -- orientation left streaming during algorithm work -- is the one entries 73 and 74 measured overflowing."
 
 ```
 
