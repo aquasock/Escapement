@@ -286,6 +286,7 @@ Topic IDs are the `record_id` prefix. An entry reserves a name; it does not clai
 | What unit is the IMU timestamp in, and how is it encoded? | IMU | IMU-008 |
 | How is the injected gesture waveform built, and what was wrong with it? | IMU | IMU-009 |
 | Can a gesture recorded from a hand be replayed through injection, and does it learn? | IMU | IMU-010 |
+| Why does `read_pattern` fail against a pattern that is loaded and matching? Does a pattern survive a reboot? | IMU | IMU-011 |
 | Which ttyACM device is the watch, and which is the TinyTang? | TOL | TOL-005 |
 | Why is the console dead after an esptool read with --after no_reset? | TOL | TOL-006 |
 | How do I open a Terminal on the watch from a host, reliably? | TOL | TOL-007 |
@@ -465,6 +466,7 @@ IMU-007: "With a quiet FIFO and zero errors, KLIO climbs 20/40/60/80 in about 5 
 IMU-008: "The part's timestamp tick is ~15.6 us (64130 ticks/second, MEASURED): a TS_LARGE_DELTA field is a DELTA that bhy2.c ADDS to a running 64-bit counter, not an absolute time, and the physical accelerometer at 50 Hz advances the parsed timestamp by exactly 1282-1283 ticks per 20 ms sample"
 IMU-009: "The injected gesture rotates gravity in the y-z plane (ay=sin(theta), az=cos(theta)), so its angular velocity belongs on X: writing it into gy, as the waveform did from entry 73 to 76, makes every block assert a tilt about x and a spin about y at once -- a motion no wrist can produce"
 IMU-010: "A hand gesture recorded at 100 Hz and replayed through injection five times gave peaks 20/60/40/40/20 with 3-27 frames and read_pattern rc -2 every time, while the same gesture performed live learns and yields a 157-byte pattern -- so injection delivers data the engine reads but the input content is not what separates the two paths"
+IMU-011: "The LEARN slot that read_pattern reads and the recognition table write_pattern fills are separate: once a pattern is written and enabled the learn slot is consumed, so read_pattern returns -2 with driver status 3 (invalid pattern operation), and the recognition table is RAM the firmware upload wipes at every boot and any learning_reset"
 TOL-005: "The watch and the TinyTang both appear as ttyACM devices and swap numbers between reboots: the watch is 303a:1001 (Espressif USB JTAG/serial debug unit) and the TinyTang is ffff:5454 (TinyTang CDC), so identity must come from /dev/serial/by-id or udev, never from the ttyACM number"
 TOL-006: "esptool's --after no_reset leaves the ESP32-S3 in its ROM bootloader, so the board's console emits nothing and every later command reads stale state until a --after hard_reset chip_id or a power cycle"
 TOL-007: "The desktop Start menu remembers its last selection, so F10 then Enter is only deterministic after a reboot: the sequence that works is reboot, F10, Enter, and the window that appears must be verified to be `tdsh` before typing, or the keys land in whichever app was selected last"
@@ -2635,6 +2637,20 @@ TOL-007: "The desktop Start menu remembers its last selection, so F10 then Enter
     - "tinydesk-twatch ports/twatchultra/main/klio.c: `klio learn` and `klio detect` (imu_stream_on at 100 Hz, on_klio, read_pattern)"
     - "Bosch BHy2CLI flow, which injects in step-by-step mode (dmode s ... dmode n)"
   verification: "Verified on hardware 2026-11-18 (core-log entry 78), both paths on the same image and the same board. The recording itself was validated off the chip rather than from the firmware's report: 3111 accelerometer and 3111 gyroscope samples for 3000 ticks, |a| = 0.97 g, all six axes swinging by thousands of counts, and the accelerometer and gyroscope mutually consistent -- the real gesture rotates gravity in the x-z plane with its rate on gy, which is a rotation about y, whereas the synthetic waveform rotated y-z (about x) while writing gy. The 60 percent peak is recorded as a single sample of a noisy distribution, not as an improvement: the same command produced 3 and 27 frames on different runs."
+
+- record_id: IMU-011
+  kind: IMU
+  topic_id: IMU
+  status: VERIFIED
+  verified_date: 2026-11-20
+  title: "The LEARN slot and the recognition table are separate, and a pattern survives only in the second"
+  statement: "A learnt pattern lives in a LEARN slot that `bhy2_klio_read_pattern()` reads, and bhy2_klio.h documents that id as \"only 0 supported now\". Once the blob has been written into the RECOGNITION table with `bhy2_klio_write_pattern()` and enabled with `bhy2_klio_set_pattern_states()`, the learn slot is consumed: a later `read_pattern(0)` returns -2 (`BHY2_E_INVALID_PARAM`) with a driver status of 3, which bhy2_klio_defs.h names `KLIO_DRIVER_ERROR_INVALID_PATTERN_OPERATION` and describes as trying to read a learnt pattern when no pattern has been learnt. The recognition table itself is in the part's RAM and is destroyed by a firmware reload, because the host uploads that firmware at every start (IMU-001); it is also destroyed by any `bhy2_klio_set_state()` call that sets `learning_reset`, which bhy2_klio.h states \"removes any patterns loaded for recognition\". The written pattern is 157 bytes on this firmware, and `KLIO_PARAM_RECOGNITION_MAX_PATTERNS` reports 25 usable slots."
+  consequence: "Two things follow, and both were measured rather than assumed. First, `read_pattern` CANNOT TEST a restored pattern, because a restored pattern never passes through the learn slot -- an instrument that begins with read_pattern reports \"no learnt pattern\" against a pattern that is loaded, enabled and matching, and `klio recognise` exists because of this. Second, persistence must keep the 157-byte blob outside the part and write it back after every firmware boot, which is what `klio_store.c` and `klio_after_boot()` do; and any future re-learn on this engine wipes the restored table, so a session that learns a new gesture must reload the store afterwards."
+  sources:
+    - "tinydesk-twatch ports/twatchultra/components/bhy2/include/bhy2_klio.h: read_pattern (\"only 0 supported now\"), write_pattern (written patterns are disabled until enabled), set_state (a reset removes patterns loaded for recognition)"
+    - "tinydesk-twatch ports/twatchultra/components/bhy2/include/bhy2_klio_defs.h: KLIO_DRIVER_ERROR_INVALID_PATTERN_OPERATION = 3, and the parameter ids KLIO_PARAM_RECOGNITION_MAX_PATTERNS = 8 and KLIO_PARAM_PATTERN_BLOB_SIZE = 7 (ids, not values -- the values this part reports are 25 slots and 157 bytes)"
+    - "tinydesk-twatch ports/twatchultra/main/klio_store.c and klio.c: klio_store_format header and klio_after_boot()"
+  verification: "Verified on hardware 2026-11-20 (core-log entry 79). The learn slot's consumption was observed directly: after `klio save 0` succeeded, `klio detect` printed `driver status: 3` and `read_pattern: FAILED (-2), 244 bytes` while the same pattern was demonstrably live. The restore path was then proven in both directions -- a learned gesture, saved, rebooted and restored automatically (`restored 1 of 1 pattern(s) after boot`), matched with `klio recognise` reporting pattern 0 and its count climbing to 14.1 over 115 frames; and after `klio forget 0` recognition refused with nothing loaded, and a further reboot logged no restore. The part reported `max patterns 25` and `pattern blob size 157` in `klio status` on this image."
 
 ```
 
