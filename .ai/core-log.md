@@ -1,3 +1,33 @@
+## 85 COMMIT Unreleased 2026-11-20T19:54:12-07:00
+
+#### Coming From:
+
+Unreleased c06c86b
+
+#### Purpose:
+
+Move the Game Boy port's Start and Select one slot down the right margin column, leaving the top slot empty, at the operator's direction.
+
+#### Outcome:
+
+THE RIGHT COLUMN NOW READS EMPTY, SELECT, START FROM THE TOP, in the fork at 40611cb, and the operator passed it on the glass. THE CHANGE TOUCHES THREE PLACES THAT HAVE TO AGREE, and two of them answer different questions rather than repeating one: `pad_from_frame()` gives slot 1 GB_PAD_SELECT and slot 2 GB_PAD_START with slot 0 mapped to nothing, `gb_app_touch()` reports haptic consumption for slots 1 and 2 only, and the label block sets a blank, "Select" and "Start". THE PREDICATE AND THE MAPPING ARE SEPARATE CODE AND MUST STAY CONSISTENT, which is worth stating because the failure is silent in both directions: a slot counted live but given no bit buzzes without acting, and a slot given a bit but not counted live acts without being felt. Both now answer for slots 1 and 2 and nothing else. ALL THREE SLOTS KEEP THEIR BOXES, so the column still reads as the same three-button stack the NES and Pokemon Mini carry, and the vacant top box has no duty -- the pattern this file already accepted for the vacant slot before it moved, on the recorded reasoning that a box which does nothing is honest where blank glass that fires a button is a fault the operator has reported twice. A STALE BLOCK FURTHER DOWN THE SAME FUNCTION WOULD HAVE UNDONE THE CHANGE and was found while making it: it still cleared slot 2 to a single space, which would have wiped the new "Start" label the instant it was set, leaving a labelled button's box with no word in it and the mapping still firing. It was removed, and the three slots are now set together so that a label and its duty cannot live in two separate places in that function again -- which is exactly how the swapped chrome index in paint_column() went unnoticed the first time. THE COST OF THE CHANGE ON THE MARGINS IS NIL: the three slots are drawn from one call and the same column geometry, so nothing moved on the glass except the words and which slots are live. VERIFICATION WAS THE OPERATOR'S EYES, WHICH IS THE ONLY VALID INSTRUMENT HERE, because the panel is write-only and a drawn box is not evidence that anything was drawn -- the file's own history has three display defects that reported success while drawing nothing. Host testing is 47 of 47. The app image is unchanged at 3,094,528 bytes, which predicts the module link pair did not move, and that prediction was CHECKED rather than assumed because this project has relinked on several cycles where the image grew by tens of bytes: `music` reports 192,000 frames with 0 errors and 0 short writes, so the decoder in the modules partition is still being called through a table linked against this build. THE CORE-SYNTAX AUDIT REQUIRED BY core.md WAS PERFORMED BEFORE COMMIT: core.md and core-syntax.md were re-read, the complete .ai/ diff inspected, core.md is unchanged, entry 85 is checked against the template for header order, the six sections in order, prose-only Purpose, Outcome and Next Steps, eligible Files Modified and the three Status lines, the log stands at 85 entries against a ring of 100 so no archive is due, and the known conformance debt in entries 66 through 73 stands as entry 74 recorded it. No reference record was added: this is a layout decision about this project's own code, and the external fact it rests on -- that the panel is write-only and that blank glass firing a button has been reported twice -- is already carried by LCD records and by entries 41 and 44.
+
+#### Next Steps:
+
+NOTHING IS OWED ON THIS CHANGE. The larger outstanding question on this port is still the audio drop distribution: 6.3 drops a second pass by ear, but a cumulative counter cannot say whether they arrive evenly or in bursts, and a per-second histogram written to a file is the instrument that would answer it -- the gap has now been recorded in two consecutive entries and is the most useful next piece of work on the emulator. The startup burst is separate and larger, around 5,120 drops before steady state during cartridge load, and opening the audio stream after the ROM loads rather than before is its likely shape. UNCHANGED AND STILL OPEN: the two margin columns are unassigned in the other emulator ports; Pause, Reset and Save are labelled on all three emulators and send nothing; `klio save` still emits a `meta 12 fifo overflow`; gesture mapping runs only while the IMU window is open; the injection line stays parked at entry 78; the DMG compatibility path is unproven because no DMG cartridge has been launched; and the two unidentified firmware header fields at 0x2c and 0x44 still gate custom firmware.
+
+#### Files Modified:
+
+None in this repository; the fork carries the change at 40611cb (`ports/twatchultra/main/gb.c`).
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: PASS
+
+---
+
 ## 84 COMMIT Unreleased 2026-11-20T19:30:28-07:00
 
 #### Coming From:
