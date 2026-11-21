@@ -1,4 +1,4 @@
-# Handoff — Escapement / TinyDesk on T-Watch Ultra, 2026-11-20T22:48
+# Handoff — Escapement / TinyDesk on T-Watch Ultra, 2026-11-20T23:00
 
 Orientation, not authority. **Verify before acting on it.** The files, the flash
 and the board are the fact; this file is a claim.
@@ -267,24 +267,98 @@ floor: 1.72x realtime with rendering, 58.9 fps of 59.73.
 a 16 KB buffer with a count of 4 (a 32 KB walk). Nothing calls it, but a future
 savestate feature inherits it — fix when next touching the core.
 
+## NEXT CYCLE — DESIGNED, NOT BUILT: Pusher A closes the emulator
+
+**The operator's request:** a single tap of the watch's physical Pusher A closes
+the running emulator and returns to the desktop.
+
+**This was researched and planned but NO CODE WAS WRITTEN.** The tree is clean at
+`1664a04` and entry 88 is the last entry. Anyone picking this up starts from the
+plan below, not from a partial change.
+
+### What already exists
+
+`ports/twatchultra/main/pwrkey.c` already owns Pusher A. It is **not a GPIO** —
+it reaches the SoC as the AXP2101's PEK input, reported on PMU IRQ GPIO 7, with
+the internal pull-up and write-1-to-clear status discipline that BRD-002 says is
+mandatory. On a short press (`IRQ1_PEK_SHORT`, 0x08, at line 158) it does:
+
+```c
+s_presses++;
+send_key();        // line 90: s_input(KEY_ENTER, 1) — always "\r"
+haptic_tap();
+```
+
+`pwrkey_init(pwrkey_input_fn)` is the only entry point; `pwrkey.pin = -1`
+disables it deliberately and returns true.
+
+### The plan
+
+1. **`pwrkey.h` — add an app-key hook**, modelled on `touch.h`'s
+   `touch_set_app_touch()`, which documents the exact reason it is set once at
+   init rather than per app: *"a registration that is torn down with the app has
+   a window where the driver holds a pointer to something that has freed
+   itself."*
+
+   ```c
+   /* Called on a short press before the key is injected. True = consumed. */
+   void pwrkey_set_app_key(bool (*fn)(void *user), void *user);
+   ```
+
+2. **`pwrkey.c` — consult it first**, in the `IRQ1_PEK_SHORT` branch before
+   `send_key()`; if consumed, still `haptic_tap()` but do not inject.
+
+3. **`gb.c` — register at init**, alongside `touch_add_app_touch(gb_app_touch)`
+   at line 1759:
+
+   ```c
+   static bool gb_app_key(void *user) {
+       if (!gb_running()) return false;   /* not ours: Enter passes through */
+       gb_stop();                          /* saves SRAM, releases the screen */
+       return true;
+   }
+   ```
+
+4. **Scope: GBC only.** NES and Pokemon Mini are two lines each but have their
+   own save paths and behaviour the operator has not tested. Extend after GBC is
+   confirmed on the glass.
+
+### Two things the next agent must check
+
+**Threading.** The hook runs on `pwrkey_task` (core 0, priority 3) and
+`gb_stop()` waits for the guest and blitter to exit — up to ~100 ms. `gb stop`
+from the shell makes the same call from a task, so this is not new, but after
+entry 86's blit-priority hang it deserves a measurement rather than an
+assumption. Measure tap-to-desktop latency and record it.
+
+**A saved game.** `gb_stop()` saves SRAM, so an accidental tap is annoying rather
+than destructive. Verify that explicitly — it is the difference between a
+feature and a way to lose a session.
+
+### Also open from entry 88
+
+The savestate block in `gnuboy.c` passes a 16 KB buffer with a count of 4 (a
+32 KB walk). Nothing calls it, so no user can hit it, but a future savestate
+feature inherits it. Fix when the core is next touched.
+
 ## Next steps, in order
 
-1. **Audio drop distribution.** 6.3/s now, passed by ear, but a cumulative
-   counter cannot say whether those arrive evenly or in bursts — the gap that
-   has now been recorded twice. A per-second histogram to a file (the way
-   `imu inject` writes traces) is the instrument to build. Startup is separate
-   and larger: ~5,120 drops before steady state, during ROM load; opening the
-   audio stream after the cartridge loads is the likely fix.
-2. **Decide on always-on detection** (above) — it is the difference between a
-   demo and a feature.
-3. **`klio save` overflow is now more visible.** The save happens automatically
-   when a learn completes, so "learned and kept" can be shown for a pattern read
-   during a `meta 12 fifo overflow`. It survived every observation, but one
-   instrumented run counting overflow events against successful reads would
-   settle whether that is luck.
-4. **The pass has a silent 60 s ceiling** with no countdown.
-5. **More than one gesture.** The store and picker already handle a collection
-   (25 slots, name + switch each); the window just has to learn to choose a slot.
+1. **Pusher A closes the emulator** — planned above, no code written. GBC first.
+2. **The startup audio burst.** ~5,100 samples dropped during cartridge load
+   before steady state, which is larger than anything left in steady state. The
+   shape of the fix is to open the audio stream *after* the ROM loads rather than
+   before — a change to the port, not the core. *(The per-second histogram this
+   list used to ask for was built in entries 86-87 and lives at
+   `/sd/diag/gbhist.txt`; steady-state drops are now 0.014%.)*
+3. **Decide on always-on gesture detection** (above) — the difference between a
+   demo and a feature, and it needs an upstream change.
+4. **`klio save` overflow.** The save is automatic when a learn completes, so
+   "learned and kept" can be shown for a pattern read during a
+   `meta 12 fifo overflow`. It survived every observation, but one instrumented
+   run counting overflow events against successful reads would settle it.
+5. **The learn pass has a silent 60 s ceiling** with no countdown.
+6. **More than one gesture.** The store and picker already handle a collection
+   (25 slots, name + switch each); the window just has to choose a slot.
 
 ## Open / unsolved
 
