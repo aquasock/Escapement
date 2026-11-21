@@ -1,12 +1,13 @@
-# Handoff — Escapement / TinyDesk on T-Watch Ultra, 2026-11-20T18:45
+# Handoff — Escapement / TinyDesk on T-Watch Ultra, 2026-11-20T19:05
 
 Orientation, not authority. **Verify before acting on it.** The files, the flash
 and the board are the fact; this file is a claim.
 
 ## One line
 
-**The GBC emulator runs clean** — Zelda boots, saves restore, audio plays — after
-entry 82 fixed one DMA defect that had been showing up as two different faults.
+**The GBC emulator runs clean** — Zelda boots, saves restore, audio is clean by
+ear — after entry 82 fixed one DMA defect that had been showing up as two
+different faults, and entry 83 widened the ring that fix had over-shrunk.
 **A learnt gesture opens an app, and the wearer switches detection on or off —
 both survive a reboot.** The AI-engine/injection line is **parked by operator
 decision** — do not resume it without being asked.
@@ -29,11 +30,11 @@ from the mirror while an emulator runs; ask the operator.
 
 ## Where things live
 
-- Project-control repo: `/run/media/vash/GIT/Escapement`, `main`, at `32e6e44`
-  (core-log **entry 82**; reference **IMU-011**, **IMU-012**, **AUD-003**).
+- Project-control repo: `/run/media/vash/GIT/Escapement`, `main`, at `c9ded2c`
+  (core-log **entry 83**; reference **IMU-011**, **IMU-012**, **AUD-003**).
   Pushed, clean.
 - Active code is the fork: `/run/media/vash/GIT/tinydesk-twatch`, branch
-  `t-watch-ultra`, at `7be9f9a`, pushed to `fork`, clean. Push to `fork`
+  `t-watch-ultra`, at `a697f9b`, pushed to `fork`, clean. Push to `fork`
   (`aquasock/tinydesk`) only — **never** `origin` (upstream, read-only).
 - `.ai/core.md` is RESTRICTED. Do not edit without an explicit instruction.
 
@@ -150,6 +151,12 @@ bytes and allocates each separately. This board had **12,251 free with a 3,968
 largest block**, so it could not allocate at all. Now 256 frames a descriptor
 (1,024 bytes each). Ring is 21 ms at 48 kHz instead of 85 ms.
 
+**Ring depth (entry 83).** Four descriptors of 256 frames left the ring at
+1,024 frames; a GB frame is 731.5 samples, 71% of it, so it clipped. Eight
+descriptors (8,192 bytes, 2,048-frame ring, 47 ms) took drops from 272/s to
+23.6/s. `6 x 512` is 12,288 bytes against 12,251 free — measure `mem heap`
+before going there.
+
 **The display's SPI bus draws on the same pool.** That is why the same defect
 appeared as a frozen picture with sound on one run and a moving picture in
 silence on another. If either symptom returns, run `mem heap` and read the DMA
@@ -184,17 +191,28 @@ A background task also costs power permanently: the part streams at 100 Hz for
 the watch's whole uptime instead of only while a window is open. That trade
 should be made deliberately, not as a side effect.
 
+## Latest backup
+
+`~/twatch-backup/working-2026-11-20-1857-gbc-dma.bin`, 16,777,216 bytes, sha256
+`8bb3bc4f615c714a2246b70ecb23ef37f7675cc729bd0acc96810930b20d4ab2`. Verified
+against the chip (digest matched) and `ota_0` inside it is byte-identical to the
+build. Holds both audio DMA changes.
+
 ## Next steps, in order
 
-1. **Decide on always-on detection** (above) — it is the difference between a
+1. **Audio drop variance.** 23.6/s steady but the three windows ran 8.8/34.6/24.3
+   with no explanation. A per-second histogram would say whether they cluster;
+   startup is separate and worse (5,680 drops in the first 14 s, during ROM
+   load — opening the stream after the cartridge loads is the likely fix).
+2. **Decide on always-on detection** (above) — it is the difference between a
    demo and a feature.
-2. **`klio save` overflow is now more visible.** The save happens automatically
+3. **`klio save` overflow is now more visible.** The save happens automatically
    when a learn completes, so "learned and kept" can be shown for a pattern read
    during a `meta 12 fifo overflow`. It survived every observation, but one
    instrumented run counting overflow events against successful reads would
    settle whether that is luck.
-3. **The pass has a silent 60 s ceiling** with no countdown.
-4. **More than one gesture.** The store and picker already handle a collection
+4. **The pass has a silent 60 s ceiling** with no countdown.
+5. **More than one gesture.** The store and picker already handle a collection
    (25 slots, name + switch each); the window just has to learn to choose a slot.
 
 ## Open / unsolved
