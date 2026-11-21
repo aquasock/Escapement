@@ -1,4 +1,4 @@
-# Handoff — Escapement / TinyDesk on T-Watch Ultra, 2026-11-20T19:32
+# Handoff — Escapement / TinyDesk on T-Watch Ultra, 2026-11-20T19:56
 
 Orientation, not authority. **Verify before acting on it.** The files, the flash
 and the board are the fact; this file is a claim.
@@ -30,11 +30,11 @@ from the mirror while an emulator runs; ask the operator.
 
 ## Where things live
 
-- Project-control repo: `/run/media/vash/GIT/Escapement`, `main`, at `e7c30be`
-  (core-log **entry 84**; reference **IMU-011**, **IMU-012**, **AUD-003**).
+- Project-control repo: `/run/media/vash/GIT/Escapement`, `main`, at `eaef672`
+  (core-log **entry 85**; reference **IMU-011**, **IMU-012**, **AUD-003**).
   Pushed, clean.
 - Active code is the fork: `/run/media/vash/GIT/tinydesk-twatch`, branch
-  `t-watch-ultra`, at `b377dcb`, pushed to `fork`, clean. Push to `fork`
+  `t-watch-ultra`, at `40611cb`, pushed to `fork`, clean. Push to `fork`
   (`aquasock/tinydesk`) only — **never** `origin` (upstream, read-only).
 - `.ai/core.md` is RESTRICTED. Do not edit without an explicit instruction.
 
@@ -140,6 +140,13 @@ matching is not sufficient. Symptom of a stale blob: `music` prints "playing"
 and plays nothing.
 
 ## The GBC emulator (entry 82 — working)
+
+**Margin columns.** Right column, top to bottom: **empty, Select, Start** (entries
+85). Left: Pause, Reset, Save — labelled, sending nothing. Only slots 1 and 2 of
+the right column are live, and there are **three** places that must agree: the pad
+mapping in `pad_from_frame()`, the haptic liveness predicate in `gb_app_touch()`,
+and the labels in the margin setup. Moving a slot means moving all three; a label
+that lived in two places once is how a swapped chrome index went unnoticed.
 
 `gb start` boots Link's Awakening DX, save restores, audio plays. Verified on
 hardware with the operator confirming picture and sound.
