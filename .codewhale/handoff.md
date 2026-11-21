@@ -1,25 +1,39 @@
-# Handoff — Escapement / TinyDesk on T-Watch Ultra, 2026-11-20T16:05
+# Handoff — Escapement / TinyDesk on T-Watch Ultra, 2026-11-20T18:45
 
 Orientation, not authority. **Verify before acting on it.** The files, the flash
 and the board are the fact; this file is a claim.
 
 ## One line
 
-**A learnt gesture now opens an app, and the wearer switches detection on or
-off — both survive a reboot.** Press Learn, gesture, pick an app, tick `detect`,
-gesture again and the app opens. The AI-engine/injection line is **parked by
-operator decision** — do not resume it without being asked.
+**The GBC emulator runs clean** — Zelda boots, saves restore, audio plays — after
+entry 82 fixed one DMA defect that had been showing up as two different faults.
+**A learnt gesture opens an app, and the wearer switches detection on or off —
+both survive a reboot.** The AI-engine/injection line is **parked by operator
+decision** — do not resume it without being asked.
 
 **Detection only runs while the IMU window is open.** That is a stated limit the
 operator accepted, not a bug: `src/wm.c` has no lock, so a background task
 launching an app would be a data race. See "Always-on detection" below.
 
+## WORKING WITH THE OPERATOR ON THE WATCH — read this first
+
+**When the operator says they are testing, send no commands.** Not status, not
+`ls`, not a read "to check". Reading the screen did not cause the freezes, but
+running commands did take the board away from them mid-session, and entry 82
+records that cost. Boot what they ask for, then stop.
+
+**The USB mirror goes stale once a picture owns the panel** (DSP-003). Two
+`gb status` reads returned identical counters and reported `emu=63755us` against
+a 6127us baseline — the numbers were meaningless. Do not quote frame rates read
+from the mirror while an emulator runs; ask the operator.
+
 ## Where things live
 
-- Project-control repo: `/run/media/vash/GIT/Escapement`, `main`, at `161b1b6`
-  (core-log **entry 81**; reference **IMU-011** and **IMU-012**). Pushed, clean.
+- Project-control repo: `/run/media/vash/GIT/Escapement`, `main`, at `32e6e44`
+  (core-log **entry 82**; reference **IMU-011**, **IMU-012**, **AUD-003**).
+  Pushed, clean.
 - Active code is the fork: `/run/media/vash/GIT/tinydesk-twatch`, branch
-  `t-watch-ultra`, at `badaff7`, pushed to `fork`, clean. Push to `fork`
+  `t-watch-ultra`, at `7be9f9a`, pushed to `fork`, clean. Push to `fork`
   (`aquasock/tinydesk`) only — **never** `origin` (upstream, read-only).
 - `.ai/core.md` is RESTRICTED. Do not edit without an explicit instruction.
 
@@ -123,6 +137,28 @@ The mmap pair (`inst=0x42ae0000`, `data=0x3cce0000`) has been stable, but the
 `0x3c280658`. Check the `host=` field that `make flac` prints. Inst/data
 matching is not sufficient. Symptom of a stale blob: `music` prints "playing"
 and plays nothing.
+
+## The GBC emulator (entry 82 — working)
+
+`gb start` boots Link's Awakening DX, save restores, audio plays. Verified on
+hardware with the operator confirming picture and sound.
+
+**The one thing that can break it, and did twice under two different names:**
+the I2S DMA allocation. Four descriptors × 1024 frames stereo = 16,368 bytes
+from `MALLOC_CAP_INTERNAL|MALLOC_CAP_DMA`; the driver caps a descriptor at 4092
+bytes and allocates each separately. This board had **12,251 free with a 3,968
+largest block**, so it could not allocate at all. Now 256 frames a descriptor
+(1,024 bytes each). Ring is 21 ms at 48 kHz instead of 85 ms.
+
+**The display's SPI bus draws on the same pool.** That is why the same defect
+appeared as a frozen picture with sound on one run and a moving picture in
+silence on another. If either symptom returns, run `mem heap` and read the DMA
+line before suspecting anything else. See AUD-003.
+
+Saving: the writer task is on a **PSRAM** stack now, because it writes the SD
+card over SDSPI and never touches internal flash. If it ever starts touching
+internal flash, it must go back to internal DRAM — that condition is written at
+the allocation.
 
 ## Always-on detection (the obvious next feature)
 
