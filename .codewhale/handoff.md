@@ -1,4 +1,4 @@
-# Handoff — Escapement / TinyDesk on T-Watch Ultra, 2026-11-20T19:05
+# Handoff — Escapement / TinyDesk on T-Watch Ultra, 2026-11-20T19:32
 
 Orientation, not authority. **Verify before acting on it.** The files, the flash
 and the board are the fact; this file is a claim.
@@ -30,11 +30,11 @@ from the mirror while an emulator runs; ask the operator.
 
 ## Where things live
 
-- Project-control repo: `/run/media/vash/GIT/Escapement`, `main`, at `c9ded2c`
-  (core-log **entry 83**; reference **IMU-011**, **IMU-012**, **AUD-003**).
+- Project-control repo: `/run/media/vash/GIT/Escapement`, `main`, at `e7c30be`
+  (core-log **entry 84**; reference **IMU-011**, **IMU-012**, **AUD-003**).
   Pushed, clean.
 - Active code is the fork: `/run/media/vash/GIT/tinydesk-twatch`, branch
-  `t-watch-ultra`, at `a697f9b`, pushed to `fork`, clean. Push to `fork`
+  `t-watch-ultra`, at `b377dcb`, pushed to `fork`, clean. Push to `fork`
   (`aquasock/tinydesk`) only — **never** `origin` (upstream, read-only).
 - `.ai/core.md` is RESTRICTED. Do not edit without an explicit instruction.
 
@@ -151,11 +151,24 @@ bytes and allocates each separately. This board had **12,251 free with a 3,968
 largest block**, so it could not allocate at all. Now 256 frames a descriptor
 (1,024 bytes each). Ring is 21 ms at 48 kHz instead of 85 ms.
 
-**Ring depth (entry 83).** Four descriptors of 256 frames left the ring at
-1,024 frames; a GB frame is 731.5 samples, 71% of it, so it clipped. Eight
-descriptors (8,192 bytes, 2,048-frame ring, 47 ms) took drops from 272/s to
-23.6/s. `6 x 512` is 12,288 bytes against 12,251 free — measure `mem heap`
-before going there.
+**AUDIO RING: THREE TERMS, NOT TWO (entries 82-84).** `dma_desc_num` and
+`dma_frame_num` are a memory budget shared with the display's SPI bus, and
+three things matter:
+
+  buffer size   a whole frame (2,926 B) must fit in one descriptor
+  ring depth    total bytes, against jitter
+  queue depth   `desc_num - 1` — the driver's own completion queue
+
+```
+4x1023  16,368B  4 descs  93.7ms  never allocated (4092 > 3968 largest block)
+4x256    4,096B  4 descs  23.4ms  0.623% dropped
+8x256    8,192B  8 descs  46.9ms  0.054% dropped
+2x900    7,200B  2 descs  41.2ms  0.581% dropped  <- queue starved to 1 slot
+8x320   10,240B  8 descs  46.9ms  0.014% dropped  <- current
+```
+
+`8 x 400` is 12,800 B and does NOT fit (12,251 free). Measure `mem heap`
+before any change here — this file was wrong once by modelling one term.
 
 **The display's SPI bus draws on the same pool.** That is why the same defect
 appeared as a frozen picture with sound on one run and a moving picture in
@@ -200,10 +213,12 @@ build. Holds both audio DMA changes.
 
 ## Next steps, in order
 
-1. **Audio drop variance.** 23.6/s steady but the three windows ran 8.8/34.6/24.3
-   with no explanation. A per-second histogram would say whether they cluster;
-   startup is separate and worse (5,680 drops in the first 14 s, during ROM
-   load — opening the stream after the cartridge loads is the likely fix).
+1. **Audio drop distribution.** 6.3/s now, passed by ear, but a cumulative
+   counter cannot say whether those arrive evenly or in bursts — the gap that
+   has now been recorded twice. A per-second histogram to a file (the way
+   `imu inject` writes traces) is the instrument to build. Startup is separate
+   and larger: ~5,120 drops before steady state, during ROM load; opening the
+   audio stream after the cartridge loads is the likely fix.
 2. **Decide on always-on detection** (above) — it is the difference between a
    demo and a feature.
 3. **`klio save` overflow is now more visible.** The save happens automatically
