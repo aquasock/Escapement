@@ -1,3 +1,33 @@
+## 83 COMMIT Unreleased 2026-11-20T19:02:27-07:00
+
+#### Coming From:
+
+Unreleased 43466fb
+
+#### Purpose:
+
+Restore enough audio ring depth that the Game Boy emulator stops dropping samples, after entry 82's DMA fix cured the silence by shrinking the ring past the point where it could keep up.
+
+#### Outcome:
+
+DROPS FELL BY TWELVE TIMES AND THE OPERATOR PASSED IT BY EAR, AND THE CHANGE IS ONE NUMBER. Entry 82 fixed a genuine allocation failure by cutting the I2S ring from 4,092 frames to 1,024, and that left it too shallow for anything that produces audio a video frame at a time: a Game Boy frame is 731.5 samples, which is 71 PERCENT OF THE RING, so the ring drained almost to empty between writes and any jitter in the frame loop clipped it. THE OPERATOR REPORTED HEARING IT AND WAS RIGHT -- measured over 76 seconds on the board at a correct 59.6 fps, 4,533 frames produced 20,670 dropped samples, 272 a second, 0.62 percent of the audio, against 0.15 percent measured on the same build before the ring was reduced. The rate tracked the shallowness rather than anything else that changed, which is why the diagnosis is the ring depth and not merely the correlation. Eight descriptors of 256 frames doubles the ring to 2,048 frames, which is 47 ms at the emulator's 43,691 Hz and about 2.8 video frames of slack instead of 1.4, and every allocation stays at 1,024 bytes, comfortably inside the 3,968-byte largest free block that forced the reduction in the first place. MEASURED THE SAME WAY AFTERWARDS, over 211 seconds in three windows: 4,990 drops, 23.6 a second, 0.054 percent, with the frame rate unchanged at 59.4 to 59.7 fps. The budget now lives in the source as a three-line table so the next person to touch it sees all three states at once: 4 x 1023 is 16,368 bytes and 93.7 ms and was never allocated; 4 x 256 is 4,096 bytes and 23.4 ms and dropped 0.62 percent; 8 x 256 is 8,192 bytes and 46.9 ms and drops 0.054 percent. IT IS NOT ZERO AND THE VARIANCE IS RECORDED RATHER THAN SMOOTHED, because a cumulative counter cannot distinguish an even trickle from a burst and the difference decides whether it is audible: the three measurement windows ran at 8.8, 34.6 and 24.3 drops a second with no explanation found, and startup is far worse than steady state at 5,680 drops in the first fourteen seconds during ROM load. The honest position is that 0.054 percent spread evenly is inaudible and the same total arriving in bursts might not be, and that the operator's ears settled it. THE NEXT STEP IS WRITTEN DOWN WITH ITS LIMIT: six buffers of 512 frames would be 12,288 bytes and 68 ms, against the 12,251 bytes the DMA pool had free, which is close enough to the allocation cliff that caused entry 82's failure that it wants a `mem heap` measurement of that pool before anyone tries it. A REBOOT AND A FULL VERIFIED BACKUP FOLLOWED, because the operator asked for one and because the previous verified image predates both DMA changes: the board was rebooted with `--before default_reset --after hard_reset`, came back to the desktop, and `scripts/watch-backup.sh` then read 16,777,216 bytes at 582.9 kbit/s in 230.3 seconds, verified it against the chip with the board held in the bootloader and nothing allowed to boot between the read and the compare, reported `verify OK (digest matched)`, wrote `working-2026-11-20-1857-gbc-dma.bin` with sha256 `8bb3bc4f615c714a2246b70ecb23ef37f7675cc729bd0acc96810930b20d4ab2`, confirmed the board came back, and the sidecar hash was re-checked with `sha256sum -c` rather than trusted from its own creation. THE IMAGE WAS CONFIRMED TO HOLD THIS BUILD FROM THE IMAGE ITSELF: the 3,094,480 bytes at offset 0x20000 hash identical to `build/tinydesk.bin`, so the archive is the build with both DMA changes in it and not a pre-change image. THE CORE-SYNTAX AUDIT REQUIRED BY core.md WAS PERFORMED BEFORE COMMIT: core.md and core-syntax.md were re-read, the complete .ai/ diff inspected, core.md is unchanged, entry 83 is checked against the template for header order, the six sections in order, prose-only Purpose, Outcome and Next Steps, eligible Files Modified and the three Status lines, the log stands at 83 entries against a ring of 100 so no archive is due, and the known conformance debt in entries 66 through 73 stands as entry 74 recorded it. No reference record was added: AUD-003 already carries the 4092-byte descriptor ceiling and the shared pool, and this cycle changed a count rather than establishing a new external fact.
+
+#### Next Steps:
+
+THE DROP RATE IS NOW LOW ENOUGH TO PASS BY EAR AND NOT LOW ENOUGH TO EXPLAIN, and the thing that would close that gap is an instrument rather than a change: the counter is cumulative, so it cannot say whether 23.6 drops a second arrive evenly or in bursts. A per-second histogram for ten seconds of play, dumped to a file the way `imu inject` does its traces, would answer it without another guess -- and if the drops turn out to be clustered on particular frames, the thing to look at is what those frames have in common rather than the ring depth again. THE STARTUP BURST IS A SEPARATE AND LARGER PROBLEM, 5,680 drops in the first fourteen seconds, and it happens while the ROM loads and the first frames settle. It is inaudible under the game's own opening but it is 400 drops a second, far above steady state, and it is the first thing a wearer hears. If it is worth fixing, the shape of the fix is to open the audio stream after the cartridge is loaded rather than before, so the guest's first frames are not competing with the load. THE WIDER BUDGET IS RECORDED IN THE SOURCE ITSELF, so that the next person to widen it sees the cliff: 6 x 512 is 12,288 bytes against 12,251 free, so any further widening needs `mem heap`'s DMA line taken with the emulator, the music player and Bluetooth all up, because an allocation that fails is exactly the failure entry 82 spent a cycle on. UNCHANGED AND STILL OPEN: the two margin columns are unassigned in the emulator ports; Pause, Reset and Save are labelled on all three emulators and send nothing; `klio save` still emits a `meta 12 fifo overflow`; gesture mapping runs only while the IMU window is open; the injection line stays parked at entry 78; the DMG compatibility path is unproven; and the two unidentified firmware header fields at 0x2c and 0x44 still gate custom firmware.
+
+#### Files Modified:
+
+None in this repository; the fork carries the change at a697f9b (`ports/twatchultra/main/sound.c`).
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: PASS
+
+---
+
 ## 82 COMMIT Unreleased 2026-11-20T18:38:33-07:00
 
 #### Coming From:
