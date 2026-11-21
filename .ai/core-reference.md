@@ -178,6 +178,8 @@ Topic IDs are the `record_id` prefix. An entry reserves a name; it does not clai
 | How much does raising the SPI clock buy? | LCD | LCD-011 |
 | Can the panel transfer use DMA to go faster? | LCD | LCD-012 |
 | What actually limits a framebuffer write on this board? | LCD | LCD-013 |
+| Can a panel writer bound its wait for the SPI bus? | LCD | LCD-014 |
+| Why does a bounded acquire fail with every push refused? | LCD | LCD-014 |
 | Why is the emulator slow when the ROM computes? | EMU | EMU-003 |
 | How fast is PSRAM access on this watch? | EMU | EMU-003 |
 | Why not use the other core? | EMU | EMU-004 |
@@ -324,6 +326,7 @@ LCD-011: "40 MHz is clean on the glass and is the driver's compiled-in default, 
 
 LCD-012: "SPI DMA is not usable here today: the GDMA out-link descriptor address field is 20 bits, so a descriptor must sit in internal DRAM below 1 MB, and Linux owns none of it -- the obstacle is allocation, not addressability (SOC-004)"
 LCD-013: "A full 320x400 frame costs 93-95 ms at 40 MHz and 108.8 ms at 20 MHz through fbbench, so halving the clock costs only 15 percent and the transfer is neither wire bound nor MMIO bound: roughly 20 us of each 64-byte transaction is fixed engine turnaround"
+LCD-014: "spi_device_acquire_bus() in ESP-IDF 5.3.1 requires portMAX_DELAY: a finite wait tripped SPI_CHECK and returned ESP_ERR_INVALID_ARG without touching the lock, so a pusher cannot bound its wait -- it must take the infinite acquire and check the result, which is what makes contention a skipped band and a hang something else entirely"
 TCH-001: "The touch controller is a CST9217 at I2C 0x1A (register 0x0000 reads 0xCA, the family checkcode); 0x5A is the DRV2605 haptic driver, whose register 0x00 reads 0xE0 (DEVICE_ID bits), and only 0x1A completes the CST92xx unlock handshake"
 TCH-002: "A reset CST9217 is in command mode and reports nothing: write 0xD1=0x01, then 0xD1=0x1E twice, require byte 1 of a read of 0x0002 to be 0x1E, then write 0xD1=0x09 for normal mode"
 TCH-003: "Report block at 0xD000 is 15 bytes and the transfer must be all 15 even though only 7 are decoded; byte 0 = 0x06 for a down event and 0xAB means no new report; x=(b1<<4)|(b3>>4), y=(b2<<4)|(b3&0x0F); a short read leaves the ack mid-block so a held touch freezes"
@@ -1578,6 +1581,19 @@ TOL-007: "The desktop Start menu remembers its last selection, so F10 then Enter
     - "patches/kernel/display/final/spi-esp32.c: the 64-byte chunk loop in esp32_spi_exec_op"
     - "LCD-011 for the earlier 100.85 ms figure this reproduces independently, and LCD-010 for where the time was thought to be"
   verification: "Measured on hardware 2026-11-10, after the operator confirmed the display was correct on the glass following the chunk-loop change. Consistent across runs: 93.3, 94.8, 94.0 and 94.8 ms for a full frame at 40 MHz across three boots; 108.8 ms at 20 MHz; banded 9.99-10.30 ms per band."
+
+- record_id: LCD-014
+  kind: DISPLAY
+  topic_id: LCD
+  status: VERIFIED
+  verified_date: 2026-11-21
+  title: "spi_device_acquire_bus() accepts only portMAX_DELAY: a bounded wait is refused outright, not merely slow"
+  statement: "In ESP-IDF 5.3.1 a device's bus acquisition cannot be bounded. `spi_device_acquire_bus()` in components/esp_driver_spi/src/gpspi/spi_master.c begins with two checks before it touches any lock: `SPI_CHECK(wait == portMAX_DELAY, \"acquire finite time not supported now.\", ESP_ERR_INVALID_ARG)` and `SPI_CHECK(!spi_bus_device_is_polling(device), \"Cannot acquire bus when a polling transaction is in progress.\", ESP_ERR_INVALID_STATE)`. So a timeout passed as a tick count does not wait and then give up -- it returns ESP_ERR_INVALID_ARG immediately, having never attempted `spi_bus_lock_acquire_start()`. The second check is the one that fires when the SAME device handle is mid-transaction: two tasks polling the same `spi_device_t` overlap, and the loser is told the bus is busy rather than being made to wait."
+  consequence: "A writer on the panel bus that wants to survive contention cannot do it by asking for a bounded acquire; it must either hold portMAX_DELAY and accept an unbounded wait, or check the result of an infinite acquire and skip the band. The port's `push_pixels_raw_buf()` does the latter and counts refusals as `s_bus_misses`. The practical consequence for diagnosis is the sharper one: because a refused acquisition costs a band and returns, a task that instead never returns is blocked somewhere else, so contention and a hang are distinguishable only if something records which phase the pusher had reached. Measured evidence that the refusal is silent and cheap: swapping the port's infinite acquire for `pdMS_TO_TICKS(100)` turned a miss count of 29 into 43,680 over one comparable emulator session -- every acquisition failed, and the emulator kept running with a black picture rather than crashing."
+  sources:
+    - "ESP-IDF 5.3.1 components/esp_driver_spi/src/gpspi/spi_master.c: spi_device_acquire_bus(), the two SPI_CHECK lines at the top, and spi_device_release_bus() which asserts `ret == ESP_OK` on a bus this device never acquired"
+    - "tinydesk-twatch ports/twatchultra/main/display.c: push_pixels_raw_buf(), BUS_PH_* phase markers and s_bus_misses"
+  verification: "Established on this project's tools and hardware 2026-11-21 (core-log entry 89). A bounded acquire was built and flashed; every panel push then failed, driving the driver's miss counter from 29 to 43,680 across one session, which is what sent the investigation to the driver source and found the SPI_CHECK. Reverting to portMAX_DELAY restored 0 to 15 misses per session. The `ESP_ERR_INVALID_STATE` polling check is the same one already recorded as fatal in display.c's comment, where ignoring it and then calling release produced `assert failed: spi_device_release_bus spi_master.c:1330 (ret == ESP_OK)` and a reboot."
 - record_id: EMU-003
   kind: EMU
   topic_id: EMU
