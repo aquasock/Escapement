@@ -262,6 +262,7 @@ Topic IDs are the `record_id` prefix. An entry reserves a name; it does not clai
 | Why is the DAC silent when the watch says it is streaming? | USB | USB-006 |
 | What should a volume control's taper law be? | AUD | AUD-001 |
 | Which FLAC decoder fits on this board, and why? | AUD | AUD-002 |
+| Why does I2S fail to allocate its DMA buffer, and why does the picture freeze when it does? | AUD | AUD-003 |
 | Why does an unattended reboot miss the keyboard entirely? | BLE | BLE-004 |
 | Why does the keyboard connect but type nothing? | BLE | BLE-003 |
 | Why does a saved bond never come back at boot? | BLE | BLE-006 |
@@ -455,6 +456,7 @@ USB-005: "Claiming a USB interface allocates DMA descriptor lists and IDF 5.3.1 
 MOD-001: "A blob in the modules partition is mapped as INSTRUCTIONS (0x42000000..0x43ffffff) and called directly, but it must never be data-read through that pointer and must never map the partition twice; it reaches the firmware through ONE API table whose address the blob build derives from the app ELF, so a blob belongs to the build that produced it"
 AUD-001: "A volume percentage is a loudness scale, not an amplitude, and the three conventions differ: -10 dB at half is the psychoacoustic half-loudness result, -18 dB at half is what a 15A audio-taper pot and VLC's cubic law both give, and linear-in-dB spends an even 3.6 dB per 10% over a 36 dB range; a power law is accurate at one point and inverts the feel"
 AUD-002: "FLAC decoding fits because micro-flac (Apache-2.0) sizes one PSRAM working buffer from the file's own STREAMINFO and has Xtensa LPC assembly, costing 31.7 KB of flash; Rockbox's decoder cannot run here at all because it reserves ~190 KB of internal SRAM as static 7-channel buffers"
+AUD-003: "An I2S descriptor buffer is capped at 4092 bytes by the driver and allocated one calloc each from the internal DMA pool, so four descriptors of 1024 stereo frames asks for 16,368 bytes at once; this board had 12,251 free with a 3,968 largest block, so the allocation failed and the channel never configured -- and because the display SPI bus draws on the same pool, a shortage shows up as silence with a picture or a frozen picture with sound"
 USB-006: "VERIFIED: the USB-C DAC's playback FU MUTE refuses SET_CUR with a STALL, so its silent first stream cannot be unmuted from the host; a streaming alternate-setting cycle (dac_wake(), `uac2 wake`) re-arms it, and its hardware volume barely changes loudness on headphones"
 
 IMU-001: "The BHI260AP runs firmware the HOST loads into its RAM: the image sits in `moddata` at 0xE10000 as a multi-segment container whose first segment loads at 0x124000, and its header carries a SHA-256 of the payload at offset 0x08; nothing about it is a fixed mask ROM program"
@@ -2667,6 +2669,21 @@ TOL-007: "The desktop Start menu remembers its last selection, so F10 then Enter
     - "tinydesk-twatch ports/twatchultra/main/imu.c: ops_start, which returns early while klio_learn_active(), and ori_enable"
     - "tinydesk-twatch ports/twatchultra/components/bhy2/include/bhy2_defs.h: BHY2_SENSOR_ID_DEVICE_ORI and _WU, BHY2_SENSOR_ID_KLIO"
   verification: "Verified on hardware 2026-11-20 (core-log entry 80). The operator pressed the IMU window's Learn button and performed the gesture; the bar filled and the window reported `learned and kept`, `klio stored` then reported slot 0 at 157 bytes, and after a reboot the pattern was restored automatically and matched over 88 frames from the engine. No FIFO overflow or sensor error appeared in that pass. The contrasting configuration -- orientation left streaming during algorithm work -- is the one entries 73 and 74 measured overflowing."
+
+- record_id: AUD-003
+  kind: AUD
+  topic_id: AUD
+  status: VERIFIED
+  verified_date: 2026-11-20
+  title: "An I2S DMA descriptor is capped at 4092 bytes, taken from the internal pool the display's SPI bus also draws on"
+  statement: "In ESP-IDF 5.3.1's `esp_driver_i2s`, a descriptor's DMA buffer is capped by `I2S_DMA_BUFFER_MAX_SIZE` (4092 bytes): `i2s_get_buf_size()` computes `dma_frame_num * bytes_per_frame` and, above that ceiling, clamps the frame count and warns `dma frame num is out of dma buffer size, limited to N`. For stereo 16-bit that is 4 bytes a frame, so the practical maximum is 1023 frames a descriptor regardless of what is asked for. The buffers are allocated one `heap_caps_calloc` each, from `I2S_MEM_ALLOC_CAPS` (`MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT`) and `I2S_DMA_ALLOC_CAPS` (`MALLOC_CAP_INTERNAL | MALLOC_CAP_DMA | MALLOC_CAP_8BIT`), and `i2s_std_set_slot()` frees and reallocates ALL of them whenever the computed buffer size changes -- which a mono/stereo mode change does. `i2s_alloc_dma_buffer` failing surfaces as `E i2s_common: ... allocate DMA buffer failed` followed by `E i2s_std: i2s_std_set_slot` and `i2s_channel_reconfigure`, and the channel is left unusable."
+  consequence: "The descriptor count and frame count are a MEMORY BUDGET, not a latency tuning knob: four descriptors of 1024 frames is 16,368 bytes of internal DMA-capable RAM in one shot, and on this board with the emulator running that pool measured 12,251 bytes free with a largest contiguous block of 3,968, so the allocation could not succeed at all. This port therefore runs four descriptors of 256 frames (4,096 bytes total), which sets the ring at 1,024 frames -- 21 ms at 48 kHz, 23 ms at 43,691 Hz. THE DISPLAY COMPETES FOR THE SAME POOL: `spi_bus_initialize(SPI2_HOST, &bus, SPI_DMA_CH_AUTO)` allocates from the same internal DMA heap, so a shortage presents as whichever subsystem loses the allocation -- an I2S failure gives a silent picture with sound, an SPI failure gives a frozen picture with sound. Any new consumer of internal DMA RAM on this board should be sized against `mem heap`'s DMA line rather than against the part's maximum."
+  sources:
+    - "ESP-IDF 5.3.1 components/esp_driver_i2s/i2s_common.c: I2S_DMA_BUFFER_MAX_SIZE clamp in i2s_get_buf_size(), i2s_alloc_dma_desc() and i2s_free_dma_desc()"
+    - "ESP-IDF 5.3.1 components/esp_driver_i2s/i2s_std.c: i2s_std_set_slot() frees and reallocates the descriptor set when the buffer size changes"
+    - "ESP-IDF 5.3.1 components/esp_driver_i2s/i2s_private.h: I2S_MEM_ALLOC_CAPS and I2S_DMA_ALLOC_CAPS"
+    - "tinydesk-twatch ports/twatchultra/main/sound.c: sound_init() descriptor and frame counts, and set_std() which reconfigures the slot on every rate change"
+  verification: "Verified on hardware 2026-11-20 (core-log entry 82). Two failing runs of the Game Boy emulator produced the four I2S lines above -- one with sound and a frozen picture, one with a moving picture and no sound -- and `mem heap` with the emulator running reported the DMA pool at 12,251 bytes free with a 3,968 largest block, which is smaller than a single clamped 4,092-byte buffer. After the frame count was reduced to 256, a cold boot reported no I2S lines at all, `gb status` showed `audio=on 43691Hz` where the channel could not be configured before, and the operator confirmed picture and sound both running. The shared consumer was checked rather than assumed: `music` on a 48 kHz tone still reports 192,000 frames, 0 errors, 0 short writes with the shorter ring."
 
 ```
 
