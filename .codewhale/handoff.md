@@ -1,4 +1,4 @@
-# Handoff — Escapement / TinyDesk on T-Watch Ultra, 2026-11-20T22:30
+# Handoff — Escapement / TinyDesk on T-Watch Ultra, 2026-11-20T22:48
 
 Orientation, not authority. **Verify before acting on it.** The files, the flash
 and the board are the fact; this file is a claim.
@@ -30,8 +30,8 @@ from the mirror while an emulator runs; ask the operator.
 
 ## Where things live
 
-- Project-control repo: `/run/media/vash/GIT/Escapement`, `main`, at `19c84c6`
-  (core-log **entry 87**; reference **IMU-011**, **IMU-012**, **AUD-003**).
+- Project-control repo: `/run/media/vash/GIT/Escapement`, `main`, at `e2c5180`
+  (core-log **entry 88**; reference **IMU-011**, **IMU-012**, **AUD-003**).
   Pushed, clean.
 - Active code is the fork: `/run/media/vash/GIT/tinydesk-twatch`, branch
   `t-watch-ultra`, at `1664a04`, pushed to `fork`, clean. Push to `fork`
@@ -207,6 +207,11 @@ should be made deliberately, not as a side effect.
 
 ## Latest backup
 
+`~/twatch-backup/working-2026-11-20-2241-jtables.bin`, 16,777,216 bytes, sha256
+`ccc95be23156a9669ff38483c0d73425257a3b59d9b516be6924f550b62c1ca7`. Verified
+against the chip; `ota_0` identical to build `0x2f3770` (3,094,384 B); module
+link `host=0x3c28080c` still valid. Supersedes the audio-prio image below.
+
 `~/twatch-backup/working-2026-11-20-2124-audio-prio.bin`, 16,777,216 bytes, sha256
 `eaa795bd8b802cd2ffda66709e640e75dc753a383db153ea3713d3487179220a`. Verified
 against the chip; `ota_0` identical to build `0x2f3c30`; module relinked to
@@ -240,8 +245,27 @@ in the component's CMakeLists — a build flag, no source edit). 5,008 → 4,649
 - Blit priority above the painter — **hangs the picture**; two blocking writers
   on one SPI bus cannot be ordered by priority. See entry 86.
 
-**Untried:** VRAM to internal DRAM (16 KB, read 144×/frame). Needs a miss
-counter first — two locality arguments in this file have already been wrong.
+**VRAM to internal DRAM — TRIED, CRASHES (entry 88).** Two banks of 8 KB,
+internal-first. Terminal died twice during `gbcbench` with no error text;
+reverting restored it at 4,552 µs immediately. Not separated whether it was the
+16 KB leaving a shared pool or a defect in the two-bank rewrite — both were
+reverted together. **If anyone retries: keep the rewrite, put both banks in
+PSRAM.** If that runs, it is memory pressure and the question is closed.
+
+**THE OPTIMISATION LINE IS CLOSED.** Three locality changes, three answers:
+
+```
+jump tables        +7%, free          KEPT
+interpreter→IRAM   no gain, 12 KB     reverted
+VRAM→internal      crashes            reverted
+```
+
+Internal RAM is the binding constraint. The interpreter is at this board's
+floor: 1.72x realtime with rendering, 58.9 fps of 59.73.
+
+**Known defect taken by the revert:** the savestate block in `gnuboy.c` passes
+a 16 KB buffer with a count of 4 (a 32 KB walk). Nothing calls it, but a future
+savestate feature inherits it — fix when next touching the core.
 
 ## Next steps, in order
 
