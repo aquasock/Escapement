@@ -278,6 +278,8 @@ Topic IDs are the `record_id` prefix. An entry reserves a name; it does not clai
 | Which toolchain is it, and what does it produce? | TOL | TOL-002 |
 | Why does a kernel patch silently go missing? | TOL | TOL-003 |
 | What can an emulator measured on this board achieve? | EXT | EXT-001 |
+| Does a bigger data cache make the emulator faster? | EMU | EMU-022 |
+| Why does deleting sdkconfig change the firmware? | TOL | TOL-008 |
 | Where can a large read-only blob live without RAM? | EXT | EXT-002 |
 | Where does the IMU's firmware live, and in what container? | IMU | IMU-001 |
 | What do the bytes in a KLIO output frame mean? | IMU | IMU-002 |
@@ -438,6 +440,7 @@ EMU-018: "Internal DRAM is scarce enough that 4,148 bytes of .bss starved the SS
 EMU-019: "tmc_button() writes the emulated CPU's pin state that tmc_run() reads, so it may only be called from the guest task: one instance is not reentrant, and the touch poll task runs on core 0 at the same priority as the unpinned guest task -- presses go through a queue drained between frames, not straight at the machine"
 EMU-020: "splb32_audio_emits() counts square-wave TOGGLES, not sounds -- one held tone raises it thousands of times a second -- so a front end keyed on it plays continuously and falls silent only when the guest stops stepping; the envelope is the signal and the waveform is a clock, so splb32_audio_active() exists and callers fire on its rising edge"
 EMU-021: "The emulated EEPROM is 1024 bytes (HT24LC08_SIZE) and the save image must match it exactly -- ht24lc08_save() memcpys HT24LC08_SIZE with no length argument, so TMC_EEPROM_BYTES at 512 wrote 512 bytes past the caller's buffer and the overflow surfaced three calls away as a tdsh `fclose` on a corrupted FILE*; _Static_assert ties the two together, and a 64 KB coredump partition carved from the unused ota_1 is how a panic gets a backtrace when the console is compiled out"
+EMU-022: "A 64 KB data cache moved the Game Boy benchmark from 7915/7886 us to 7718/7850 us -- inside the 130 us run-to-run spread -- while costing 17 KB of internal heap and leaving no room for a shell to start, so the emulator is not data-cache bound"
 OTA-001: "A/B firmware update works on this port and needs no repartitioning -- 2 x 3 MiB slots were already there with esp_ota_set_boot_partition and rollback wired; install to the inactive slot, restart, the trial confirms itself after 30 s, and installing again writes the other slot. A truncated image is refused at boot with `invalid segment length`, so a corrupt slot cannot brick the board. The built-in update feed is a 404, which is the real gap, not partition size"
 NES-003: "The NES blit was 70 percent of the frame because it made three passes over external memory for one 5120-pixel internal band -- a 120 KB PSRAM scratch buffer, the 260 KB PSRAM framebuffer, and back -- and streaming the conversion straight into the transmit band took Zelda's title from 19 to 42 fps, which is close to this board's ceiling rather than halfway to 60"
 PM-001: "Pokemon Mini's CPU requirement is 0.22-0.36 MIPS, not the 1 MIPS the original scope stated -- 1 MIPS is the 4 MHz / 4-cycle hardware CEILING, while a game needs instructions-per-frame x 72 Hz, and the twelve retail cartridges measured use 3,091 to 5,053 instructions of the 13,889-per-frame budget"
@@ -477,6 +480,7 @@ IMU-012: "KLIO reaches progress 100 and reports a learnt pattern with accel and 
 TOL-005: "The watch and the TinyTang both appear as ttyACM devices and swap numbers between reboots: the watch is 303a:1001 (Espressif USB JTAG/serial debug unit) and the TinyTang is ffff:5454 (TinyTang CDC), so identity must come from /dev/serial/by-id or udev, never from the ttyACM number"
 TOL-006: "esptool's --after no_reset leaves the ESP32-S3 in its ROM bootloader, so the board's console emits nothing and every later command reads stale state until a --after hard_reset chip_id or a power cycle"
 TOL-007: "The desktop Start menu remembers its last selection, so F10 then Enter is only deterministic after a reboot: the sequence that works is reboot, F10, Enter, and the window that appears must be verified to be `tdsh` before typing, or the keys land in whichever app was selected last"
+TOL-008: "Deleting sdkconfig to force regeneration reverts every setting that lives only in it, silently: on this board that dropped CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH and cut the ISR stack from 2096 to 1536, which matters because the console is compiled out and the coredump is the only crash record"
 ```
 
 ---
@@ -1869,10 +1873,25 @@ TOL-007: "The desktop Start menu remembers its last selection, so F10 then Enter
   sources:
     - "patches/harness/core0/tmc_core.h: TMC_EEPROM_BYTES, now 1024 with the reasoning recorded"
     - "patches/harness/core0/tmc_core.c: _Static_assert(TMC_EEPROM_BYTES == HT24LC08_SIZE)"
+
+
     - "patches/harness/splb32/ht24lc08.c: ht24lc08_save() and HT24LC08_SIZE"
     - "tinydesk-twatch third_party/tdsh/src/core/tdsh_parser.c:1630, the fclose that received the corrupted pointer"
     - "captured backtrace: #5 _fclose_r(fp=0x6d305b1b), #6 fclose, #7 execute_segment, #8 tdsh_execute_line (line="tama stop")"
   verification: "Verified on hardware 2026-11-12. The backtrace came from a core dump, not from bisection: `ota_1` has never been used (no update feed on this board), so it was shrunk from 0x300000 to 0x2F0000 to free 64 KB at 0x600000 for a `coredump` partition, with `CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH` and `..._DATA_FORMAT_ELF`; `idf.py coredump-info` then named the assert and every frame. The partition and the config were reverted and the watch reflashed from a clean tree before the fix was accepted. After the fix, two complete start/stop cycles: `uptime` climbed 17 to 27 to 34 seconds with `stopped, screen released` printed each time and no reset. The static assertion was proved to work rather than assumed -- setting the constant back to 512 fails the build with 'save image size must match the emulated EEPROM'."
+
+- record_id: EMU-022
+  kind: EMU
+  topic_id: EMU
+  status: VERIFIED
+  verified_date: 2026-11-21
+  title: "A 64 KB data cache buys about 1.5 percent of the Game Boy's frame time and costs 17 KB of internal heap, so the data path is not cache bound"
+  statement: "Doubling the ESP32-S3 data cache from CONFIG_ESP32S3_DATA_CACHE_32KB to _64KB, changing nothing else, moved the Game Boy CPU-only benchmark (Shantae, 3000 frames, rendering off) from 7915 and 7886 us a frame at 32 KB to 7718 and 7850 us at 64 KB. Run-to-run spread on a single build is about 130 us, so the two configurations are not distinguishable. The cost is measured on the same boot: heap_caps_get_free_size(MALLOC_CAP_INTERNAL) falls from 27467 to about 10020, and the heap's total size reported by `mem heap` falls from 259083 to 231279 -- 27804 bytes taken by the cache, of which about 17,000 is the difference in free space once the driver's other allocations settle. The 64 KB figure is not usable as-is: with it the desktop still ran but no shell could start until 4 KB more was freed by shrinking the statusbar task's stack, and the internal low-water mark fell to 2611 bytes."
+  consequence: "This closes the last internal-RAM lever on the emulator, and it closes it the same way entry 87's IRAM placement did. Four changes have now been tried that spend something to buy frame time: jump tables cost nothing and gained 7 percent; moving the interpreter to IRAM gained nothing for 12 KB; moving VRAM to internal RAM crashed; a 64 KB data cache gains about 1.5 percent for 17 KB and leaves the shell unable to start. Internal RAM is not where this emulator's time is, and the likely reason is that the working set the cache could help -- VRAM plus CPU state -- already fits in 32 KB, while the 1 MB cartridge streams through either way. The practical use of the number is architectural: an emulator-only firmware profile would not go faster for having more cache, so any reason to split the application across two slots has to be a reason other than frame time."
+  sources:
+    - "ports/twatchultra/sdkconfig.defaults: CONFIG_ESP32S3_DATA_CACHE_32KB / _64KB"
+    - "ports/twatchultra/main/gbcbench.c: run_us, mode=cpu, and /sd/diag/gbcbench.txt"
+  verification: "Measured on hardware 2026-11-21 (core-log entry 90). Two runs at each cache size on the same ROM and frame count, with the result written to /sd/diag/gbcbench.txt because the panel cannot hold it. The heap figures are from `mem heap` and from the same file on the same boot as each run."
 
 - record_id: OTA-001
   kind: EXTERNAL
@@ -1881,7 +1900,7 @@ TOL-007: "The desktop Start menu remembers its last selection, so F10 then Enter
   verified_date: 2026-11-12
   title: "A/B firmware update works here with no repartitioning, and a corrupt slot is refused at boot rather than booted"
   statement: "This port's partition table already carries two 3 MiB app slots (`ota_0` at 0x10000, `ota_1` at 0x310000) plus `otadata` at 0x610000, and `ports/esp_idf/app/ota_esp.c` already implements the whole ESP-IDF A/B path: `esp_ota_set_boot_partition()`, `esp_ota_mark_app_valid_cancel_rollback()`, `esp_ota_mark_app_invalid_rollback_and_reboot()`, an `ota` shell command (status, feed, check, install, cancel, restart, rollback) and the Update app. Measured on the watch 2026-11-12: `ota_0` running, `ota_1 is empty`; `ota install` reports `Version 0.4.0 is installed. Restart to use it.`; `ota restart` comes up `Running: ota_1 (on trial: confirms itself 30 s after start-up)`; the trial flag clears about 35 s later; a second install writes `ota_0` and a second restart returns to `Running: ota_0`. `otadata` then holds sequence 3 for one slot against 2 for the other."
-  consequence: "The swap is real and needs no new partitions, which retires the premise that an 8 MiB repartition is required before firmware updates can be trusted. Two operational facts came out of doing it. First, `ota install` refuses to proceed on this board until `board save` has run, because 28 pin settings are compiled into this port's firmware and a generic image would start without them -- the guard is correct and running it also proves `/fs` is writable. Second, the transfer path that works is HTTP: SFTP stalls and leaves a 0-byte file (the single-client wolfSSH wedge, SSH-003), while `ota install http://host/file.bin` streams at about 52 KB/s. The rollback protection was verified against a REAL corrupt image rather than a contrived one: an install interrupted by a hard reset left `ota_1` with a valid descriptor and a truncated body, and the bootloader refused it with `E esp_image: invalid segment length 0xff9afffd`, staying on `ota_0`. That is the property the mechanism exists for, and the corruption was self-inflicted -- do not reset the board during an install."
+  consequence: "The swap is real and needs no new partitions, which retires the premise that an 8 MiB repartition is required before firmware updates can be trusted. Two operational facts came out of doing it. First, `ota install` refuses to proceed on this board until `board save` has run, because 28 pin settings are compiled into this port's firmware and a generic image would start without them -- the guard is correct and running it also proves `/fs` is writable. Second, the transfer path that works is HTTP: SFTP stalls and leaves a 0-byte file (the single-client wolfSSH wedge, SSH-003), while `ota install http://host/file.bin` streams at about 52 KB/s. The rollback protection was verified against a REAL corrupt image rather than a contrived one: an install interrupted by a hard reset left `ota_1` with a valid descriptor and a truncated body, and the bootloader refused it with `E esp_image: invalid segment length 0xff9afffd`, staying on `ota_0`. That is the property the mechanism exists for, and the corruption was self-inflicted -- do not reset the board during an install. Revised 2026-11-21 (core-log entry 43's repartition, confirmed by entry 90): the SLOT ADDRESSES in this record are stale. The table is now ota_0 at 0x20000 and ota_1 at 0x400000, each 0x3E0000, with otadata at 0x7F0000 and coredump at 0x7E0000 -- the mechanism and every behaviour measured here are unchanged, but the offsets quoted above belong to the pre-2026-11-17 layout."
   sources:
     - "tinydesk-twatch ports/twatchultra/partitions.csv: ota_0, ota_1, otadata"
     - "tinydesk-twatch ports/esp_idf/app/ota_esp.c: ota_install, ota_roll_back, ota_esp_boot_ok, cmd_ota"
@@ -2615,6 +2634,19 @@ TOL-007: "The desktop Start menu remembers its last selection, so F10 then Enter
     - "tinydesk-twatch tools/watch-screen.py (Screen model, DECSC/DECRC handling, drain-before-send)"
     - "tinydesk-twatch ports/twatchultra/main/ (desktop key handling for F10 and Enter; Start menu selection persistence)"
   verification: "Verified on hardware 2026-11-18 (core-log entry 75): repeated attempts using F10 followed by Enter with no screen check launched the Tamagotchi emulator several times, and `imu inject 30 ...` was typed into it as game input. After a reboot the same F10/Enter sequence produced a `tdsh` window on the first attempt, confirmed by reading the screen back, and the injection runs then executed normally."
+
+- record_id: TOL-008
+  kind: TOOLCHAIN
+  topic_id: TOL
+  status: VERIFIED
+  verified_date: 2026-11-21
+  title: "Deleting sdkconfig to force regeneration silently drops settings that live only in that file, including the coredump partition and the ISR stack size"
+  statement: "ESP-IDF regenerates `sdkconfig` from `sdkconfig.defaults` only when `sdkconfig` is absent, and the generated file then holds every value the project set at any time -- including ones set interactively with `idf.py menuconfig` or inherited from an earlier defaults file that no longer contains them. Removing `sdkconfig` to force a clean reconfiguration therefore reverts every such setting to its IDF default without any message. On this board that dropped `CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH=y` (to `CONFIG_ESP_COREDUMP_ENABLE_TO_NONE=y`) and `CONFIG_FREERTOS_ISR_STACKSIZE` from 2096 to 1536, and also reverted the NimBLE role set and dropped `CONFIG_FREERTOS_TASK_FUNCTION_WRAPPER`."
+  consequence: "The coredump setting is the one that matters here: this firmware builds with `CONFIG_ESP_CONSOLE_NONE`, so a panic prints nothing and the coredump partition at 0x7E0000 is the only record a crash leaves (EMU-021 depends on it). A scratch experiment that deletes `sdkconfig` can therefore remove the project's only crash reporting and say nothing at all. The safe pattern is to copy `sdkconfig` aside before a configuration experiment and restore the copy afterwards rather than regenerate, and to confirm the restore by comparing the built image size against the pre-experiment build -- here the difference was 18 KB, which is what surfaced the loss. Values that must survive belong in `sdkconfig.defaults`, because that file is the only one that reproduces them."
+  sources:
+    - "ports/twatchultra/sdkconfig and sdkconfig.defaults: the two files' diff after a regeneration"
+    - "ESP-IDF 5.3.1 build system: sdkconfig is generated from defaults only when it does not exist"
+  verification: "Observed on this project's tools 2026-11-21 (core-log entry 90): after `rm -f sdkconfig && idf.py build` the generated file differed from the preserved copy in 40 lines, the app image came out 18432 bytes smaller, and the two settings above had flipped. Restoring the preserved copy rebuilt to the identical size and `mem heap` returned to 259083 total / 27467 free."
 
 - record_id: IMU-008
   kind: IMU

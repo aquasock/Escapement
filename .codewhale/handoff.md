@@ -1,4 +1,4 @@
-# Handoff — Escapement / TinyDesk on T-Watch Ultra, 2026-11-21T11:00
+# Handoff — Escapement / TinyDesk on T-Watch Ultra, 2026-11-21T12:15
 
 Orientation, not authority. **Verify before acting on it.** The files, the flash
 and the board are the fact; this file is a claim.
@@ -9,7 +9,16 @@ and the board are the fact; this file is a claim.
 29–40 ms, SRAM saved first — built, flashed, and confirmed by the operator on
 the glass (entry 89). **An intermittent blitter stall is real and is PARKED by
 operator decision**, instrumented so its next occurrence names its own cause.
-The AI-engine/injection line stays parked at entry 78.
+
+**The emulator's optimisation line is now closed four ways** (entry 90 adds the
+64 KB data cache: ~1.5%, inside noise, for 17 KB of internal RAM). Do not try a
+fifth internal-RAM lever without new evidence — see "Measured dead ends" below.
+
+**A two-slot architecture was proposed and priced, not built.** Its premise was
+emulator speed from spare internal RAM; that premise is now measured false. If
+it is revisited, the case has to be fit, power or boot time — and the cheapest
+first step is a boot profile that never calls `esp_wifi_init()`, worth 41,500
+bytes (SOC-005), not a second application.
 
 ## WORKING WITH THE OPERATOR ON THE WATCH — read this first
 
@@ -29,9 +38,10 @@ card (`/sd/diag/`), not to the console and not to the mirror.
 ## Where things live
 
 - Project-control repo: `/run/media/vash/GIT/Escapement`, `main`, at the entry
-  89 commit (core-log **entry 89**; reference **LCD-014** added).
+  90 commit (core-log **entry 90**; reference **LCD-014**, **EMU-022**,
+  **TOL-008** added).
 - Active code is the fork: `/run/media/vash/GIT/tinydesk-twatch`, branch
-  `t-watch-ultra`, at `78a8c4c`, pushed to `fork`. Push to `fork`
+  `t-watch-ultra`, at `07c1a42`, pushed to `fork`. Push to `fork`
   (`aquasock/tinydesk`) only — **never** `origin` (upstream, read-only).
 - `.ai/core.md` is RESTRICTED. Do not edit without an explicit instruction.
 
@@ -101,6 +111,51 @@ queues are deliberately **leaked, not freed**, `gb status` says so, and
 `gb_start()` refuses until a reboot. Do not "fix" that leak without solving the
 exit first.
 
+## MEASURED DEAD ENDS — internal RAM does not buy frame time (entries 87-90)
+
+Four changes were tried that spend something to buy emulator speed. All four
+answers are in, and the line is closed:
+
+```
+jump tables        +7%, free             KEPT      (entry 87)
+interpreter->IRAM  no gain, 12 KB        reverted  (entry 87)
+VRAM->internal     crashes               reverted  (entry 88)
+data cache 32->64  ~1.5%, noise, 17 KB   reverted  (entry 90, EMU-022)
+```
+
+The benchmark, for comparison against any future claim — Shantae, 3000 frames,
+`cpu` mode (rendering off):
+
+```
+32 KB cache   7915 / 7886 us
+64 KB cache   7718 / 7850 us      run-to-run spread ~130 us
+```
+
+With the 64 KB cache the desktop ran but **no shell could start** until 4 KB
+more was freed: internal free went 27467 -> ~10020 and the low-water mark
+reached 2611 bytes. Internal RAM is the binding constraint on this board, and
+none of these levers moved the number.
+
+**The instrument.** `gbcbench` writes `/sd/diag/gbcbench.txt` (run_us, heap
+free, heap min). Use it, not the screen — loading a cartridge prints hundreds of
+bank lines and the panel holds 26 rows with no scrollback.
+
+## TWO CURRENT DECISIONS FOR THE OPERATOR
+
+1. **Statusbar stack.** Measured worst case is **3644 bytes** of 8192; the
+   deepest path is `sb_build` -> platform `get_tz()` -> `fopen`/`fscanf` on
+   `/fs/root/.tdsh_tz`, about 1570 bytes of it. 5120 would return 3072 bytes to
+   internal DRAM with 1476 of headroom; 4096 is too close. Size is deliberately
+   unchanged pending the operator's call.  **3072 must not be restored** — it
+   panicked for a real reason.
+2. **The two-slot idea.** Mechanically trivial (`ota rollback` =
+   `esp_ota_set_boot_partition(next)` + `esp_restart()`, `otadata` 8 KB, slots
+   `ota_0` 0x20000 / `ota_1` 0x400000, 0x3E0000 each). Costs: ~9063 lines
+   forked across ten drivers, `ota install` would overwrite the other slot
+   (`esp_ota_get_next_update_partition()` means "other version of ME"), the
+   codec blob is linked to one API address (`host=0x3c280c08` now), and every
+   emulator launch/exit becomes a reboot that kills the desktop session.
+
 ## Build, flash, relink
 
 ```sh
@@ -128,6 +183,13 @@ Skip the board read when the size is unchanged: compare
 `xtensa-esp32s3-elf-nm build/tinydesk.elf` `g_modhost_ptr` / `g_modbss` against
 `modules/build/modaddr.h`. That check was correct twice this session.
 
+**NEVER `rm sdkconfig` TO FORCE REGENERATION — it silently reverts settings that
+live only in that file.** On 2026-11-21 that dropped
+`CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH=y` (the ONLY crash record this firmware
+has, since the console is compiled out) and cut `CONFIG_FREERTOS_ISR_STACKSIZE`
+2096 -> 1536. Copy `sdkconfig` aside and restore the copy; confirm with the
+image size. See TOL-008.
+
 ## Reading the watch from the host
 
 ```sh
@@ -141,16 +203,27 @@ tools/watch-screen.py 'gb status\r' 3    # send keys, then read
 - Scrollback does not survive a repaint; a long output gets truncated.
 - **A blocking serial read hangs for ever once a picture owns the panel.**
 
-## Backup
+## Backup — and what the board is actually running
+
+**The board currently runs the entry-90 diagnostic build (fork `07c1a42`,
+3,098,048 bytes, module `host=0x3c280c08`), which is COMMITTED but NOT in any
+verified backup.** The newest verified image predates it:
 
 `~/twatch-backup/working-2026-11-21-1100-pusherA.bin`, 16,777,216 bytes,
 sha256 `9fe4f9574c2c7d37e96e172064081cea689911c779a8f9cdb16557197797c18e`.
-Verified against the chip; `ota_0` byte-identical to `build/tinydesk.bin`
-(3,097,360 B); module `host=0x3c280b28`. Supersedes
+Verified against the chip; `ota_0` byte-identical to the entry-89 build
+(3,097,360 B), module `host=0x3c280b28`. Restoring it returns the watch to
+entry 89 — Pusher A working, stall instrumentation absent. Supersedes
 `working-2026-11-20-2241-jtables.bin`.
+
+Take a fresh verified backup with `scripts/watch-backup.sh` before anything
+destructive, now that the module address has moved again.
 
 ## Next steps, in order
 
+0. **Two decisions waiting on the operator** — the statusbar stack size, and
+   whether the two-slot architecture is still wanted now its premise is dead.
+   See "Two current decisions" above. Neither is owed by code.
 1. **Catch the stall** by playing normally; read `/sd/diag/gbwedge.txt`.
 2. **The startup audio burst** (~5,100 samples dropped during cartridge load).
    Shape of the fix: open the audio stream *after* the ROM loads.
@@ -172,10 +245,11 @@ Verified against the chip; `ota_0` byte-identical to `build/tinydesk.bin`
 
 ## Standing facts
 
-- Internal RAM is the binding constraint; the optimisation line is closed
-  (entry 88). Three locality changes, three answers: jump tables +7% (kept),
-  interpreter→IRAM no gain (reverted), VRAM→internal crashes (reverted).
+- Internal RAM is the binding constraint; the optimisation line is closed four
+  ways, the fourth measured in entry 90 (see "Measured dead ends").
+- Statusbar task stack is 8192 with a measured worst case of 3644.
+  `statusbar` reports the watermark; `gbcbench` writes to `/sd/diag/`.
 - I2S DMA and the display's SPI bus share one internal pool (AUD-003).
-- App at `0x20000`, slot `0x3E0000`, 3,097,360 bytes, ~966 KB free.
+- App at `0x20000`, slot `0x3E0000`, 3,098,048 bytes, ~962 KB free.
 - **Back up the working tree before destructive experiments** — a mutation
   sweep once reverted uncommitted work via `git checkout`.
