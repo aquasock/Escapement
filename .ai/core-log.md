@@ -1,3 +1,33 @@
+## 88 COMMIT Unreleased 2026-11-20T22:45:59-07:00
+
+#### Coming From:
+
+Unreleased ea28586
+
+#### Purpose:
+
+Test whether moving the Game Boy's VRAM from PSRAM into internal RAM, the last locality change entry 87 left open, buys any frame time.
+
+#### Outcome:
+
+IT CRASHED AND WAS REVERTED, SO THE ANSWER IS NO AND THE MEMORY ARGUMENT IS NOW BACKED BY A FAILURE RATHER THAN BY ARITHMETIC ALONE. The fork is unchanged at 1664a04 and the tree is clean, because the change was removed rather than committed: this entry records a negative result and a backup, not a modification. VRAM is the busiest remaining buffer in the system -- 16 KB for a Colour cartridge, read by the renderer 144 times a frame and written continuously by the guest -- and through a 32 KB data cache it is the region most likely to be paying for misses, so moving it was the obvious test after entry 87 measured the interpreter as the cost. THE MECHANICS OF THE ATTEMPT ARE RECORDED BECAUSE THE FAILURE IS THE USEFUL PART. The internal pool had 32,987 bytes free with a LARGEST CONTIGUOUS BLOCK OF 12,288, and VRAM was a single `calloc(2, 8192)`, so it was changed to two separately allocated banks with an internal-first, PSRAM-fallback order; `hw.h`'s `byte (*vbanks)[8192]` became `byte *vbanks[2]`; the savestate block in `gnuboy.c`, which passed the whole array with a count of 4 and so walked 32,768 bytes through a 16,384-byte buffer, became one entry per bank. THAT LAST LINE WAS A DORMANT OVER-READ AND ITS FIX IS ALSO LOST WITH THE REVERT, which is worth stating plainly: nothing in this port calls `gnuboy_save_state()` or `gnuboy_load_state()`, so no user could have hit it, but it is a real defect in the vendored core that a future savestate feature would inherit. THE CRASH WAS TWO TERMINAL DEATHS DURING `gbcbench`, not one, and with no error text and no result line -- the window simply closed mid-run. Reverting restored the benchmark immediately at 4,552 us, which is within noise of entry 87's 4,649, so the change was definitively the cause. WHY IT CRASHED IS NOT ESTABLISHED AND THE ENTRY SAYS SO RATHER THAN GUESSING: 16 KB taken from a pool shared with the I2S DMA buffers, the display transmit buffer and the task stacks is a plausible starvation, and a defect in the two-bank rewrite is equally plausible, and both were reverted together so neither can be separated from the other. THE CHEAP DECISIVE TEST IS RECORDED FOR WHOEVER WANTS IT: keep the two-bank rewrite and its savestate fix but allocate BOTH banks from PSRAM. If that runs, the fault is memory pressure and the locality question is closed for good; if it crashes too, the fault is in the rewrite and the memory question stays open. It is half a cycle and it was deliberately not run tonight -- the operator's decision was to leave the port as it stands and keep developing, which is the right call after three attempts at the same trade. THE PATTERN ACROSS THE WHOLE OPTIMISATION LINE IS NOW CLEAR ENOUGH TO STATE. Three changes were tried that traded something for speed: jump tables cost nothing and gained 7 percent; moving the interpreter to IRAM gained nothing and cost 12 KB; moving VRAM to internal RAM crashed. Internal RAM is the binding constraint on this board, and every attempt to spend it on emulator speed has either bought nothing or broken something -- which is consistent with entry 87's finding that the 32 KB instruction cache already covered the interpreter, and with the memory figures that made both changes marginal before they were attempted. THE BOARD IS HEALTHY AND ON THE ENTRY 87 IMAGE: audio re-verified after the revert at 192,000 frames with 0 errors and 0 short writes, the module link still valid because the app image is unchanged at 3,094,384 bytes, and a full backup was taken and checked. THE BACKUP WAS VERIFIED IN THE WAY THIS PROJECT REQUIRES rather than trusted: 16,777,216 bytes read with the board held in the bootloader, compared against the chip with nothing allowed to boot between the read and the verify, `verify OK (digest matched)`, written as `working-2026-11-20-2241-jtables.bin` with sha256 `ccc95be23156a9669ff38483c0d73425257a3b59d9b516be6924f550b62c1ca7`, the sidecar re-checked with `sha256sum -c`, and the 3,094,384 bytes at offset 0x20000 inside it confirmed byte-identical to `build/tinydesk.bin` so the archive holds the entry 87 build rather than a previous one. THE CORE-SYNTAX AUDIT REQUIRED BY core.md WAS PERFORMED BEFORE COMMIT: core.md and core-syntax.md were re-read, the complete .ai/ diff inspected, core.md is unchanged, entry 88 is checked against the template for header order, the six sections in order, prose-only Purpose, Outcome and Next Steps, eligible Files Modified and the three Status lines, the log stands at 88 entries against a ring of 100 so no archive is due, and the known conformance debt in entries 66 through 73 stands as entry 74 recorded it. No reference record was added: this cycle established that a change in this project's own code does not work, which belongs in the log and not in a file kept for what outside sources say.
+
+#### Next Steps:
+
+THE EMULATOR'S OPTIMISATION LINE IS CLOSED unless someone wants the half-cycle test above, and the honest position is that the interpreter sits at this board's practical floor: 1.72x realtime with rendering, 58.9 fps against the Game Boy's 59.73, 1.3 percent of frames missing during heavy transitions. The remaining emulator work is not speed but the startup burst, around 5,100 audio samples dropped during cartridge load before steady state, and its shape is to open the audio stream after the ROM loads rather than before -- a change to the port rather than to the core, and cheap. THE WIDER PROJECT IS WHERE THE TIME IS BEST SPENT NOW, and the standing backlog is unchanged by any of this: the two margin columns are unassigned in the other emulator ports; Pause, Reset and Save are labelled on all three emulators and send nothing; `klio save` still emits a `meta 12 fifo overflow`; gesture mapping runs only while the IMU window is open, and moving it to always-on needs a safe route from a background task into the window manager because `src/wm.c` has no lock; the injection line stays parked at entry 78; the DMG compatibility path is unproven because no DMG cartridge has been launched; and the two unidentified firmware header fields at 0x2c and 0x44 still gate custom firmware. THE SAVESTATE OVER-READ IS WORTH RE-FIXING whenever the core is next touched, since it is a genuine defect that the revert took with it.
+
+#### Files Modified:
+
+None.
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: PASS
+
+---
+
 ## 87 COMMIT Unreleased 2026-11-20T22:27:12-07:00
 
 #### Coming From:
