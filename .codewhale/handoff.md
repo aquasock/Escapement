@@ -1,4 +1,4 @@
-# Handoff — Escapement / TinyDesk on T-Watch Ultra, 2026-11-20T21:30
+# Handoff — Escapement / TinyDesk on T-Watch Ultra, 2026-11-20T22:30
 
 Orientation, not authority. **Verify before acting on it.** The files, the flash
 and the board are the fact; this file is a claim.
@@ -30,11 +30,11 @@ from the mirror while an emulator runs; ask the operator.
 
 ## Where things live
 
-- Project-control repo: `/run/media/vash/GIT/Escapement`, `main`, at `556f52f`
-  (core-log **entry 86**; reference **IMU-011**, **IMU-012**, **AUD-003**).
+- Project-control repo: `/run/media/vash/GIT/Escapement`, `main`, at `19c84c6`
+  (core-log **entry 87**; reference **IMU-011**, **IMU-012**, **AUD-003**).
   Pushed, clean.
 - Active code is the fork: `/run/media/vash/GIT/tinydesk-twatch`, branch
-  `t-watch-ultra`, at `d3e3c96`, pushed to `fork`, clean. Push to `fork`
+  `t-watch-ultra`, at `1664a04`, pushed to `fork`, clean. Push to `fork`
   (`aquasock/tinydesk`) only — **never** `origin` (upstream, read-only).
 - `.ai/core.md` is RESTRICTED. Do not edit without an explicit instruction.
 
@@ -217,6 +217,31 @@ against the chip; `ota_0` identical to build `0x2f3c30`; module relinked to
 `8bb3bc4f615c714a2246b70ecb23ef37f7675cc729bd0acc96810930b20d4ab2`. Verified
 against the chip (digest matched) and `ota_0` inside it is byte-identical to the
 build. Holds both audio DMA changes.
+
+## The GBC frame budget (entry 87 — measured)
+
+Normal frames 11 ms, transition frames 40-53 ms, budget 16.742 ms. The port
+holds 58.9 fps against 59.73; 1.3% of frames miss, all during transitions.
+
+**The split, measured with a temporary profiler (since reverted):**
+- **render is CONSTANT 5-10 ms** — `lcd_renderline()` runs 144×/frame always
+- **interpreter goes 6 ms idle → 17-32 ms** on a transition
+
+So opcode/interpreter work is the lever, not rendering.
+
+**Landed:** jump tables on `cpu.c` only (`-fjump-tables -ftree-switch-conversion`
+in the component's CMakeLists — a build flag, no source edit). 5,008 → 4,649 µs,
+**+7%**.
+
+**Rejected, with numbers:**
+- IRAM placement — moved the interpreter to real IRAM (0x4037f…) and gained
+  nothing (4,649 → 4,602, noise) while costing 12 KB internal RAM. The 32 KB
+  i-cache already covered the 14.5 KB interpreter.
+- Blit priority above the painter — **hangs the picture**; two blocking writers
+  on one SPI bus cannot be ordered by priority. See entry 86.
+
+**Untried:** VRAM to internal DRAM (16 KB, read 144×/frame). Needs a miss
+counter first — two locality arguments in this file have already been wrong.
 
 ## Next steps, in order
 
