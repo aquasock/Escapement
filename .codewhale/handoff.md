@@ -1,4 +1,4 @@
-# Handoff — Escapement / TinyDesk on T-Watch Ultra, 2026-11-20T19:56
+# Handoff — Escapement / TinyDesk on T-Watch Ultra, 2026-11-20T21:30
 
 Orientation, not authority. **Verify before acting on it.** The files, the flash
 and the board are the fact; this file is a claim.
@@ -30,11 +30,11 @@ from the mirror while an emulator runs; ask the operator.
 
 ## Where things live
 
-- Project-control repo: `/run/media/vash/GIT/Escapement`, `main`, at `eaef672`
-  (core-log **entry 85**; reference **IMU-011**, **IMU-012**, **AUD-003**).
+- Project-control repo: `/run/media/vash/GIT/Escapement`, `main`, at `556f52f`
+  (core-log **entry 86**; reference **IMU-011**, **IMU-012**, **AUD-003**).
   Pushed, clean.
 - Active code is the fork: `/run/media/vash/GIT/tinydesk-twatch`, branch
-  `t-watch-ultra`, at `40611cb`, pushed to `fork`, clean. Push to `fork`
+  `t-watch-ultra`, at `d3e3c96`, pushed to `fork`, clean. Push to `fork`
   (`aquasock/tinydesk`) only — **never** `origin` (upstream, read-only).
 - `.ai/core.md` is RESTRICTED. Do not edit without an explicit instruction.
 
@@ -139,7 +139,7 @@ The mmap pair (`inst=0x42ae0000`, `data=0x3cce0000`) has been stable, but the
 matching is not sufficient. Symptom of a stale blob: `music` prints "playing"
 and plays nothing.
 
-## The GBC emulator (entry 82 — working)
+## The GBC emulator (entries 82-86 — working)
 
 **Margin columns.** Right column, top to bottom: **empty, Select, Start** (entries
 85). Left: Pause, Reset, Save — labelled, sending nothing. Only slots 1 and 2 of
@@ -158,24 +158,18 @@ bytes and allocates each separately. This board had **12,251 free with a 3,968
 largest block**, so it could not allocate at all. Now 256 frames a descriptor
 (1,024 bytes each). Ring is 21 ms at 48 kHz instead of 85 ms.
 
-**AUDIO RING: THREE TERMS, NOT TWO (entries 82-84).** `dma_desc_num` and
-`dma_frame_num` are a memory budget shared with the display's SPI bus, and
-three things matter:
+**AUDIO RING: A CEILING, NOT A DEPTH (entries 82-86).** `dma_desc_num` and
+`dma_frame_num` are a memory budget shared with the **display's SPI bus**, and
+three things matter: buffer size (a 2,926 B frame should fit one descriptor),
+ring depth (total bytes vs stalls), and queue depth (`desc_num - 1`, the
+driver's completion queue).
 
-  buffer size   a whole frame (2,926 B) must fit in one descriptor
-  ring depth    total bytes, against jitter
-  queue depth   `desc_num - 1` — the driver's own completion queue
-
-```
-4x1023  16,368B  4 descs  93.7ms  never allocated (4092 > 3968 largest block)
-4x256    4,096B  4 descs  23.4ms  0.623% dropped
-8x256    8,192B  8 descs  46.9ms  0.054% dropped
-2x900    7,200B  2 descs  41.2ms  0.581% dropped  <- queue starved to 1 slot
-8x320   10,240B  8 descs  46.9ms  0.014% dropped  <- current
-```
-
-`8 x 400` is 12,800 B and does NOT fit (12,251 free). Measure `mem heap`
-before any change here — this file was wrong once by modelling one term.
+**The hard limit is the display.** ~24,951 B are free for audio + display
+together. `4 x 1023` = 16,368 B leaves 8,583 and **freezes the picture**;
+`8 x 320` = 10,240 B leaves 14,711 and is fine. `ring_try` in `sound.c` now
+stops at `3 x 900` (10,800 B, 61.8 ms) and lists fallbacks down to `4 x 256`,
+because free DMA varies with what else runs. `gb status` prints `ring=` so a
+drop rate always says which geometry produced it.
 
 **The display's SPI bus draws on the same pool.** That is why the same defect
 appeared as a frozen picture with sound on one run and a moving picture in
@@ -212,6 +206,12 @@ the watch's whole uptime instead of only while a window is open. That trade
 should be made deliberately, not as a side effect.
 
 ## Latest backup
+
+`~/twatch-backup/working-2026-11-20-2124-audio-prio.bin`, 16,777,216 bytes, sha256
+`eaa795bd8b802cd2ffda66709e640e75dc753a383db153ea3713d3487179220a`. Verified
+against the chip; `ota_0` identical to build `0x2f3c30`; module relinked to
+`host=0x3c280804`. Supersedes `working-2026-11-20-1857-gbc-dma.bin`
+(the older entry below is kept for provenance).
 
 `~/twatch-backup/working-2026-11-20-1857-gbc-dma.bin`, 16,777,216 bytes, sha256
 `8bb3bc4f615c714a2246b70ecb23ef37f7675cc729bd0acc96810930b20d4ab2`. Verified
