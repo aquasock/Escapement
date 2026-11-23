@@ -1,4 +1,4 @@
-# Handoff — Escapement / TinyDesk on T-Watch Ultra, 2026-11-23T11:10
+# Handoff — Escapement / TinyDesk on T-Watch Ultra, 2026-11-23T11:55
 
 Orientation, not authority. **Verify before acting on it.** The files, the flash
 and the board are the fact; this file is a claim.
@@ -10,10 +10,15 @@ card, chosen with the margin arrows and Enter, battery saves round-tripping
 (Pokemon Crystal confirmed by the operator, entry 93). The desktop is the
 default boot; slot B is one `ota rollback` away.
 
-**ONE OPEN ANOMALY**: once, a reset shortly after leaving a game booted slot B
-instead of the desktop. Hypothesis (rollback protection vs the desktop's 30 s
-confirm) is UNCONFIRMED — two reproduction attempts were both invalid. Recovery
-is `otatool erase_otadata`.
+**THE ENTRY IS THE START MENU**: "Game Boy Color" reboots into slot B; Pusher A
+returns to the desktop. Exit now ERASES otadata (see below).
+
+**LIVE RISK — the desktop never leaves PENDING_VERIFY.** Measured twice: with the
+desktop confirmed drawing and running 45 s, otadata still read PENDING_VERIFY. The
+30 s confirm that OTA-001 recorded working on 2026-11-12 (pre-repartition layout)
+no longer fires — a REGRESSION of unknown cause, now noted in OTA-001. Rollback
+protection therefore cannot clear itself; a crash on the desktop can still roll
+back to slot B. Chase this before trusting the OTA path.
 
 ## WORKING WITH THE OPERATOR ON THE WATCH — read this first
 
@@ -34,10 +39,10 @@ host read during a picture hangs for ever.
 
 ## Where things live
 
-- Project-control repo: `/run/media/vash/GIT/Escapement`, `main`, entry 93
+- Project-control repo: `/run/media/vash/GIT/Escapement`, `main`, entry 94
   (reference **BRD-006** in entry 92; **TOL-009** in entry 91).
 - Active code is the fork: `/run/media/vash/GIT/tinydesk-twatch`, branch
-  `t-watch-ultra`, at `01acc7b`, pushed to `fork`. Push to `fork`
+  `t-watch-ultra`, at `d11ca27`, pushed to `fork`. Push to `fork`
   (`aquasock/tinydesk`) only — **never** `origin` (upstream, read-only).
 - `.ai/core.md` is RESTRICTED. Do not edit without an explicit instruction.
 
@@ -54,7 +59,8 @@ bootloader picked decides the personality.
 - **Entry:** `ota rollback` in a shell, or
   `otatool switch_ota_partition --name ota_1`.
 - **Exit:** Pusher A → flag → boot task calls `gb_stop()` (SRAM saved) →
-  `esp_ota_set_boot_partition(ota_0)` → restart.
+  **erase otadata** → restart. Erase, not `set_boot_partition`: see below.
+- **Entry:** Start menu "Game Boy Color" → `slotb start`; or `slotb status`.
 - **Picker:** `gbpick.c` scans `/sd/media/gbc` (2 deep), then `/sd` (2 deep);
   right column ↓/↑ (index 4/3), bottom strip Enter (index 1). Other ten margin
   buttons are blanked. Picker is also the failure report (text on the glass).
@@ -153,20 +159,26 @@ esptool write_flash 0xC00000 build/flac.bin 0xE00000 build/flac.data.bin
 
 **NEVER `rm sdkconfig`** — see TOL-008. Copy aside, compare after build.
 
+**`esptool ... --before default_reset --after hard_reset run` DOES NOT RESET THIS
+BOARD OUT OF THE BOOTLOADER.** It exits 0 and the board stays in the stub, so
+anything you then "measure" was measured with nothing running. This invalidated
+most of one session's tests. **Use `otatool` for switching and resetting** — it
+resets reliably; `esptool` reads with `--after no_reset` leave the board parked.
+
 ## Current board state
 
-- Runs entry-93 build (3,102,416 B). **otadata was ERASED** so the bootloader
-  deterministically boots `ota_0`; both slots hold the same image.
-- Module `host=0x3c28106c`, MMU `0x42ae0000`/`0x3cce0000`.
+- Runs entry-94 build (3,103,296 B), desktop on `ota_0`; both slots hold the same
+  image. otadata holds a bootloader-written pending entry for `ota_0` (expected).
+- Module `host=0x3c281250`, MMU `0x42ae0000`/`0x3cce0000`.
 - Cartridge chosen per boot from the picker (no remembered selection yet).
 
 ## Backup
 
-`~/twatch-backup/working-2026-11-23-1830-slotb-picker.bin` — 16 MiB, verified
+`~/twatch-backup/working-2026-11-23-1245-launcher.bin` — 16 MiB, verified
 against the chip, sha256
-`4ed2f5b2177c8452b34f868b0cd3afd32761b68178f1afcbd2379ff39e377163`.
-Both `ota_0` and `ota_1` regions confirmed byte-identical to the build.
-Supersedes `working-2026-11-23-1700-slotb-emu.bin` (entry 92).
+`3d7ac79f0474f7540f9c21084873dc9ab18052da490133823dec713cdbfa6c2c`.
+Both `ota_0` and `ota_1` regions confirmed byte-identical to the build, FLAC blobs
+current. Supersedes `working-2026-11-23-1830-slotb-picker.bin` (entry 93).
 
 ## Next steps, in order
 
@@ -179,6 +191,11 @@ Supersedes `working-2026-11-23-1700-slotb-emu.bin` (entry 92).
 3. **Measure the frame-time claim** — compare a slot B `gbhist` against the same
    ROM under the desktop. Never checked against a run.
 4. Remove the 0x1A000 trail once several sessions pass without a hang.
+5. **Confirm regression** — see "LIVE RISK" above. Needs a temporary secondary
+   console build to see whether `esp_timer_create` for `ota_ok` succeeds.
+6. **Launcher files are NOT in the image** — `/root/Apps/gbslotb.py` and
+   `Start menu/Game Boy Color.tdlink` live on littlefs `storage`. A full-image
+   flash or factory restore removes them; sources are in `scripts/apps/`.
 6. Open: frame-pool stall (parked), startup audio burst (~5,100 samples),
    Pusher A for NES/PM in the desktop, always-on gestures, `klio save` overflow,
    injection parked at 78, DMG unproven, savestate over-read, header 0x2c/0x44.

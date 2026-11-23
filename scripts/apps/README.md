@@ -8,6 +8,7 @@ install does not create them. These copies exist so they can be restored.
 ```
 pm.py     -> /root/Apps/pm.py     Pokemon Mini  (Start menu: "Pokémon Mini")
 tama.py   -> /root/Apps/tama.py   Tamagotchi V3 (Start menu: "Tamagotchi V2-3")
+gbslotb.py -> /root/Apps/gbslotb.py  Game Boy in slot B (Start menu: "Game Boy Color")
 ```
 
 Each is paired with a shortcut file the desktop reads:
@@ -15,7 +16,14 @@ Each is paired with a shortcut file the desktop reads:
 ```
 /root/Start menu/Pokémon Mini.tdlink      target=/root/Apps/pm.py
 /root/Start menu/Tamagotchi V2-3.tdlink   target=/root/Apps/tama.py
+/root/Start menu/Game Boy Color.tdlink    target=/root/Apps/gbslotb.py
 ```
+
+`gbslotb.py` is different in kind from the other two: `pm` and `tama` start an
+emulator inside the desktop, while this one REBOOTS THE WATCH into slot B, a
+personality with no desktop at all. It runs the firmware's `slotb start`
+command, which sets `ota_1` as the boot partition and restarts. Leaving slot B
+is Pusher A, which saves SRAM and returns the boot to `ota_0`.
 
 ## Why these are so short, and what they must not lose
 
@@ -50,6 +58,10 @@ echo 'tinydesk.shell("pm start")' >> "/root/Apps/pm.py"
 
 echo 'import tinydesk' > "/root/Apps/tama.py"
 echo 'tinydesk.shell("tama")' >> "/root/Apps/tama.py"
+
+echo 'import tinydesk' > "/root/Apps/gbslotb.py"
+echo 'tinydesk.shell("slotb start")' >> "/root/Apps/gbslotb.py"
+echo 'target=/root/Apps/gbslotb.py' > "/root/Start menu/Game Boy Color.tdlink"
 ```
 
 Then check both with `cat`, and launch one from the Start menu — the menu is the
