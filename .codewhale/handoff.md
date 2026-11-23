@@ -1,35 +1,28 @@
-# Handoff — Escapement / TinyDesk on T-Watch Ultra, 2026-11-23T13:10
+# Handoff — Escapement / TinyDesk on T-Watch Ultra, 2026-11-23T15:10
 
 Orientation, not authority. **Verify before acting on it.** The files, the flash
 and the board are the fact; this file is a claim.
 
 ## One line
 
-**Slot B is a working game console with a cartridge picker** — any ROM on the
-card, chosen with the margin arrows and Enter, battery saves round-tripping
-(Pokemon Crystal confirmed by the operator, entry 93). The desktop is the
-default boot; slot B is one `ota rollback` away.
-
-**THE ENTRY IS THE START MENU**: "Game Boy Color" reboots into slot B; Pusher A
-returns to the desktop. Exit now ERASES otadata (see below).
-
-**FRAME TIME IS MEASURED (entry 96, EMU-023).** Slot B is **6.6% faster per
-frame** than the desktop and contention is gone — 334 µs/frame of preemption
-becomes **0**. Every guest frame is blitted, pool never starved.
+**SLOT B IS A PERFORMANCE SLOT WITH A MENU (entry 97).** "Slot B - select an
+app": Game Boy Color / NES / Pokemon Mini. **Pusher A means BACK** — inside an
+app it stops it and returns to the menu; in the menu it leaves for the desktop.
+So changing games costs a tap, not a reboot.
 
 ```
-desktop          wall 11427 us   cpu 11096   lost 334   over 29
-slot B (core 1)  wall 10670 us   cpu 10695   lost   0   over  7   blits=frames
-slot B (core 0)  wall  9836 us   cpu  9860   lost   0   over  4   blits 3621/4199
+slot B  frames=4185  wall=10670us  cpu=10695  lost=0  over=7  blits=frames
+desktop frames=3911  wall=11427us  cpu=11096  lost=334 over=29
 ```
 
-**DO NOT move `gbblit` to core 0.** It makes the guest 7.7% faster and throws away
-14% of displayed frames. `gb_set_blit_core(1)` in `slotb.c` with the numbers at
-the call site.
+6.6% faster per frame and all preemption gone (entry 96, EMU-023). **Do not move
+`gbblit` to core 0** — 7.7% faster guest, 14% of frames thrown away.
 
-**Lesson that changed the conclusion:** guest CPU time is not the target. Report
-`blits` against `frames` and `starved` beside any timing, or a change that
-improves the emulator's own numbers while ruining the picture looks like a win.
+**Only NES and Pokemon Mini have never run in slot B** — this card holds only
+`.gbc` files, so both fail with a message on the glass. One `.nes` at
+`/sd/media/nes/homebrew/game.nes` would test the table.
+
+**Log is at 97 of 100.** Three entries left before the archive-and-restart rule.
 
 ## WORKING WITH THE OPERATOR ON THE WATCH — read this first
 
@@ -50,10 +43,10 @@ host read during a picture hangs for ever.
 
 ## Where things live
 
-- Project-control repo: `/run/media/vash/GIT/Escapement`, `main`, entry 96
+- Project-control repo: `/run/media/vash/GIT/Escapement`, `main`, entry 97
   (reference **BRD-006** in entry 92; **TOL-009** in entry 91).
 - Active code is the fork: `/run/media/vash/GIT/tinydesk-twatch`, branch
-  `t-watch-ultra`, at `2264698`, pushed to `fork`. Push to `fork`
+  `t-watch-ultra`, at `328fcd4`, pushed to `fork`. Push to `fork`
   (`aquasock/tinydesk`) only — **never** `origin` (upstream, read-only).
 - `.ai/core.md` is RESTRICTED. Do not edit without an explicit instruction.
 
