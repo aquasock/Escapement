@@ -280,6 +280,7 @@ Topic IDs are the `record_id` prefix. An entry reserves a name; it does not clai
 | What can an emulator measured on this board achieve? | EXT | EXT-001 |
 | Does a bigger data cache make the emulator faster? | EMU | EMU-022 |
 | Why does deleting sdkconfig change the firmware? | TOL | TOL-008 |
+| Why does a port's strong hook never run, while the firmware still builds and boots? | TOL | TOL-009 |
 | Where can a large read-only blob live without RAM? | EXT | EXT-002 |
 | Where does the IMU's firmware live, and in what container? | IMU | IMU-001 |
 | What do the bytes in a KLIO output frame mean? | IMU | IMU-002 |
@@ -481,6 +482,7 @@ TOL-005: "The watch and the TinyTang both appear as ttyACM devices and swap numb
 TOL-006: "esptool's --after no_reset leaves the ESP32-S3 in its ROM bootloader, so the board's console emits nothing and every later command reads stale state until a --after hard_reset chip_id or a power cycle"
 TOL-007: "The desktop Start menu remembers its last selection, so F10 then Enter is only deterministic after a reboot: the sequence that works is reboot, F10, Enter, and the window that appears must be verified to be `tdsh` before typing, or the keys land in whichever app was selected last"
 TOL-008: "Deleting sdkconfig to force regeneration reverts every setting that lives only in it, silently: on this board that dropped CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH and cut the ISR stack from 2096 to 1536, which matters because the console is compiled out and the coredump is the only crash record"
+TOL-009: "A weak definition in an object the link already includes satisfies every reference to that symbol, so the archive member holding a strong definition is never fetched; ESP-IDF archives port sources into libmain.a, so a port's strong override of a weak board hook is silently absent from the image until `-Wl,--undefined=<symbol>` forces the member out, and `nm` shows `W` instead of `T`"
 ```
 
 ---
@@ -2732,6 +2734,20 @@ TOL-008: "Deleting sdkconfig to force regeneration reverts every setting that li
     - "ESP-IDF 5.3.1 components/esp_driver_i2s/i2s_private.h: I2S_MEM_ALLOC_CAPS and I2S_DMA_ALLOC_CAPS"
     - "tinydesk-twatch ports/twatchultra/main/sound.c: sound_init() descriptor and frame counts, and set_std() which reconfigures the slot on every rate change"
   verification: "Verified on hardware 2026-11-20 (core-log entry 82). Two failing runs of the Game Boy emulator produced the four I2S lines above -- one with sound and a frozen picture, one with a moving picture and no sound -- and `mem heap` with the emulator running reported the DMA pool at 12,251 bytes free with a 3,968 largest block, which is smaller than a single clamped 4,092-byte buffer. After the frame count was reduced to 256, a cold boot reported no I2S lines at all, `gb status` showed `audio=on 43691Hz` where the channel could not be configured before, and the operator confirmed picture and sound both running. The shared consumer was checked rather than assumed: `music` on a 48 kHz tone still reports 192,000 frames, 0 errors, 0 short writes with the shorter ring."
+
+- record_id: TOL-009
+  kind: TOOLCHAIN
+  topic_id: TOL
+  status: VERIFIED
+  verified_date: 2026-11-23
+  title: "A weak definition that is already in the link satisfies every reference to it, so a port's strong override in an archive member is never fetched and is silently absent from the image"
+  statement: "GNU ld's archive-member selection is driven only by references that are still undefined when the archive is scanned. A weak definition does not have to come from an archive to satisfy a reference: if the object that defines it is already included in the link, every call to the symbol binds to that weak definition, no undefined reference remains, and the linker never searches the archives for a strong one. ESP-IDF links a component's sources into a static library -- this port's into libmain.a -- so a `__attribute__((weak))` no-op written beside `app_main` in main.c suppresses a board's strong implementation in another translation unit of the same component. The link succeeds with no diagnostic of any kind."
+  consequence: "This port deliberately uses weak board hooks so one shared application links against every board in the tree: `board_apps_register`, `board_imu_ops`, `board_maintenance_start`, and `board_startup_override`. A port that defines one strongly gets nothing unless the archive member is forced out, and the failure presents as the feature simply not working while the firmware builds, flashes and boots normally -- on this board that hid an entire boot personality. The mechanism is `target_link_options(<component> PUBLIC \"-Wl,--undefined=<a symbol only that member defines>\")`, or any call from an object that is always linked. Confirm a hook is live with `nm <elf> | grep <symbol>`: `T` is a linked strong definition and `W` is the weak fallback, so `W` means the port's code did not run. Apply the same check to any other weak board hook whose implementation lives outside main.c."
+  sources:
+    - "GNU binutils ld documentation, weak symbols and archive-member inclusion"
+    - "tinydesk-twatch ports/esp_idf/app/main.c: __attribute__((weak)) board_startup_override stub, and the call in app_main()"
+    - "tinydesk-twatch ports/twatchultra/main/CMakeLists.txt: target_link_options(... -Wl,--undefined=slotb_force_link)"
+  verification: "Established on this project's tools 2026-11-23 (core-log entry 91). The first build containing ports/twatchultra/main/slotb.c linked `board_startup_override` as `W` at an address inside main.o and `slotb_mark` was absent from the ELF entirely; the board booted the desktop from the other OTA slot and no log, coredump or build warning mentioned slot B. Adding the `--undefined` link option changed the symbol to `T`, and slot B then ran and handed the boot back."
 
 ```
 
