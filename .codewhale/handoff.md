@@ -1,14 +1,19 @@
-# Handoff — Escapement / TinyDesk on T-Watch Ultra, 2026-11-23T10:20
+# Handoff — Escapement / TinyDesk on T-Watch Ultra, 2026-11-23T11:10
 
 Orientation, not authority. **Verify before acting on it.** The files, the flash
 and the board are the fact; this file is a claim.
 
 ## One line
 
-**The Game Boy runs in slot B with no desktop behind it** — no shell, no status
-strip, no WiFi, no SSH; picture, UI, audio, video, touch, haptics and Pusher A
-all confirmed on the glass (entry 92). The watch is a game console one
-`ota rollback` away, and the desktop is the default boot.
+**Slot B is a working game console with a cartridge picker** — any ROM on the
+card, chosen with the margin arrows and Enter, battery saves round-tripping
+(Pokemon Crystal confirmed by the operator, entry 93). The desktop is the
+default boot; slot B is one `ota rollback` away.
+
+**ONE OPEN ANOMALY**: once, a reset shortly after leaving a game booted slot B
+instead of the desktop. Hypothesis (rollback protection vs the desktop's 30 s
+confirm) is UNCONFIRMED — two reproduction attempts were both invalid. Recovery
+is `otatool erase_otadata`.
 
 ## WORKING WITH THE OPERATOR ON THE WATCH — read this first
 
@@ -29,10 +34,10 @@ host read during a picture hangs for ever.
 
 ## Where things live
 
-- Project-control repo: `/run/media/vash/GIT/Escapement`, `main`, entry 92
-  (reference **BRD-006** added this cycle; **TOL-009** in entry 91).
+- Project-control repo: `/run/media/vash/GIT/Escapement`, `main`, entry 93
+  (reference **BRD-006** in entry 92; **TOL-009** in entry 91).
 - Active code is the fork: `/run/media/vash/GIT/tinydesk-twatch`, branch
-  `t-watch-ultra`, at `af4a9cd`, pushed to `fork`. Push to `fork`
+  `t-watch-ultra`, at `01acc7b`, pushed to `fork`. Push to `fork`
   (`aquasock/tinydesk`) only — **never** `origin` (upstream, read-only).
 - `.ai/core.md` is RESTRICTED. Do not edit without an explicit instruction.
 
@@ -50,6 +55,9 @@ bootloader picked decides the personality.
   `otatool switch_ota_partition --name ota_1`.
 - **Exit:** Pusher A → flag → boot task calls `gb_stop()` (SRAM saved) →
   `esp_ota_set_boot_partition(ota_0)` → restart.
+- **Picker:** `gbpick.c` scans `/sd/media/gbc` (2 deep), then `/sd` (2 deep);
+  right column ↓/↑ (index 4/3), bottom strip Enter (index 1). Other ten margin
+  buttons are blanked. Picker is also the failure report (text on the glass).
 - **Emulator:** the port's own `gb.c`, **not a copy**. `gb_install_touch_hook()`
   and `gb_install_key_hook()` let it run without its shell command.
 
@@ -66,7 +74,12 @@ bootloader picked decides the personality.
    absent from the image and the firmware still builds, flashes and boots.
    `nm <elf> | grep board_startup_override` must show **`T`**, not `W`.
    Fixed by `-Wl,--undefined=slotb_force_link`. See **TOL-009**.
-2. **Registering a hook does not start a driver.** `touch_add_app_touch()` and
+2. **A touch handler must fire on the press EDGE, not per report.** The CST9217
+   re-reports a held finger every ~66 ms (TCH records the interval; HAP-001 uses
+   it for the click). Acting per report moved the picker 5–8 rows per tap, and
+   would have made one tap select *and* commit a ROM. Track prev-state; a release
+   frame (n == 0) clears it.
+3. **Registering a hook does not start a driver.** `touch_add_app_touch()` and
    `pwrkey_set_app_key()` install into a poll loop that `touch_init()` /
    `pwrkey_init()` create. Haptics need BOTH the rail (`board_haptic_power_on()`)
    AND `haptic_init()` (which writes the library and wave sequence). Three dead
@@ -79,12 +92,16 @@ warm reboot the panel and motor rails are still driven; on a **cold boot every
 expander pin is an input**, so nothing is powered. Never infer a rail from what
 the glass shows — drive the pins explicitly.
 
-## Diagnostics in flash padding (INTERIM — FIRST THING TO REMOVE)
+## Diagnostics in flash padding
 
 ```
 0x1A000  slot B stage trail   (only when slot B runs)
-0x1B000  which slot booted    (EVERY boot — a desktop-side flash write)
+0x1B000  RETIRED — was a per-boot write; removed in entry 93. Stale bytes may remain.
 ```
+
+The desktop's per-boot mark is **gone**. The 0x1A000 trail stays as insurance
+against a hang (it distinguishes "stopped here" from "never started"); remove it
+once several sessions pass without one.
 
 Stages: 1 ENTER, 2 RAILS, 3 DISPLAY, 4 BOARDCFG, 5 SD, 6 EMU STARTED, 7 EMU
 STOPPED, 8 RETURN, 9 SETBOOT FAILED; 90 DISPLAY, 91 BOARDCFG, 92 SD, 93 NO ROM.
@@ -138,29 +155,30 @@ esptool write_flash 0xC00000 build/flac.bin 0xE00000 build/flac.data.bin
 
 ## Current board state
 
-- Runs entry-92 build (3,100,032 B), **desktop on ota_0 by default**; slot B is
-  entered deliberately and both slots hold the same image.
-- Module `host=0x3c280f40`, MMU `0x42ae0000`/`0x3cce0000`.
-- ROM is hard-coded (`GB_ROM_DEFAULT`, the Zelda GBC cartridge).
+- Runs entry-93 build (3,102,416 B). **otadata was ERASED** so the bootloader
+  deterministically boots `ota_0`; both slots hold the same image.
+- Module `host=0x3c28106c`, MMU `0x42ae0000`/`0x3cce0000`.
+- Cartridge chosen per boot from the picker (no remembered selection yet).
 
 ## Backup
 
-`~/twatch-backup/working-2026-11-23-1700-slotb-emu.bin` — 16 MiB, verified
+`~/twatch-backup/working-2026-11-23-1830-slotb-picker.bin` — 16 MiB, verified
 against the chip, sha256
-`9307ab83a140f34f39534ede2807c2ed8c0e066a6ace186a5759970a7fcdbdc8`.
+`4ed2f5b2177c8452b34f868b0cd3afd32761b68178f1afcbd2379ff39e377163`.
 Both `ota_0` and `ota_1` regions confirmed byte-identical to the build.
+Supersedes `working-2026-11-23-1700-slotb-emu.bin` (entry 92).
 
 ## Next steps, in order
 
-1. **Delete `slotb_boot_mark()`** — writes a flash sector on every desktop boot.
-2. **Prove the rollback net** — `slotb_confirm()` works; a slot B that dies
-   *before* confirming has never been tested. A deliberate crash is the test.
-3. **Cartridge selection in slot B** — the SD card is mounted, so a picker or a
-   remembered choice is now available.
-4. **Measure the frame-time claim** — slot B was argued from 8–13 ms of polling
-   SPI leaving the guest's core. Compare a slot B `gbhist` against the same ROM
-   under the desktop; it has never been checked against a run.
-5. Remove the 0x1A000/0x1B000 markers with (1).
+1. **Settle the rollback anomaly** — reset-within-30-s returning to slot B.
+   Test properly: BOTH slots with valid otadata entries, reset inside the window,
+   `otatool` output VISIBLE. Probable fix: confirm the desktop's image on boot
+   after a local switch instead of after 30 s — but that is the desktop's OTA
+   policy and needs operator approval.
+2. **Remember the last cartridge** — the picker rescans every boot.
+3. **Measure the frame-time claim** — compare a slot B `gbhist` against the same
+   ROM under the desktop. Never checked against a run.
+4. Remove the 0x1A000 trail once several sessions pass without a hang.
 6. Open: frame-pool stall (parked), startup audio burst (~5,100 samples),
    Pusher A for NES/PM in the desktop, always-on gestures, `klio save` overflow,
    injection parked at 78, DMG unproven, savestate over-read, header 0x2c/0x44.
