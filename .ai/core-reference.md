@@ -165,6 +165,7 @@ Topic IDs are the `record_id` prefix. An entry reserves a name; it does not clai
 | Which I2C bus carries the peripherals, on which pins, at which addresses? | BRD | BRD-001 |
 | Which PMU interrupt pin is it, and why did it storm? | BRD | BRD-002 |
 | What does the power rail map look like? | BRD | BRD-003 |
+| Why is a panel or motor powered after a reboot but dark from a power cycle? | BRD | BRD-006 |
 | Which SPI bus is the panel on, and does the second one work? | BRD | BRD-004 |
 | Where is the haptic driver, and why does it buzz nothing? | BRD | BRD-005 |
 | Where is the touch controller, and what is at 0x5A? | TCH | TCH-001 |
@@ -483,6 +484,7 @@ TOL-006: "esptool's --after no_reset leaves the ESP32-S3 in its ROM bootloader, 
 TOL-007: "The desktop Start menu remembers its last selection, so F10 then Enter is only deterministic after a reboot: the sequence that works is reboot, F10, Enter, and the window that appears must be verified to be `tdsh` before typing, or the keys land in whichever app was selected last"
 TOL-008: "Deleting sdkconfig to force regeneration reverts every setting that lives only in it, silently: on this board that dropped CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH and cut the ISR stack from 2096 to 1536, which matters because the console is compiled out and the coredump is the only crash record"
 TOL-009: "A weak definition in an object the link already includes satisfies every reference to that symbol, so the archive member holding a strong definition is never fetched; ESP-IDF archives port sources into libmain.a, so a port's strong override of a weak board hook is silently absent from the image until `-Wl,--undefined=<symbol>` forces the member out, and `nm` shows `W` instead of `T`"
+BRD-006: "The XL9555 expander's CONFIG and OUTPUT registers survive an ESP32-S3 reset, so a peripheral it switches stays powered across a warm reboot and is unpowered on a cold boot; on a cold boot every expander pin is an input, which is why the panel lit up after a warm reset with no code raising its rail"
 ```
 
 ---
@@ -985,6 +987,19 @@ TOL-009: "A weak definition in an object the link already includes satisfies eve
     - "patches/kernel/display/NOTES provenance and TinyPetz firmware/bringup/main/board.c: EXPANDS_DRV_EN = 6, the expander bit that enables the haptic rail"
     - "userspace/haptic.c: the driver, with the register map and the library choice recorded"
   verification: "Verified on hardware 2026-11-09: the registers were read as above before any code was written, haptic_init() then reported `haptic ready (DRV2605, ERM)` in the daemon log, and the operator confirmed the click is felt when a bar is tapped. TinyPetz was checked first and does not drive the chip at all -- it only raises the expander bit at boot -- so the effect was established here from the datasheet IDs rather than copied."
+
+- record_id: BRD-006
+  kind: BOARD
+  topic_id: BRD
+  title: "The XL9555 expander's direction and output registers survive an ESP32-S3 reset, so a peripheral it switches stays powered across a warm reboot and is dark on a cold boot"
+  status: VERIFIED
+  verified_date: 2026-11-23
+  statement: "The XL9555 at I2C 0x20 switches the AMOLED's rail (port 0 bit 7, P07) and the DRV2605's (port 0 bit 6, P06) through its CONFIG and OUTPUT latches. Both registers keep their values across a reset of the ESP32-S3; the expander is not reset with the MCU. On a cold boot, from a power cycle, every expander pin is an INPUT, so neither rail is driven and both peripherals are unpowered until something configures the pin as an output. After a warm reset, the pins are still configured as outputs and the latches are still high, so both peripherals come up already powered."
+  consequence: "This makes the panel's behaviour depend on how the board started, which is the opposite of what a driver should assume, and it produced a specifically misleading result on this project. A second boot personality that brought the display up without raising the panel switch showed a lit screen after a warm reboot and would have shown a black one after a power cycle -- so the success proved nothing about the cold path. Drive the pins explicitly at every bring-up whose correctness matters (power.c's board_display_power_on and board_haptic_power_on, and board_touch_reset_release for the touch controller's reset line, which is held in reset by the same expander) rather than inferring the rail state from what the glass shows. This record is separate from BRD-005 because it is a property of the expander and applies to every peripheral it gates, not to the haptic chip."
+  sources:
+    - "tinydesk-twatch ports/twatchultra/main/power.c: xl_pin_set/xl_pin_high writing XL9555_CONFIG0 and OUTPUT0, and the note at board_touch_reset_release that 'on a cold boot the expander has every pin configured as an input'"
+    - "BRD-005 for which bit gates the haptic rail, and patches/kernel/display/NOTES for the display's P07"
+  verification: "Established on hardware 2026-11-23 (core-log entry 92) by a failure that named itself: slot B drew on the panel correctly after a warm reboot from the desktop while raising no rail at all, and the motor stayed silent although its rail was up -- so the display's success was the latch's doing, not the driver's. power.c's own comment states the cold-boot half, and the fix was to call board_display_power_on() unconditionally so the cold path is exercised rather than inherited."
 
 - record_id: HAP-001
   kind: HAPTIC

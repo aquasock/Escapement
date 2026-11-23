@@ -1,98 +1,103 @@
-# Handoff — Escapement / TinyDesk on T-Watch Ultra, 2026-11-23T09:45
+# Handoff — Escapement / TinyDesk on T-Watch Ultra, 2026-11-23T10:20
 
 Orientation, not authority. **Verify before acting on it.** The files, the flash
 and the board are the fact; this file is a claim.
 
 ## One line
 
-**Slot B exists, works, and is confirmed on the glass** — one image in both OTA
-slots, `ota_1` boots a bare personality that starts no shell, desktop, WiFi or
-SSH (entry 91). Next increment is the emulator payload on that proven base.
-
-**Background is now verified and complete for the current build** — the gap
-entries 89 and 90 left is closed.
+**The Game Boy runs in slot B with no desktop behind it** — no shell, no status
+strip, no WiFi, no SSH; picture, UI, audio, video, touch, haptics and Pusher A
+all confirmed on the glass (entry 92). The watch is a game console one
+`ota rollback` away, and the desktop is the default boot.
 
 ## WORKING WITH THE OPERATOR ON THE WATCH — read this first
 
 **When the operator says they are testing, send no commands.** Not status, not
 `ls`, not a read "to check". Boot what they ask for, then stop.
 
-**NEVER reset the board mid-cycle with an instrument.** On 2026-11-23 a
-`otatool read_otadata` run three seconds after `switch_ota_partition` reset the
-board and restarted slot B mid-sequence. Wait out the cycle (≈30 s) before
-touching the port.
+**NEVER reset the board mid-cycle with an instrument.** A `otatool read_otadata`
+run three seconds after `switch_ota_partition` restarted slot B mid-sequence.
 
 **`esptool ... --after no_reset` leaves the board in the bootloader (TOL-006).**
-Every marker read must be followed by a real reset:
+Follow every marker read with:
 `esptool ... --before default_reset --after hard_reset run`.
 
 **THE USB MIRROR IS DEAD WHILE A PICTURE OWNS THE PANEL (DSP-003).** A blocking
-host read during a picture hangs for ever. Nothing read during a picture is
-trustworthy.
+host read during a picture hangs for ever.
 
 **Do not pipe a long run through `tail`.** It buffers to exit.
 
 ## Where things live
 
-- Project-control repo: `/run/media/vash/GIT/Escapement`, `main`, entry 91
-  (reference **TOL-009** added).
+- Project-control repo: `/run/media/vash/GIT/Escapement`, `main`, entry 92
+  (reference **BRD-006** added this cycle; **TOL-009** in entry 91).
 - Active code is the fork: `/run/media/vash/GIT/tinydesk-twatch`, branch
-  `t-watch-ultra`, at `188f262`, pushed to `fork`. Push to `fork`
+  `t-watch-ultra`, at `af4a9cd`, pushed to `fork`. Push to `fork`
   (`aquasock/tinydesk`) only — **never** `origin` (upstream, read-only).
 - `.ai/core.md` is RESTRICTED. Do not edit without an explicit instruction.
 
-## SLOT B — how it works (entry 91)
+## SLOT B — how it works (entries 91–92)
 
-One image, flashed to **both** `ota_0` (0x20000) and `ota_1` (0x400000). The
-slot the bootloader picked decides the personality.
+One image in **both** `ota_0` (0x20000) and `ota_1` (0x400000). The slot the
+bootloader picked decides the personality.
 
-- **Seam:** `board_startup_override()` in `ports/esp_idf/app/main.c`, **weak**,
-  called after `nvs_flash_init()` and before the netif/shell/desktop. Returns
-  true → `app_main` stops there.
+- **Seam:** `board_startup_override(const char *board_conf)` in
+  `ports/esp_idf/app/main.c`, **weak**, called after `nvs_flash_init()` and
+  before netif/shell/desktop. Returns true → `app_main` stops there.
 - **Implementation:** `ports/twatchultra/main/slotb.c`, strong, returns false on
-  `ota_0` so the desktop path is unchanged.
+  `ota_0`.
 - **Entry:** `ota rollback` in a shell, or
   `otatool switch_ota_partition --name ota_1`.
-- **Exit:** `esp_ota_set_boot_partition(ota_0)` + `esp_restart()`.
-- **Slot B brings up its own power rails** (`board_power_rails_preinit()`)
-  because the override runs before `app_main` reaches them, and the AMOLED is
-  behind a switched regulator.
+- **Exit:** Pusher A → flag → boot task calls `gb_stop()` (SRAM saved) →
+  `esp_ota_set_boot_partition(ota_0)` → restart.
+- **Emulator:** the port's own `gb.c`, **not a copy**. `gb_install_touch_hook()`
+  and `gb_install_key_hook()` let it run without its shell command.
 
-### THE TRAP THAT COST THIS CYCLE — read before adding any board hook
+### ORDER THAT MATTERS in `slotb_run()`
 
-A **weak definition in an already-included object satisfies every reference**,
-so the linker never fetches the strong one from `libmain.a`. The module was
-absent from the image and the firmware built, flashed and booted normally.
-`nm <elf> | grep board_startup_override` showed **`W`** instead of `T`.
+`board_power_rails_preinit()` → `display_init(NULL)` → `display_pixels_claim(true)`
+→ **`slotb_peripherals()`** → board.conf → SD mount → touch hook → `pwrkey_init`
+→ `gb_start(NULL)` → `slotb_confirm()` → wait for flag → `gb_stop()` → return.
 
-Fixed by `target_link_options(... PUBLIC "-Wl,--undefined=slotb_force_link")`.
-**Any new weak board hook needs the same treatment and the same `nm` check.**
-See TOL-009.
+### THE TWO TRAPS THAT COST THIS WORK — read before changing anything
 
-## Diagnostics in flash padding (interim — REMOVE BEFORE SHIPPING)
+1. **A weak definition in an already-included object satisfies every reference**,
+   so the linker never fetches the strong one from `libmain.a`. The module is
+   absent from the image and the firmware still builds, flashes and boots.
+   `nm <elf> | grep board_startup_override` must show **`T`**, not `W`.
+   Fixed by `-Wl,--undefined=slotb_force_link`. See **TOL-009**.
+2. **Registering a hook does not start a driver.** `touch_add_app_touch()` and
+   `pwrkey_set_app_key()` install into a poll loop that `touch_init()` /
+   `pwrkey_init()` create. Haptics need BOTH the rail (`board_haptic_power_on()`)
+   AND `haptic_init()` (which writes the library and wave sequence). Three dead
+   peripherals came from this one mistake.
+
+### Board fact behind the "panel worked by luck" (BRD-006)
+
+The **XL9555's CONFIG and OUTPUT registers survive an ESP32-S3 reset.** After a
+warm reboot the panel and motor rails are still driven; on a **cold boot every
+expander pin is an input**, so nothing is powered. Never infer a rail from what
+the glass shows — drive the pins explicitly.
+
+## Diagnostics in flash padding (INTERIM — FIRST THING TO REMOVE)
 
 ```
-0x1A000  slot B stage trail   (only written when slot B runs)
-0x1B000  which slot booted     (EVERY boot — a desktop-side flash write)
+0x1A000  slot B stage trail   (only when slot B runs)
+0x1B000  which slot booted    (EVERY boot — a desktop-side flash write)
 ```
 
-Stage codes: 1 ENTER, 2 RAILS, 3 DISPLAY, 4 PAINT, 5 HOLD, 6 RETURN,
-7 SETBOOT_FAILED, 99 DISPLAY_FAILED. 200+subtype = boot-slot mark
-(0x10 ota_0, 0x11 ota_1). Read both with one contiguous read:
+Stages: 1 ENTER, 2 RAILS, 3 DISPLAY, 4 BOARDCFG, 5 SD, 6 EMU STARTED, 7 EMU
+STOPPED, 8 RETURN, 9 SETBOOT FAILED; 90 DISPLAY, 91 BOARDCFG, 92 SD, 93 NO ROM.
+200+subtype = boot slot (0x10 ota_0, 0x11 ota_1).
 
 ```sh
 esptool -p <by-id> -b 921600 --before default_reset --after no_reset \
         read_flash 0x1A000 0x2000 /tmp/mark.bin
-# then reset for real:  ... --before default_reset --after hard_reset run
+# then: ... --before default_reset --after hard_reset run
 ```
 
-**`slotb_boot_mark()` must be deleted before this is shipping code** — it
-erases and writes a flash sector on every desktop boot.
-
-## Proving sequence (what "pass" looked like)
-
-Green → white square (through `display_panel_push()`) → blue → desktop returns.
-Each phase 4 s. Operator confirmed 2026-11-23.
+**Delete `slotb_boot_mark()` first** — it erases a flash sector on every desktop
+boot.
 
 ## Build, flash, relink
 
@@ -107,22 +112,24 @@ python "$IDF_PATH/tools/idf.py" build
 Port: `/dev/serial/by-id/usb-Espressif_USB_JTAG_serial_debug_unit_80:45:6B:46:DF:54-if00`
 (watch is `303a:1001`; the TinyTang also enumerates as ttyACM — never open by number).
 
-**Flash both slots after any build:**
+**Flash BOTH slots after every build** (slot B is what makes the feature work):
 ```sh
 esptool -p <by-id> -b 921600 --before default_reset --after hard_reset \
         write_flash 0x20000 build/tinydesk.bin 0x400000 build/tinydesk.bin
 ```
 Add `0x7F0000 build/ota_data_initial.bin` to force the boot back to `ota_0`.
 
-**Expect a relink whenever the image size changes.** Check first:
+**ESP-IDF EMBEDS THE BUILD DATE AND TIME**, so *every* rebuild changes the image
+even for a comment-only edit. A rebuilt binary is never byte-identical — reflash
+if you want the backup and the board to match the source.
+
+**Relink the module whenever the image SIZE changes:**
 ```sh
 xtensa-esp32s3-elf-nm build/tinydesk.elf | grep -E ' g_modhost_ptr| g_modbss$'
 grep -E 'MODHOST_PTR_AT|MODBSS_AT' modules/build/modaddr.h
-```
-If they differ (they did this cycle: `host=0x3c280db8`):
-```sh
+# if they differ:
 cd ports/twatchultra/modules
-python3 read_modaddr.py --port <by-id> -o moddata.at   # ~4 min, reads storage raw
+python3 read_modaddr.py --port <by-id> -o moddata.at   # ~4 min
 make flac                                              # prints host=0x...
 esptool write_flash 0xC00000 build/flac.bin 0xE00000 build/flac.data.bin
 ```
@@ -131,35 +138,32 @@ esptool write_flash 0xC00000 build/flac.bin 0xE00000 build/flac.data.bin
 
 ## Current board state
 
-- Runs entry-91 build, `ota_0`, seq 5 (desktop is the boot target).
-- `ota_1` holds the same image at seq 4 — one `ota rollback` away.
-- App 3,099,152 bytes; module `host=0x3c280db8`, MMU `0x42ae0000`/`0x3cce0000`.
-- `music` relinked and flashed; verified only by hash, not played since.
+- Runs entry-92 build (3,100,032 B), **desktop on ota_0 by default**; slot B is
+  entered deliberately and both slots hold the same image.
+- Module `host=0x3c280f40`, MMU `0x42ae0000`/`0x3cce0000`.
+- ROM is hard-coded (`GB_ROM_DEFAULT`, the Zelda GBC cartridge).
 
 ## Backup
 
-`~/twatch-backup/working-2026-11-23-0910-entry90.bin` — 16 MiB, verified
+`~/twatch-backup/working-2026-11-23-1700-slotb-emu.bin` — 16 MiB, verified
 against the chip, sha256
-`f716a49a57115abf79dce35ec129b1a52769189d66268beb47ec9d9f0b792aa0`.
-Contains the **entry-90** build (3,098,048 B), not the slot-B build.
-**Take a fresh backup once slot B is validated**, since the current flash is
-not in any verified image.
+`9307ab83a140f34f39534ede2807c2ed8c0e066a6ace186a5759970a7fcdbdc8`.
+Both `ota_0` and `ota_1` regions confirmed byte-identical to the build.
 
 ## Next steps, in order
 
-1. **Emulator payload in slot B** — gnuboy on one core, blitter on the other,
-   touch/gamepad input, audio, Pusher A to return (reuse `gb_app_key()`).
-2. **Delete `slotb_boot_mark()`** — interim instrument, writes flash every boot.
-3. **Mount the SD card in slot B** — no `td_fs_stdio_redirect` there; needed for
-   cartridges and `/sd/diag/`.
-4. **Prove rollback protection** — configured but never exercised. A deliberate
-   crash before `slotb_confirm()` is the cheap test.
-5. Still open: frame-pool stall (parked, `/sd/diag/gbwedge.txt`), startup audio
-   burst (~5,100 samples), Pusher A for NES/PM, always-on gestures, `klio save`
-   overflow, injection parked at 78, DMG unproven, savestate over-read,
-   firmware header fields 0x2c/0x44.
-6. Operator decisions outstanding: statusbar stack (5120 vs 8192), two-slot
-   rationale now reframed as fit/power/boot-time.
+1. **Delete `slotb_boot_mark()`** — writes a flash sector on every desktop boot.
+2. **Prove the rollback net** — `slotb_confirm()` works; a slot B that dies
+   *before* confirming has never been tested. A deliberate crash is the test.
+3. **Cartridge selection in slot B** — the SD card is mounted, so a picker or a
+   remembered choice is now available.
+4. **Measure the frame-time claim** — slot B was argued from 8–13 ms of polling
+   SPI leaving the guest's core. Compare a slot B `gbhist` against the same ROM
+   under the desktop; it has never been checked against a run.
+5. Remove the 0x1A000/0x1B000 markers with (1).
+6. Open: frame-pool stall (parked), startup audio burst (~5,100 samples),
+   Pusher A for NES/PM in the desktop, always-on gestures, `klio save` overflow,
+   injection parked at 78, DMG unproven, savestate over-read, header 0x2c/0x44.
 
 ## Standing facts
 
