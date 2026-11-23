@@ -1,3 +1,33 @@
+## 98 COMMIT Unreleased 2026-11-23T16:03:32-07:00
+
+#### Coming From:
+
+Unreleased 4d9b929
+
+#### Purpose:
+
+Correct entry 97, which recorded that NES and Pokemon Mini had never run in slot B because the card held no ROMs for them.
+
+#### Outcome:
+
+ENTRY 97 IS WRONG ON A POINT OF FACT AND THIS ENTRY SUPERSEDES IT. It recorded that "NES and Pokemon Mini are menu entries that have never run in slot B, and the reason is the card rather than the code -- `/sd/media` holds only `gbc`", and its Outcome said the same thing as "the likely cause on this card is a missing cartridge". THE OPERATOR RAN BOTH FROM THE SLOT B MENU AND BOTH WORKED, and checking the card shows why: `/sd/media/nes/homebrew` holds `zelda.nes`, `smb.nes` and `game.nes`, `/sd/media/min/homebrew` holds thirteen cartridges including `Pokemon Pinball Mini (USA, Europe).min` which is the exact `PM_ROM_DEFAULT` path, and `/sd/media/tama` holds its own tree. Every emulator in the menu has its default ROM present, `sd_media()` resolves the organised path first, and the table in entry 97 therefore starts all three apps rather than only Game Boy. THE ERROR WAS MINE AND ITS SHAPE IS WORTH RECORDING BECAUSE THIS PROJECT HAS NOW BEEN MISLED BY IT THREE TIMES. The listing that produced the false claim was a GARBLED SCREEN CAPTURE: the command and its output had interleaved across runs, so the line read `media/gbc/homebrewls /sd/media/gbc/homebrew | cat`, and `gbc` was read out of corrupted text and treated as a complete listing of `/sd/media`. The two earlier instances were the shifted otadata enum in entry 95, where `VALID` printed as `PENDING_VERIFY`, and a hand-parsed otadata in entry 91 that named the wrong boot slot. All three are the same fault: an instrument produced something plausible and it was believed without a second source, on a device whose only display of truth is a serial mirror that mangles output when keystrokes and reads overlap. THE RULE THAT FOLLOWS IS NARROW AND CHECKABLE: a screen-capture listing is not evidence of a directory's contents, because the capture can interleave or truncate; a claim about what is or is not on the card gets confirmed from a second, differently-shaped command -- `ls` of the specific path rather than of its parent, or a read that does not race the input. The remedy applied here was simply to list `/sd/media/nes/homebrew` and `/sd/media/min/homebrew` directly, which answered it in one command. NO CODE CHANGED, because the code was correct: the menu, the table, the ROM resolution and the failure message all behave as written, and what was wrong was the claim about what the card contained. The failure message added in entry 97 remains worth having for the case it was written for -- a card that really is missing a cartridge -- and is simply not the state this card is in. THE CORE-SYNTAX AUDIT REQUIRED BY core.md WAS PERFORMED BEFORE COMMIT: core.md and core-syntax.md were re-read, the complete `.ai/` diff inspected, core.md is unchanged, entry 98 is checked against the template for header order, the six sections in order, prose-only Purpose, Outcome and Next Steps, eligible Files Modified and the three Status lines, the log stands at 98 entries against a ring of 100 so no archive is due and TWO remain before it is, and the known conformance debt in entries 66 through 73 stands as entry 74 recorded it. No reference record was added: this is this project's own card and its own reading error, not an outside source's behaviour.
+
+#### Next Steps:
+
+THE THREE-APP MENU IS NOW CONFIRMED END TO END BY THE OPERATOR, not just Game Boy, so the table in slot B needs no work and the next cycle can start wherever the project is most useful. TWO ENTRIES REMAIN BEFORE THE LOG ROLLS AT 100: when the hundredth is written the active log must be tar.gz'd into `archived_logs` with the date and time, cleared, and reopened with a handover entry that names the archive and summarises the live state, so that work should be planned for rather than stumbled into. THE TAMAGOTCHI IS THE ONE EMULATOR NOT IN THE SLOT B MENU, and `/sd/media/tama` holds its tree; adding it is one row in `s_apps[]` plus a `tama_install_touch_hook()` split of the same shape as the other three, and it is worth doing only if the operator wants a fourth entry. THE STARTUP AUDIO BURST remains the one number that got worse in slot B (21 of 70 seconds with drops against 7 of 66 on the desktop) and has not been investigated; it is the strongest candidate for the next technical cycle. THE CARTRIDGE PICKER STILL RESCANS THE CARD ON EVERY LAUNCH with no memory of the last choice, which now costs more than it did because the menu sits in front of it. THE FRAME-POOL STALL FROM ENTRY 89 remains parked with `starved` and the blits-against-frames ratio written every session by entry 96's totals. TWO SMALL REMOVALS ARE OWED once slot B has run more sessions without a hang: the 0x1A000 stage trail, and the desktop's `ota status` line about a sequence number an exit erases. UNCHANGED AND STILL OPEN: Pusher A is still GBC-only in the desktop, always-on gesture detection still needs an upstream lock in `src/wm.c`, `klio save` still emits `meta 12 fifo overflow`, the injection line stays parked at entry 78, the DMG path is unproven, the savestate over-read in `gnuboy.c` is still unfixed, the two unidentified firmware header fields at 0x2c and 0x44 still gate custom firmware, and the statusbar stack decision is still the operator's.
+
+#### Files Modified:
+
+None.
+
+#### Status:
+
+- Build: N/A
+- Deployment: N/A
+- User Test: N/A
+
+---
+
 ## 97 COMMIT Unreleased 2026-11-23T15:05:39-07:00
 
 #### Coming From:

@@ -1,4 +1,4 @@
-# Handoff — Escapement / TinyDesk on T-Watch Ultra, 2026-11-23T15:10
+# Handoff — Escapement / TinyDesk on T-Watch Ultra, 2026-11-23T16:10
 
 Orientation, not authority. **Verify before acting on it.** The files, the flash
 and the board are the fact; this file is a claim.
@@ -18,11 +18,28 @@ desktop frames=3911  wall=11427us  cpu=11096  lost=334 over=29
 6.6% faster per frame and all preemption gone (entry 96, EMU-023). **Do not move
 `gbblit` to core 0** — 7.7% faster guest, 14% of frames thrown away.
 
-**Only NES and Pokemon Mini have never run in slot B** — this card holds only
-`.gbc` files, so both fail with a message on the glass. One `.nes` at
-`/sd/media/nes/homebrew/game.nes` would test the table.
+**ALL THREE APPS ARE CONFIRMED IN SLOT B** — the operator ran NES and Pokemon
+Mini from the menu (entry 98 corrects entry 97, which wrongly claimed the card
+had no ROMs for them). Every emulator's default ROM is present:
 
-**Log is at 97 of 100.** Three entries left before the archive-and-restart rule.
+```
+/sd/media/gbc/homebrew   .gbc cartridges
+/sd/media/nes/homebrew   zelda.nes  smb.nes  game.nes
+/sd/media/min/homebrew   13 .min cartridges incl. Pokemon Pinball Mini
+/sd/media/tama           its own tree
+```
+
+**Tamagotchi is the only emulator NOT in slot B's menu** — one row in `s_apps[]`
+plus a `tama_install_touch_hook()` split, if wanted.
+
+**Log is at 98 of 100.** TWO entries left before the archive-and-restart rule:
+at 100, tar.gz the log into `archived_logs`, clear it, reopen with a handover
+entry naming the archive. Plan for it rather than stumble into it.
+
+**NEVER trust a screen-capture listing as proof of a directory's contents** — the
+mirror interleaves and truncates when keystrokes and reads overlap. Three
+conclusions have been wrong this way (entries 91, 95, 98). Confirm with a second,
+differently-shaped command: `ls` the specific path, not its parent.
 
 ## WORKING WITH THE OPERATOR ON THE WATCH — read this first
 
@@ -43,7 +60,7 @@ host read during a picture hangs for ever.
 
 ## Where things live
 
-- Project-control repo: `/run/media/vash/GIT/Escapement`, `main`, entry 97
+- Project-control repo: `/run/media/vash/GIT/Escapement`, `main`, entry 98
   (reference **BRD-006** in entry 92; **TOL-009** in entry 91).
 - Active code is the fork: `/run/media/vash/GIT/tinydesk-twatch`, branch
   `t-watch-ultra`, at `328fcd4`, pushed to `fork`. Push to `fork`
