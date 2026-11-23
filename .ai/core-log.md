@@ -1,3 +1,33 @@
+## 95 COMMIT Unreleased 2026-11-23T12:05:22-07:00
+
+#### Coming From:
+
+Unreleased 504091f
+
+#### Purpose:
+
+Establish whether the desktop's 30-second OTA confirm still works, which entry 94 asserted it did not.
+
+#### Outcome:
+
+THE CONFIRM WORKS AND ENTRY 94'S CLAIM IS WITHDRAWN, because the fault was in the reader and not in the firmware: the otadata state field was being decoded with an enum map shifted by one, so `ESP_OTA_IMG_VALID` (0x2) printed as PENDING_VERIFY and `ESP_OTA_IMG_ABORTED` (0x4) printed as INVALID, and every conclusion drawn from those reads was built on a label the hardware had not produced. The authoritative values, from `components/bootloader_support/include/esp_flash_partitions.h`, are NEW 0x0, PENDING_VERIFY 0x1, VALID 0x2, INVALID 0x3, ABORTED 0x4 and UNDEFINED 0xFFFFFFFF; the decoder in use had been `1=NEW, 2=PENDING_VERIFY, 3=VALID, 4=INVALID, 5=ABORTED, 0xFFFFFFFF=ERASED`, which is wrong in every position and also invents a state the hardware does not have. MEASURED CORRECTLY, THE TRIAL BEHAVES EXACTLY AS OTA-001 SAYS IT DOES. otadata was erased so the bootloader had to record a fresh entry, the desktop was confirmed drawing on the glass, and at about 45 s the entry read state 2, VALID. The 2026-11-12 figure in OTA-001 therefore stands and its revision note from entry 94 has been replaced with a withdrawal naming the reader fault, so the correction is visible from the record rather than only from this log. WHAT THE CYCLE DID ESTABLISH IS THE REAL MECHANISM BEHIND THE OPERATOR'S ORIGINAL ANOMALY, and it is rollback protection working exactly as designed. `esp_ota_set_boot_partition(ota_0)` writes a pending entry; a reset inside the 30-second trial makes the bootloader mark that entry ABORTED and fall back to the other valid image, which after a game session is slot B. So exiting the emulator and power-cycling within 30 s landed the wearer back in the emulator, and that is correct firmware behaviour rather than a defect. THE ERASE-BASED EXIT IS KEPT AND IS NOW JUSTIFIED BY MEASUREMENT RATHER THAN BY A STORY: erasing removes the ALTERNATIVE image rather than the trial, so a rollback has nothing to choose. Tested directly -- erase otadata, boot, reset at t=12 s with a command that writes nothing, and the desktop still came up, with the entry reading VALID afterwards. That matters because the person who power-cycles within 30 s is precisely the wearer who has just put the watch down after a game. Three verdicts changed and each is recorded rather than quietly dropped: entry 94 said the confirm did not fire (it does), entry 93 and 94 both said the exit needed an unverifiable early-confirm guard (it does not, and it stays removed), and the repair of the erase justification in `slotb.c` replaces the false account with the measured one. NO CONSOLE WAS EVER ENABLED FOR THIS WORK, so there is nothing to remove as the operator asked: `CONFIG_ESP_CONSOLE_NONE=y` and `CONFIG_ESP_CONSOLE_SECONDARY_NONE=y` are unchanged in `sdkconfig`, the file was copied aside and compared before and after the build and did not differ, and the diagnosis was done entirely by reading flash from the host. No temporary instrumentation was added to the firmware in this cycle; the only diagnostic still present is slot B's own stage trail at 0x1A000, which predates this work and writes only during a slot B session. THE IMAGE IS 3,103,296 BYTES and unchanged from entry 94, with module `host=0x3c281250` unmoved, so no relink was owed; it was reflashed to both slots anyway because ESP-IDF embeds the build date and time, so a comment-only edit still produces a different binary and the board must carry the built one rather than the previous one. A FULL 16 MiB BACKUP WAS TAKEN AND VERIFIED: `working-2026-11-23-1305-confirm-corrected.bin`, sha256 `dbeca7d6b7f123e70895eb2ce3c3eca1fa3b78053333eed4097350c235922a19`, compared against the chip with the board held in the bootloader, sidecar re-checked, both slots confirmed byte-identical to the build and the FLAC blobs current. THE CORE-SYNTAX AUDIT REQUIRED BY core.md WAS PERFORMED BEFORE COMMIT: core.md and core-syntax.md were re-read, the complete `.ai/` diff inspected, core.md is unchanged, entry 95 is checked against the template for header order, the six sections in order, prose-only Purpose, Outcome and Next Steps, eligible Files Modified and the three Status lines, the log stands at 95 entries against a ring of 100 so no archive is due, and the known conformance debt in entries 66 through 73 stands as entry 74 recorded it. OTA-001 was revised in place rather than given a new id, which is what section 1 requires when a recorded fact proves wrong.
+
+#### Next Steps:
+
+NO FIRMWARE WORK IS OWED BY THIS CYCLE and the board is settled: desktop on `ota_0` with a VALID entry, both slots carrying the same build, launcher and picker confirmed by the operator in entry 94. THE LESSON WORTH CARRYING FORWARD IS ABOUT INSTRUMENTS RATHER THAN THE WATCH: three separate readings in two cycles were wrong for tool reasons -- `esptool run` does not reset this board, a multi-range `read_flash` is unsupported and silently produced no file, and the otadata state map was shifted by one -- and each produced a confident conclusion about firmware that the firmware did not support. A decoder for a binary structure should be checked against the defining header before its output is used as evidence, and this project already has the precedent: entry 91 recorded a hand-parsed otadata giving a confident wrong answer about which slot boots. THE ITEMS THAT WERE QUEUED BEHIND THIS ONE ARE UNCHANGED AND NOW UNBLOCKED: the picker rescans the card every boot rather than remembering the last cartridge; slot B's stage trail at 0x1A000 should come out once several sessions pass without a hang; and the frame-time claim that motivated the whole slot architecture is still unmeasured, which is one `gbhist` comparison away now that slot B is a working console. UNCHANGED AND STILL OPEN: the frame-pool stall is parked with `/sd/diag/gbwedge.txt` its next instrument, the startup audio burst is about 5,100 samples dropped during cartridge load, Pusher A is still GBC-only in the desktop, always-on gesture detection still needs an upstream lock in `src/wm.c`, `klio save` still emits `meta 12 fifo overflow`, the injection line stays parked at entry 78, the DMG path is unproven, the savestate over-read in `gnuboy.c` is still unfixed, the two unidentified firmware header fields at 0x2c and 0x44 still gate custom firmware, and the statusbar stack decision is still the operator's.
+
+#### Files Modified:
+
+None.
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: N/A
+
+---
+
 ## 94 COMMIT Unreleased 2026-11-23T11:51:13-07:00
 
 #### Coming From:

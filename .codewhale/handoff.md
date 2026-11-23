@@ -1,4 +1,4 @@
-# Handoff — Escapement / TinyDesk on T-Watch Ultra, 2026-11-23T11:55
+# Handoff — Escapement / TinyDesk on T-Watch Ultra, 2026-11-23T12:10
 
 Orientation, not authority. **Verify before acting on it.** The files, the flash
 and the board are the fact; this file is a claim.
@@ -13,12 +13,16 @@ default boot; slot B is one `ota rollback` away.
 **THE ENTRY IS THE START MENU**: "Game Boy Color" reboots into slot B; Pusher A
 returns to the desktop. Exit now ERASES otadata (see below).
 
-**LIVE RISK — the desktop never leaves PENDING_VERIFY.** Measured twice: with the
-desktop confirmed drawing and running 45 s, otadata still read PENDING_VERIFY. The
-30 s confirm that OTA-001 recorded working on 2026-11-12 (pre-repartition layout)
-no longer fires — a REGRESSION of unknown cause, now noted in OTA-001. Rollback
-protection therefore cannot clear itself; a crash on the desktop can still roll
-back to slot B. Chase this before trusting the OTA path.
+**THERE IS NO CONFIRM REGRESSION — that claim was withdrawn in entry 95.** The
+desktop's 30 s confirm works; the reader had the otadata state enum shifted by one
+so `VALID (0x2)` printed as `PENDING_VERIFY`. Correct values: NEW 0x0,
+PENDING_VERIFY 0x1, VALID 0x2, INVALID 0x3, ABORTED 0x4, UNDEFINED 0xFFFFFFFF.
+
+What IS true is the mechanism behind the original anomaly: a reset inside the
+30 s trial makes the bootloader mark the entry ABORTED and fall back to the
+OTHER valid image. That is rollback protection working as designed, and it is why
+the exit erases otadata — erasing removes the alternative, not the trial,
+measured by a reset at t=12 s still landing on the desktop.
 
 ## WORKING WITH THE OPERATOR ON THE WATCH — read this first
 
@@ -39,10 +43,10 @@ host read during a picture hangs for ever.
 
 ## Where things live
 
-- Project-control repo: `/run/media/vash/GIT/Escapement`, `main`, entry 94
+- Project-control repo: `/run/media/vash/GIT/Escapement`, `main`, entry 95
   (reference **BRD-006** in entry 92; **TOL-009** in entry 91).
 - Active code is the fork: `/run/media/vash/GIT/tinydesk-twatch`, branch
-  `t-watch-ultra`, at `d11ca27`, pushed to `fork`. Push to `fork`
+  `t-watch-ultra`, at `771f2a7`, pushed to `fork`. Push to `fork`
   (`aquasock/tinydesk`) only — **never** `origin` (upstream, read-only).
 - `.ai/core.md` is RESTRICTED. Do not edit without an explicit instruction.
 
@@ -191,9 +195,7 @@ current. Supersedes `working-2026-11-23-1830-slotb-picker.bin` (entry 93).
 3. **Measure the frame-time claim** — compare a slot B `gbhist` against the same
    ROM under the desktop. Never checked against a run.
 4. Remove the 0x1A000 trail once several sessions pass without a hang.
-5. **Confirm regression** — see "LIVE RISK" above. Needs a temporary secondary
-   console build to see whether `esp_timer_create` for `ota_ok` succeeds.
-6. **Launcher files are NOT in the image** — `/root/Apps/gbslotb.py` and
+5. **Launcher files are NOT in the image** — `/root/Apps/gbslotb.py` and
    `Start menu/Game Boy Color.tdlink` live on littlefs `storage`. A full-image
    flash or factory restore removes them; sources are in `scripts/apps/`.
 6. Open: frame-pool stall (parked), startup audio burst (~5,100 samples),
