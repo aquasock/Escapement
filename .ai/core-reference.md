@@ -280,6 +280,7 @@ Topic IDs are the `record_id` prefix. An entry reserves a name; it does not clai
 | Why does a kernel patch silently go missing? | TOL | TOL-003 |
 | What can an emulator measured on this board achieve? | EXT | EXT-001 |
 | Does a bigger data cache make the emulator faster? | EMU | EMU-022 |
+| Does slot B actually make the Game Boy faster, and should the blitter move to the idle core? | EMU | EMU-023 |
 | Why does deleting sdkconfig change the firmware? | TOL | TOL-008 |
 | Why does a port's strong hook never run, while the firmware still builds and boots? | TOL | TOL-009 |
 | Where can a large read-only blob live without RAM? | EXT | EXT-002 |
@@ -483,6 +484,7 @@ TOL-005: "The watch and the TinyTang both appear as ttyACM devices and swap numb
 TOL-006: "esptool's --after no_reset leaves the ESP32-S3 in its ROM bootloader, so the board's console emits nothing and every later command reads stale state until a --after hard_reset chip_id or a power cycle"
 TOL-007: "The desktop Start menu remembers its last selection, so F10 then Enter is only deterministic after a reboot: the sequence that works is reboot, F10, Enter, and the window that appears must be verified to be `tdsh` before typing, or the keys land in whichever app was selected last"
 TOL-008: "Deleting sdkconfig to force regeneration reverts every setting that lives only in it, silently: on this board that dropped CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH and cut the ISR stack from 2096 to 1536, which matters because the console is compiled out and the coredump is the only crash record"
+EMU-023: "Slot B gives the Game Boy 6.6 percent of frame time and removes 334 us of preemption per frame; moving the blitter to the idle core 0 makes the guest 7.7 percent faster again but drops 14 percent of displayed frames, so it stays on the guest core"
 TOL-009: "A weak definition in an object the link already includes satisfies every reference to that symbol, so the archive member holding a strong definition is never fetched; ESP-IDF archives port sources into libmain.a, so a port's strong override of a weak board hook is silently absent from the image until `-Wl,--undefined=<symbol>` forces the member out, and `nm` shows `W` instead of `T`"
 BRD-006: "The XL9555 expander's CONFIG and OUTPUT registers survive an ESP32-S3 reset, so a peripheral it switches stays powered across a warm reboot and is unpowered on a cold boot; on a cold boot every expander pin is an input, which is why the panel lit up after a warm reset with no code raising its rail"
 ```
@@ -2664,6 +2666,20 @@ BRD-006: "The XL9555 expander's CONFIG and OUTPUT registers survive an ESP32-S3 
     - "ports/twatchultra/sdkconfig and sdkconfig.defaults: the two files' diff after a regeneration"
     - "ESP-IDF 5.3.1 build system: sdkconfig is generated from defaults only when it does not exist"
   verification: "Observed on this project's tools 2026-11-21 (core-log entry 90): after `rm -f sdkconfig && idf.py build` the generated file differed from the preserved copy in 40 lines, the app image came out 18432 bytes smaller, and the two settings above had flipped. Restoring the preserved copy rebuilt to the identical size and `mem heap` returned to 259083 total / 27467 free."
+
+- record_id: EMU-023
+  kind: EMU
+  topic_id: EMU
+  status: VERIFIED
+  verified_date: 2026-11-23
+  title: "Slot B gives the Game Boy 6.6 percent of frame time and removes 334 us of preemption per frame, and moving the blitter to the idle core costs 14 percent of displayed frames"
+  statement: "Measured on the same cartridge (Zelda, The default ROM), 70 seconds per run, two to three runs per arm, reading average WORK wall time per frame, average CPU consumed by the guest, and their difference -- time the guest had work to do and was not on a processor -- plus the count of guest frames against frames actually pushed to the panel. With the desktop running: wall 11427 us, CPU 11096 us, lost 334 us, 29 of ~3900 frames over the console's 16.742 ms budget. In slot B with both emulator tasks on core 1: wall 10670 us, CPU 10695 us, lost 0 us, 7 frames over budget, and blits equal to guest frames with the frame pool never starved. Moving the gbblit task to the otherwise-idle core 0: wall 9836 us but blits 3621 against 4199 guest frames and 3749 pool-dry events, so 14 percent of produced frames never reached the glass."
+  consequence: "Slot B is worth real time -- 6.6 percent per frame, and the elimination of all preemption, because on the desktop the guest shares its core with the desktop's own UI task at equal priority. The 334 us figure is what that contention costs and it is the number that justified the two-slot architecture. The BLITTER MUST STAY ON THE GUEST'S CORE even though the other core is idle: running the two concurrently makes the emulator itself faster and the picture worse, which is the trade nobody wants. The likely mechanism is PSRAM, since the framebuffer and the cartridge both live there and on one core the guest and blitter alternate rather than contending, but that is inference and not measured. The lesson worth generalising is that guest CPU time is not the target -- a change that improves the guest's own numbers while reducing blits below frames has made the product worse, so any future emulator timing must report blits against frames and the pool-dry count beside the timings."
+  sources:
+    - "tinydesk-twatch ports/twatchultra/main/gb.c: the s_tot_* accumulators, gb_set_blit_core(), and the /sd/diag/gbtime.txt summary"
+    - "tinydesk-twatch ports/twatchultra/main/slotb.c: gb_set_blit_core(1) with the measured reason recorded at the call"
+    - "core-log entry 96 for the runs, and entries 87-90 for the earlier optimisation attempts this supersedes in method"
+  verification: "Measured on hardware 2026-11-23 (core-log entry 96), operator-confirmed as playable in the slot-B arm. Repeatability was checked rather than assumed and the arms were tight: desktop wall 11421 and 11433 us, slot B core-1 wall 10672, 10674 and 10661 us, slot B core-0 wall 9851 and 9848 us. The counters that changed the conclusion were added after the first core-0 run appeared to be a large win on timings alone."
 
 - record_id: IMU-008
   kind: IMU

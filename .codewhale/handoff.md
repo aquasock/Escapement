@@ -1,4 +1,4 @@
-# Handoff — Escapement / TinyDesk on T-Watch Ultra, 2026-11-23T12:10
+# Handoff — Escapement / TinyDesk on T-Watch Ultra, 2026-11-23T13:10
 
 Orientation, not authority. **Verify before acting on it.** The files, the flash
 and the board are the fact; this file is a claim.
@@ -13,16 +13,23 @@ default boot; slot B is one `ota rollback` away.
 **THE ENTRY IS THE START MENU**: "Game Boy Color" reboots into slot B; Pusher A
 returns to the desktop. Exit now ERASES otadata (see below).
 
-**THERE IS NO CONFIRM REGRESSION — that claim was withdrawn in entry 95.** The
-desktop's 30 s confirm works; the reader had the otadata state enum shifted by one
-so `VALID (0x2)` printed as `PENDING_VERIFY`. Correct values: NEW 0x0,
-PENDING_VERIFY 0x1, VALID 0x2, INVALID 0x3, ABORTED 0x4, UNDEFINED 0xFFFFFFFF.
+**FRAME TIME IS MEASURED (entry 96, EMU-023).** Slot B is **6.6% faster per
+frame** than the desktop and contention is gone — 334 µs/frame of preemption
+becomes **0**. Every guest frame is blitted, pool never starved.
 
-What IS true is the mechanism behind the original anomaly: a reset inside the
-30 s trial makes the bootloader mark the entry ABORTED and fall back to the
-OTHER valid image. That is rollback protection working as designed, and it is why
-the exit erases otadata — erasing removes the alternative, not the trial,
-measured by a reset at t=12 s still landing on the desktop.
+```
+desktop          wall 11427 us   cpu 11096   lost 334   over 29
+slot B (core 1)  wall 10670 us   cpu 10695   lost   0   over  7   blits=frames
+slot B (core 0)  wall  9836 us   cpu  9860   lost   0   over  4   blits 3621/4199
+```
+
+**DO NOT move `gbblit` to core 0.** It makes the guest 7.7% faster and throws away
+14% of displayed frames. `gb_set_blit_core(1)` in `slotb.c` with the numbers at
+the call site.
+
+**Lesson that changed the conclusion:** guest CPU time is not the target. Report
+`blits` against `frames` and `starved` beside any timing, or a change that
+improves the emulator's own numbers while ruining the picture looks like a win.
 
 ## WORKING WITH THE OPERATOR ON THE WATCH — read this first
 
@@ -43,10 +50,10 @@ host read during a picture hangs for ever.
 
 ## Where things live
 
-- Project-control repo: `/run/media/vash/GIT/Escapement`, `main`, entry 95
+- Project-control repo: `/run/media/vash/GIT/Escapement`, `main`, entry 96
   (reference **BRD-006** in entry 92; **TOL-009** in entry 91).
 - Active code is the fork: `/run/media/vash/GIT/tinydesk-twatch`, branch
-  `t-watch-ultra`, at `771f2a7`, pushed to `fork`. Push to `fork`
+  `t-watch-ultra`, at `2264698`, pushed to `fork`. Push to `fork`
   (`aquasock/tinydesk`) only — **never** `origin` (upstream, read-only).
 - `.ai/core.md` is RESTRICTED. Do not edit without an explicit instruction.
 
