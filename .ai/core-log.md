@@ -1,3 +1,33 @@
+## 6 COMMIT Unreleased 2026-11-23T21:00:36-07:00
+
+#### Coming From:
+
+Unreleased ac1ec1f
+
+#### Purpose:
+
+Remove the colour flash the wearer sees when slot B boots, which was the display driver's bring-up test pattern rather than anything slot B drew.
+
+#### Outcome:
+
+THE COLOUR FLASH IS GONE AND IT WAS THE DISPLAY DRIVER'S BRING-UP BANDS, NOT SLOT B. The fork carries the work at b2d5de0. `display_init()` fills the framebuffer with red, green and blue thirds and PUSHES them, which is how this project tells a dark panel apart from a controller drawing into memory nobody can see -- an instrument with three real faults behind it, since several display defects reported success while putting nothing on the glass. But `display_init()` blacks the whole panel with `panel_fill(0)` a moment later, so what the wearer actually sees is those three colours for about a hundred milliseconds at every boot: a full-panel push at the measured cost of about a hundred milliseconds. In the desktop that is hidden, because the desktop paints immediately afterwards and the bands sit under the first frame. In slot B it is exposed, because the launcher blanks the panel deliberately and the picker is slot B's first paint -- so the sequence was black, three colour bands, black again, picker. THE FIX MAKES THEM OPTIONAL RATHER THAN DELETED, WHICH IS THE DISTINCTION THAT MATTERS. `display_boot_pattern(bool)` sets a flag, the default is ON, and every caller but one is unchanged -- so the instrument that has found real faults is still there for the next panel problem, and `display_init()` does one more thing than before rather than one fewer. Slot B calls `display_boot_pattern(false)` immediately before `display_init()`, since going from a blanked screen straight to its own first paint is what it wants. A SECOND CHANGE CAME WITH IT AND WAS NOT COSMETIC: the framebuffer is now `memset` to black BEFORE the conditional block instead of only being filled inside it. It is fresh PSRAM, so without zeroing a later partial flush could put whatever that memory happened to hold onto the glass; zeroing it unconditionally means the flag controls the visible bands and nothing else, and the buffer always starts sane. The two-call shape was chosen over inferring the intent at run time because the caller knows what it wants at the call site and the driver should not guess. THE OPERATOR CONFIRMED THE FLASH IS GONE AND THE PICKER STILL ARRIVES, which is the pair that had to be checked together: removing a visible push from the boot path risks removing the only thing that proved the panel came up, and the picker appearing is the evidence that it did. The stage trail reads PICKER UP afterwards, so the display initialised, the card mounted and the list was drawn. THE IMAGE IS 3,107,376 BYTES and the codec host address did NOT move, which was checked rather than assumed: `g_modhost_ptr` reads `0x3c2817cc` in both the ELF and the module header, so no relink was owed and the FLAC decoder on flash is still valid for this build. A FULL 16 MiB BACKUP WAS TAKEN AND VERIFIED: `working-2026-11-23-2100-nobands.bin`, sha256 `0831c3dff0ed06a78dfeb7ca88e48e180a6ce11e2317a32e1911b086325a23bb`, compared against the chip with the board held in the bootloader, sidecar re-checked, both slots confirmed byte-identical to the build and both module blobs current. THE CORE-SYNTAX AUDIT REQUIRED BY core.md WAS PERFORMED BEFORE COMMIT: core.md and core-syntax.md were re-read, the complete `.ai/` diff inspected, core.md is unchanged, this entry is checked against the template for header order, the six sections in their canonical order, prose-only Purpose, Outcome and Next Steps, eligible Files Modified and the three Status lines, the log stands at six entries against a ring of a hundred so ninety-four are free, and the known conformance debt archived with the previous log stands as entry 74 there recorded. No reference record was added: the boot bands are this project's own diagnostic choice and the record of why they exist is already in the display driver's comment.
+
+#### Next Steps:
+
+THE DESKTOP STILL DRAWS THE BANDS and therefore still pays about a hundred milliseconds of panel push at every boot for them. That is defensible -- it is the panel's only self-check and the desktop paints over them immediately -- but with slot B now running without them the two personalities differ at boot, and if the desktop ever looks slow to appear the bands are the first thing to measure rather than to remove. THE SAME TREATMENT APPLIES TO THE DESKTOP'S TWO EMULATOR ENTRIES, which are still `.tdlink`-to-`.py` scripts and still open a Terminal when launched; slot B's three were converted to native apps in entry 5 and the reasoning there applies unchanged. THE STARTUP AUDIO BURST REMAINS THE CLEAREST TECHNICAL CYCLE and its recorded theory is known to be wrong, so it should be attacked with the instrument that exists: `gbhist.txt` put 99 per cent of all drops in two episodes -- second 0 at 7,177 samples and second 14 at 3,915, against a trickle of 103 across eleven other seconds -- and `sound_stream_open()` is at line 1490 while `gnuboy_load_rom()` is at 1427, so the stream opens AFTER the ROM load and not before. A second episode mid-session points at the I2S ring draining rather than at startup. THE PROVENANCE LEVEL CAN STILL BE COLLAPSED TO ONE TAP (`retail` is the only directory with contents) and the cartridge picker still rescans the card on every launch, which with 1,143 cartridges is four taps each time. UNCHANGED AND STILL OPEN: the Tamagotchi is the only emulator not in slot B's menu; the frame-pool stall is parked with its starved and blits-against-frames counters written every session; Pusher A is Game Boy only in the desktop; always-on gesture detection needs an upstream lock; `klio save` emits a fifo overflow message; the IMU injection line is parked; the DMG path ran for the first time in entry 4 but one cartridge is thin evidence and an SGB-enhanced title would exercise the third machine type; the savestate over-read in the vendored `gnuboy.c` is unfixed and unreachable; the two unidentified firmware header fields still gate custom firmware; and the statusbar stack size remains the operator's decision.
+
+#### Files Modified:
+
+None in this repository; the fork carries the change at b2d5de0 (`ports/twatchultra/main/display.c`, `ports/twatchultra/main/display.h`, `ports/twatchultra/main/slotb.c`).
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: PASS
+
+---
+
 ## 5 COMMIT Unreleased 2026-11-23T20:28:52-07:00
 
 #### Coming From:
