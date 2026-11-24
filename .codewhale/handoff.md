@@ -1,4 +1,4 @@
-# Handoff — Escapement / TinyDesk on T-Watch Ultra, 2026-11-23T18:35
+# Handoff — Escapement / TinyDesk on T-Watch Ultra, 2026-11-23T19:40
 
 Orientation, not authority. **Verify before acting on it.** The files, the flash
 and the board are the fact; this file is a claim.
@@ -13,11 +13,19 @@ Population is scripted: `tools/gbcstage.py --dry-run` then `--go`.
 with a trailing slash, `..` to go up. `PK_MAX_ROM` is 64, so the bucket cap of 61
 is what makes every screen fit.
 
-**The tree is 4 taps deep and no finger has walked it.** Say whether the
-provenance level earns its tap; a single-child skip would save a press.
+**The tree is 4 taps deep and THE OPERATOR HAS WALKED IT** (entry 3): console →
+provenance → bucket → cartridge, confirmed working. Whether the `retail`
+provenance level earns its tap is still open — it is the only directory with
+contents, so a single-child skip would save a press.
 
-**The DMG path has never been run** — no `.gb` cartridge has booted in slot B.
-The first one launched is a real test of hardware-type detection.
+**The DMG path has NEVER been run.** No `.gb` cartridge has booted in slot B.
+`.gb` cartridges are now *visible* in the picker for the first time, but none has
+been launched, so hardware-type detection (header byte 0x143) is untested on this
+board. First DMG launch = the real test.
+
+**Which exit path the confirmed session took is unknown.** Slot B's trail reads
+stage 8 RETURN, but a game stopped by Pusher A and a picker abandoned by Pusher A
+both end there. The direct-launch game exit is still separately unconfirmed.
 
 **Card paths moved again**, so the defaults now resolve retail → homebrew → flat:
 `gbc/retail`, `nes/retail`, `pokemini/` (was `min/`), `tama/` unchanged.
@@ -43,7 +51,7 @@ host read during a picture hangs for ever.
 
 ## Where things live
 
-- Project-control repo: `/run/media/vash/GIT/Escapement`, `main`, **log at entry 2**
+- Project-control repo: `/run/media/vash/GIT/Escapement`, `main`, **log at entry 3**
   (previous 99 entries archived — see below)
   (reference **BRD-006** in entry 92; **TOL-009** in entry 91).
 - Active code is the fork: `/run/media/vash/GIT/tinydesk-twatch`, branch

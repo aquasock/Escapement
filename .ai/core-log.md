@@ -1,3 +1,33 @@
+## 3 COMMIT Unreleased 2026-11-23T19:32:29-07:00
+
+#### Coming From:
+
+Unreleased 39d1646
+
+#### Purpose:
+
+Record the operator's hardware result for entry 2's card navigation, which was committed before the test had been run.
+
+#### Outcome:
+
+THE OPERATOR CONFIRMED THAT THE NAVIGATING PICKER WORKS ON THE GLASS, WHICH CLOSES ENTRY 2'S OUTSTANDING USER TEST AND IS EVIDENCE FOR, BUT NOT PROOF OF, THE OLDER ONE THAT ENTRY 1 NAMED AS THIS LOG'S FIRST OWED VERIFICATION. Entry 2 was written and committed with `User Test: NOT RUN` because the test had not happened at that point, and entry immutability means the Status line is not rewritten after the fact; this entry records the result instead. The confirmation covers the four-level walk -- console, provenance, bucket, cartridge -- on a card holding 1,143 cartridges, so the claim that a bucket cap of 61 keeps every screen inside the picker's 64-entry list is now backed by a person using it rather than by arithmetic. Slot B's stage trail afterwards reads RETURN and the desktop is up, so the session ran to completion and handed the boot back; WHAT STAGE 8 CANNOT SAY IS WHICH PATH REACHED IT, because a game stopped by Pusher A after a direct launch and a picker abandoned by Pusher A both end at the same mark, and the desktop is also where a power cycle would land. The direct-launch game exit therefore stays separately unconfirmed until the operator says which of the two they did. No code changed and no image was rebuilt: the build on the watch is the one verified in entry 2, 3,106,944 bytes, sha256 `ba4ec8072281b1cf5778a1c708e4fc3289eca49d28805ac9c03f4cc1a4828aed`, and it is already inside the verified full-flash backup `working-2026-11-23-1830-picker-nav.bin`, sha256 `7f1562a023e730e6ed0ff8cafcc4b2980bdc5b6c09687971832505717108d33b`, whose both slots were compared byte-identical to it, so no further backup is owed. THREE THINGS THIS ENTRY DOES NOT CLAIM, and all three would be wrong to infer from a general pass. The DMG path is still unexercised: original Game Boy cartridges are now visible in the picker for the first time, but nothing in the operator's report says a `.gb` cartridge was launched, and the core's hardware-type detection for that case has never been run on this board, so the first DMG launch remains the real test of it rather than a formality. And the provenance level still costs a tap for a `retail` directory that is the only one with anything in it; the walk was accepted, which is a verdict on whether it works and not on whether it is the shortest route, so the single-child skip stays an open question for the operator rather than something settled here. The third is which exit path the confirmed session took: see the note above on stage 8, and the operator can settle it in a sentence. THE CORE-SYNTAX AUDIT REQUIRED BY core.md WAS PERFORMED BEFORE COMMIT: core.md and core-syntax.md were re-read, the complete `.ai/` diff inspected, core.md is unchanged, this entry is checked against the template for header order, the six sections in their canonical order, prose-only Purpose, Outcome and Next Steps, eligible Files Modified and the three Status lines, the log stands at three entries against a ring of a hundred so ninety-seven are free, and the known conformance debt archived with the previous log stands as entry 74 there. No reference record was added: this is a verdict on this project's own interface.
+
+#### Next Steps:
+
+THE DMG PATH IS THE NEXT THING TO EXERCISE and it is one launch away: pick Game Boy rather than Game Boy Color, enter a bucket, and start any `.gb` cartridge. What to watch for is a picture drawn with a Colour palette rather than the DMG green, or a refusal to boot -- either would mean the hardware-type detection is not doing what `gnuboy_load_rom()` claims when it reads header byte 0x143, and the on-card DMG library is now large enough to test many cartridges rather than one. THE STARTUP AUDIO BURST REMAINS THE STRONGEST TECHNICAL CYCLE, and the recorded theory is known to be wrong: reading `gbhist.txt` from the card put 99 percent of all drops in two episodes -- second 0 at 7,177 samples and second 14 at 3,915, against a trickle of 103 across eleven other seconds -- and `sound_stream_open()` is at line 1490 while `gnuboy_load_rom()` is at 1427, so the stream opens AFTER the ROM load and not before it as the note claimed. A second episode mid-session points at the I2S ring draining rather than at startup, and the per-second `short` column is the instrument to test that with. THE PROVENANCE LEVEL CAN BE COLLAPSED TO ONE TAP if the operator wants it: a directory holding a single subdirectory is skipped, which is true of `retail` today. UNCHANGED AND STILL OPEN: the Tamagotchi is the only emulator not in slot B's menu; the cartridge picker rescans the card on every launch and remembers nothing; the frame-pool stall is parked with its starved and blits-against-frames counters written every session; Pusher A is Game Boy only in the desktop; always-on gesture detection needs an upstream lock; `klio save` emits a fifo overflow message; the IMU injection line is parked; the savestate over-read in the vendored `gnuboy.c` is unfixed and unreachable; the two unidentified firmware header fields still gate custom firmware; and the statusbar stack size remains the operator's decision.
+
+#### Files Modified:
+
+None.
+
+#### Status:
+
+- Build: N/A
+- Deployment: N/A
+- User Test: PASS
+
+---
+
 ## 2 COMMIT Unreleased 2026-11-23T18:33:30-07:00
 
 #### Coming From:
