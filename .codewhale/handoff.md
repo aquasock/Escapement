@@ -1,16 +1,15 @@
-# Handoff — Escapement / TinyDesk on T-Watch Ultra, 2026-11-24T11:50
+# Handoff — Escapement / TinyDesk on T-Watch Ultra, 2026-11-24T13:10
 
 Orientation, not authority. **Verify before acting on it.** The files, the flash
 and the board are the fact; this file is a claim.
 
 ## One line
 
-**THE PICKER'S FLASH IS CLOSED — ON THE OPERATOR'S VERDICT** (entry 13). Every
-selector move called `draw_screen()`, which opened with `display_fill(0x0000)` —
-a full-panel push of black, ~100 ms — and then painted 23 bands back on top of
-those same pixels. ~190 ms per press, the first half of it a black frame. Fixed
-by making the black part of the content and repainting three bands per move.
-Operator: *"works perfect. pass."*
+**THE VOLUME BUTTON IS CLOSED — ON THE OPERATOR'S VERDICT** (entry 14). The third
+left button on slot B's emulators cycles Mute / 25% / 50% / 75% / Max, starting
+Muted, cubic taper. Its first version **panicked the watch on the first press**
+and the coredump named why; fixed by relabelling from the blit task instead of
+the touch callback. Operator: *"works great, pass."*
 
 **Still open from before:** the original "rom not found" (entries 11–12) is
 closed on the operator's verdict, **not** on a demonstrated cause — the
@@ -18,65 +17,71 @@ successful run overwrote the record that would have said which fault it was.
 
 ## Standing invariants that cost a cycle each
 
+- **While an app owns the pixels, ONLY ITS BLIT TASK MAY PAINT.** `gb_blit_task`,
+  `nes_blit_task`, `pm_blit_task`. A touch callback may record state and return.
+  `display_margin_label()` paints synchronously on the caller's task and takes
+  the SPI bus, so calling it from a touch callback asserts at
+  `spi_master.c:1310` (`spi_device_release_bus`) because the blit task is mid
+  polling-transaction and `spi_device_acquire_bus()`'s `ESP_ERR_INVALID_STATE` is
+  unchecked. This is DSP-005 violated a third time — see **DSP-009**.
+- **A dynamic label needs a latch drained in BOTH loop branches.** An idle or
+  paused cartridge produces no frames; a running one always has a frame waiting
+  and never reaches the idle branch. One branch only = a label that sits stale.
 - **The `0x1B000` failure record sector is LAST-WRITE-WINS.** If the "rom not
   found" symptom returns, read `tools/watch-slotbrec.py` BEFORE playing anything
   that works, or the evidence is gone.
 - **Blanks are drawn but not live.** Safe today because `slotb_run()` claims the
-  pixels before the picker appears, so `edge_press()` (the only path that turns a
-  margin press into a key) is unreachable. **Any new owner of the glass must
-  claim it**, or a blank slot types into a shell slot B does not have.
-- **No `display_fill()` in a redraw path.** It pushes the whole panel and then
-  the caller paints over it, which is a visible flash and double the panel time.
-  Paint the bands; gate the fill on `paint_black()`-style background bands. The
-  picker's `gbpick_message()` keeps its fill on purpose — it is a terminal screen.
+  pixels before the picker appears, so `edge_press()` is unreachable. Any new
+  owner of the glass must claim it.
+- **No `display_fill()` in a redraw path** — it pushes the whole panel and the
+  caller paints over it: a visible flash and double the panel time. See entry 13.
 - **The picker's bands tile the framebuffer under a `_Static_assert`.** With the
-  fill gone, an unclaimed row is a permanent stripe, not a blink. Do not widen
-  `PK_ROWS` or move `PK_LIST_Y` without re-checking it.
+  fill gone, an unclaimed row is a permanent stripe, not a blink.
 
-## What changed, entries 8–13 (all pushed)
+## What changed, entries 8–14 (all pushed)
 
 Read the entry, not this list, before trusting a claim.
 
 - **Entry 8 (fork `8904b22`)**: the picker's `..  (back)` row is gone; the bar
-  right of Enter is **"Up"**. Operator confirmed.
+  right of Enter is **"Up"**.
 - **Entry 9 (fork `bbbbb9e`)**: `slotb_app_go(sel, direct)` owns every exit
-  decision, so a desktop shortcut can never draw the app menu. `gb_last_error()`
-  names the real reason a start refused.
-- **Entry 10 (fork `d1f2bc0`)**: every margin slot is drawn (unused ones blank);
-  Up at a console root returns to the console list with the current console
-  highlighted, so switching console costs a press.
-- **Entry 11 (fork `e15e01b`)**: the console screen had been borrowing
-  `list_dir()`'s label array and drew leftover folder names; fixed with dedicated
-  storage, plus a guard that snaps `s_cwd` back under `root_base`. Added the
-  `0x1B000` failure record and `tools/watch-slotbrec.py`.
-- **Entry 12 (fork `75e8a00`)**: the reader had the magic byte order wrong and
-  rejected a good record; fixed. Operator passed the whole area.
+  decision; `gb_last_error()` names the real reason a start refused.
+- **Entry 10 (fork `d1f2bc0`)**: every margin slot drawn; Up at a console root
+  returns to the console list with the current console highlighted.
+- **Entry 11 (fork `e15e01b`)**: console screen had been borrowing `list_dir()`'s
+  label array; fixed, plus the `0x1B000` failure record and its reader.
+- **Entry 12 (fork `75e8a00`)**: the reader compared magic as bytes and rejected
+  a good record; fixed.
 - **Entry 13 (fork `8dff372`)**: the picker no longer paints a black frame before
-  every repaint. A move repaints the two changed rows plus the footer (~11 ms);
-  a page change repaints the body. Operator passed it.
+  every repaint — a move repaints two rows plus the footer.
+- **Entry 14 (fork `3a28bb6`, supersedes the crashing `f9fa9a6`)**: Mute/25/50/75/
+  Max volume on the third left button of Game Boy, NES and Pokemon Mini; and the
+  panic that version caused, fixed.
 
 ## Where things live
 
-- Project control: `/run/media/vash/GIT/Escapement`, `main`, **log at entry 13**.
+- Project control: `/run/media/vash/GIT/Escapement`, `main`, **log at entry 14**.
 - Active code: `/run/media/vash/GIT/tinydesk-twatch`, branch `t-watch-ultra`,
-  HEAD `8dff372`, pushed to `fork`. Push to `fork` (`aquasock/tinydesk`) only —
+  HEAD `3a28bb6`, pushed to `fork`. Push to `fork` (`aquasock/tinydesk`) only —
   **never** `origin` (upstream, read-only).
 - `.ai/core.md` is RESTRICTED. Do not edit without an explicit instruction.
 
 ```
-Fork        /run/media/vash/GIT/tinydesk-twatch  branch t-watch-ultra  HEAD 8dff372
-Project     /run/media/vash/GIT/Escapement       branch main          log entry 13
+Fork        /run/media/vash/GIT/tinydesk-twatch  branch t-watch-ultra  HEAD 3a28bb6
+Project     /run/media/vash/GIT/Escapement       branch main          log entry 14
 Port        /dev/ttyACM0  (also /dev/serial/by-id/usb-Espressif_...-if00)
-Build       3,108,912 B  sha256 48af5daa106c562af996e364d6c6a357d4c93d6bb47504684802075aab8acc6e
-Module      flac.bin unchanged this cycle — NOT reflashed, NOT re-tested
-            0xC00000 / 0xE00000 hold the blob from the 3,108,672-byte app
-            host=0x3c28193c (g_modhost_ptr) inst=0x42ae0000 data=0x3cce0000
-            app=3108912  <-- all three checked against the new ELF, none moved
-Backup      ~/twatch-backup/working-2026-11-24-1145-picker-noredraw-flash.bin
-sha256      d848982012187ff1eecea51a5b4357c3a12f68d9b111782ded1a8affbb2534d4
-            (whole 16 MiB; both app slots verified byte-identical to the build)
+Build       3,109,472 B  sha256 2c95bee5ee152a26918651cc8cb4b2f1de511a37e00245a4b7f12579a4ae62be
+Module      flac.bin 26,725 B sha256 5aedae4b00ea71b5610b9dc1d5a814a569399024429730ecbc737372d829a562
+            flac.data.bin 1,976 B sha256 4eccdad2da2a42f3deb7b79b156cf346f81a034401c1d66b386bf2e036587c11
+            host=0x3c281968  inst=0x42ae0000  data=0x3cce0000  app=3109456
+            (host moved at f9fa9a6; the blob was rebuilt and reflashed there,
+             and 3a28bb6 did not move it again — checked, not assumed)
+Backup      ~/twatch-backup/working-2026-11-24-1350-volume-button-fixed.bin
+sha256      8ff006f042f10f612737f777501db4555075940cc50da85c55e3480f9f72e31c
+            (whole 16 MiB; both app slots and the blob verified inside it)
+SUPERSEDED  working-2026-11-24-1320-volume-button.bin — holds the CRASHING
+            f9fa9a6 build (volume painted from the touch task). Do not restore.
 DO NOT USE  working-2026-11-23-2230-upbar-nomenu.bin.STALE-MODULE
-            (app slots right, codec blob stale — quarantined, not deleted)
 Layout      ota_0 0x20000, ota_1 0x400000 (0x3E0000 each), coredump 0x7E0000,
             otadata 0x7F0000, storage 0x800000, modules 0xC00000, moddata 0xE00000
 ```
@@ -99,7 +104,15 @@ Layout      ota_0 0x20000, ota_1 0x400000 (0x3E0000 each), coredump 0x7E0000,
    `gen_addr.py ../build/tinydesk.elf build/modaddr.h`). Entry 13 grew the image
    by 240 bytes and none of the three moved.
 5. **A host test passing is not evidence about the glass.** `test_twatch_edges`
-   covers display and margin rules only. `gbpick.c` runs on the board alone.
+   covers display and margin rules only. `gbpick.c` and the emulator margin
+   wiring run on the board alone.
+6. **A panic is diagnosable — read the coredump, do not theorise.** The console
+   is compiled out (`CONFIG_ESP_CONSOLE_NONE`), so a crash leaves no serial
+   output; the 64 KB coredump partition at `0x7E0000` is the only record, and
+   `espcoredump.py` decodes it into the task name, the assert string and the
+   backtrace. Entry 14's crash was named this way in one read instead of being
+   guessed at. Recipe below. **It is last-write-wins like the slot B record:**
+   read it before rebooting into anything else if a fault matters.
 
 ## Instrument traps that have cost real time
 
@@ -116,6 +129,9 @@ Layout      ota_0 0x20000, ota_1 0x400000 (0x3E0000 each), coredump 0x7E0000,
   exit, and this project's flash procedure, erase otadata for that reason.
 - **When the operator says they are testing, send no commands.** The USB mirror
   is dead while a picture owns the panel (DSP-003).
+- **A panic reading `assert failed: <fn> <file>:<line>` means a driver contract
+  was broken, not a bug in the driver.** Check the task in the coredump's task
+  table against which task is allowed to call that function.
 
 ## Slot B stage trail at flash 0x1A000 (magic "SLBS")
 
@@ -144,30 +160,42 @@ the number. Any new reader of this sector has the same trap.
 
 ## Open, in the order I would take them
 
-1. **Startup audio burst**: 99% of drops are two episodes (sec 0 = 7,177;
+1. **The other left-column buttons still have no duty.** Game Boy and NES draw
+   "Pause" and "Reset" and handle neither (`gb.c`/`nes.c` contain no
+   `EDGE_LEFT` handling except the volume slot — entries 13–14's own defect,
+   reported twice and still there); the Pokemon Mini's "Exit" and "Save" buzz
+   and do nothing. Pause is the one a wearer reaches for most. Use the volume
+   button's shape: hit test in the callback, act via a latch the blit task drains.
+2. **The volume is only tested on Game Boy.** The code path is shared; the test
+   is not. Whether the NES and Pokemon Mini steps sound as even is unverified.
+3. **Startup audio burst**: 99% of drops are two episodes (sec 0 = 7,177;
    sec 14 = 3,915). The recorded theory ("stream opens before ROM load") is
    **wrong**: `sound_stream_open()` is near line 1490, `gnuboy_load_rom()` near
    1427. Likely the I2S ring draining. Instrument: the per-second `gbhist` record.
-2. **The desktop's two emulator entries are still `.tdlink` → `.py`** and open a
-   Terminal — the same noise entries 5–6 removed from slot B. Loudest remaining
-   rough edge on the glass.
-3. **Picker rescans the card on every launch** — five taps to a cartridge now that
-   a console level sits above the tree. A remembered selection is the cheapest
-   remaining win. The `retail` provenance level can also be collapsed to one tap.
-4. **A failed cartridge returns to the desktop, not the picker** — right by
-   instruction, costly for someone sampling 1,143 ROMs. Needs a remembered
-   directory in `gbpick_run()` plus a retry, and should be built on a report.
-5. **Tamagotchi is the only emulator not in slot B's menu.**
-6. **`lcd.boot_pattern = 1` in `board.conf` re-enables the RGB bring-up bands** —
+   **Note:** streams now start Muted, so the burst is inaudible unless the volume
+   is raised first — which may itself change what `gbhist` shows.
+4. **The desktop's two emulator entries are still `.tdlink` → `.py`** and open a
+   Terminal — the same noise entries 5–6 removed from slot B.
+5. **Picker rescans the card on every launch** — five taps to a cartridge. A
+   remembered selection is the cheapest remaining win, and the `retail` level can
+   be collapsed to one tap.
+6. **A failed cartridge returns to the desktop, not the picker** — costly for
+   someone sampling 1,143 ROMs. Needs a remembered directory plus a retry, and
+   should be built on a report.
+7. **Tamagotchi is the only emulator not in slot B's menu.**
+8. **`lcd.boot_pattern = 1` in `board.conf` re-enables the RGB bring-up bands** —
    implemented, default off, **never exercised**. One line and a reboot to test.
-7. **The `0x1A000` trail and the `0x1B000` record are both owed removal** once
-   slot B runs a few cycles without an unexplained failure. Neither is read at
-   runtime. The record sector is last-write-wins; a ring of eight would keep a
-   session's worth of failures.
+9. **The `0x1A000` trail and the `0x1B000` record are both owed removal** once
+   slot B runs a few cycles without an unexplained failure.
+10. **Open question, the operator's to decide:** `spi_device_acquire_bus()`'s
+    return is unchecked in `paint_column()`, so a second-writer mistake panics
+    instead of skipping a repaint. Loud is what made entry 14 a one-read
+    diagnosis; checking it trades that for resilience.
 
 **Walked and closed: do not re-open these on the strength of this file.** The exit
 path and stage 8 RETURN (entry 12), the console labels, the blank margins,
-Up-at-root, the Up bar (entries 10–12), and the picker's redraw (entry 13).
+Up-at-root, the Up bar (entries 10–12), the picker's redraw (entry 13), and the
+volume button on Game Boy (entry 14).
 
 ## Build / flash
 
@@ -198,6 +226,31 @@ python3 gen_addr.py ../build/tinydesk.elf build/modaddr.h   # compare to the old
 python3 read_modaddr.py --port /dev/ttyACM0 -o moddata.at   # needs a booted board
 make flac
 ```
+
+## Reading a panic (the only crash record this build has)
+
+The console is compiled out, so a crash writes to the coredump partition and
+nowhere else. This is the exact sequence that named entry 14's fault:
+
+```sh
+cd /run/media/vash/GIT/tinydesk-twatch/ports/twatchultra
+export IDF_PATH=/home/vash/esp/esp-idf-5.3.1
+export IDF_PYTHON_ENV_PATH=/home/vash/esp/idf-tools/python_env/idf5.3_py3.14_env
+export PATH=$IDF_PYTHON_ENV_PATH/bin:$(ls -d /home/vash/esp/idf-tools/tools/xtensa-esp-elf/*/xtensa-esp-elf/bin|head -1):\
+/home/vash/esp/idf-tools/tools/xtensa-esp-elf-gdb/14.2_20240403/xtensa-esp-elf-gdb/bin:$PATH
+
+python -m esptool --chip esp32s3 -p /dev/ttyACM0 -b 460800 --before default_reset \
+       --after no_reset read_flash 0x7E0000 0x10000 /tmp/coredump.bin
+
+# -t raw is required: the partition holds a raw core dump, not the ELF variant.
+# The ELF must be the build that is RUNNING, or every symbol is wrong.
+python $IDF_PATH/components/espcoredump/espcoredump.py info_corefile \
+       -t raw -c /tmp/coredump.bin build/tinydesk.elf > /tmp/cd.txt 2>&1
+grep -E "Crashed task|Panic reason|#[0-9]" /tmp/cd.txt | head -20
+```
+
+Read the **task table** too — `STACK USED/FREE` per task is how stack headroom
+gets measured instead of guessed. The dump is overwritten by the next panic.
 
 ## Card
 
