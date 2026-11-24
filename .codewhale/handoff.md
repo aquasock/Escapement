@@ -1,18 +1,24 @@
-# Handoff — Escapement / TinyDesk on T-Watch Ultra, 2026-11-23T23:25
+# Handoff — Escapement / TinyDesk on T-Watch Ultra, 2026-11-24T00:25
 
 Orientation, not authority. **Verify before acting on it.** The files, the flash
 and the board are the fact; this file is a claim.
 
 ## One line
 
-**THE PICKER DRAWS THE WHOLE MARGIN FRAME AND UP LEAVES THE CONSOLE** (entry 10).
-Every margin slot is drawn; unused ones are blank and inert. Up at a console's
-root returns to the Game Boy / Game Boy Color list, with the console you came from
-highlighted, so switching console costs a press.
+**THE CONSOLE SCREEN WAS DRAWING THE DIRECTORY LISTING'S LABELS** (entry 11).
+`s_labels` is `list_dir()`'s storage and was borrowed for the console choice, so
+after Up at a console root the console screen showed leftover folder names while
+Enter went to the console the row really named. That is the operator's "weird
+state": back out of Game Boy, Enter goes into Game Boy Color. Fixed — dedicated
+storage — plus a guard that snaps `s_cwd` back under `root_base`.
 
-**Awaiting one walked test** (owed since entry 10): Start menu → Game Boy Color →
-enter `retail` → Up (console root) → Up (console list, GBC highlighted) → Down,
-Enter (Game Boy) → confirm the margins look complete on every screen.
+**NOT FIXED, NOW FINDABLE: a cartridge that will not open.** Every refusal writes
+reason + path to flash at **0x1B000**; read it with
+`tools/watch-slotbrec.py`. A `pick` record followed by a failure names the exact
+path. The sector was stale with the pre-entry-93 boot mark and has been erased.
+
+**Awaiting the operator's repeat of the failure** — go into Game Boy, back out,
+Enter, try the failing cartridge, then run the reader.
 
 **Blanks are drawn but not live.** Safe today because `slotb_run()` claims the
 pixels before the picker appears, so `edge_press()` (the only path that turns a
@@ -35,22 +41,22 @@ it**, or a blank slot will type into a shell slot B does not have.
 
 ## Where things live
 
-- Project control: `/run/media/vash/GIT/Escapement`, `main`, **log at entry 10**.
+- Project control: `/run/media/vash/GIT/Escapement`, `main`, **log at entry 11**.
 - Active code: `/run/media/vash/GIT/tinydesk-twatch`, branch `t-watch-ultra`,
-  HEAD `d1f2bc0`, pushed to `fork`. Push to `fork` (`aquasock/tinydesk`) only —
+  HEAD `e15e01b`, pushed to `fork`. Push to `fork` (`aquasock/tinydesk`) only —
   **never** `origin` (upstream, read-only).
 - `.ai/core.md` is RESTRICTED. Do not edit without an explicit instruction.
 
 ```
-Fork        /run/media/vash/GIT/tinydesk-twatch  branch t-watch-ultra  HEAD d1f2bc0
-Project     /run/media/vash/GIT/Escapement       branch main          log entry 10
+Fork        /run/media/vash/GIT/tinydesk-twatch  branch t-watch-ultra  HEAD e15e01b
+Project     /run/media/vash/GIT/Escapement       branch main          log entry 11
 Port        /dev/ttyACM0  (also /dev/serial/by-id/usb-Espressif_...-if00)
-Build       3,108,192 B  sha256 88431e74feee2ee2b51011c6653e4c420f6b19b83422c17e12f1f659e7cd01f0
+Build       3,108,672 B  sha256 1452a027fb2d78636caa4515a7f969d487934f0403d505b00bfc740f8cfd468b
 Module      flac.bin 26,725 B sha256 23753524bebb76942668b32580cbd8749177f13da481ad67840878991dcb3ba0
             flac.data.bin 1,976 B sha256 4eccdad2da2a42f3deb7b79b156cf346f81a034401c1d66b386bf2e036587c11
-            host=0x3c2818d8  inst=0x42ae0000  data=0x3cce0000  app=3108192
-Backup      ~/twatch-backup/working-2026-11-23-2315-fullframe-consoleup.bin
-sha256      8ca339c50cfc4f2c1c4f3d286098308284b33488860a686484bc8df2692784f2
+            host=0x3c28193c  inst=0x42ae0000  data=0x3cce0000  app=3108672
+Backup      ~/twatch-backup/working-2026-11-24-0010-rootlabels-faillog.bin
+sha256      e9b635564c79e3ec8fba64ef181d1728ff3a0473303890046efb8c0ebca9ca65
             (both slots AND both module regions verified byte-identical)
 DO NOT USE  working-2026-11-23-2230-upbar-nomenu.bin.STALE-MODULE
             (app slots right, codec blob stale — quarantined, not deleted)
@@ -93,6 +99,20 @@ Layout      ota_0 0x20000, ota_1 0x400000 (0x3E0000 each), coredump 0x7E0000,
 8 RETURN, 9 SETBOOT_FAILED, **10 MENU** (out of band — written every time the app
 menu is drawn, so a menu found on the glass can be read rather than guessed at).
 FAIL codes 90..93 for display, board config, SD and no-ROM.
+
+## Slot B failure record at flash 0x1B000 (magic "SBRC")
+
+```c
+uint32 magic; uint32 uptime_ms; char why[48]; char path[256];
+```
+Written by `slotb_record()` — picker's 5 refusals, the cartridge handed over
+(`why="pick"`), and `gb_start()`'s refusals with `gb_last_path()`. Read:
+
+```sh
+cd /run/media/vash/GIT/tinydesk-twatch && tools/watch-slotbrec.py
+```
+
+Old `SLBS` content there is pre-entry-93 boot mark debris, not a record.
 
 ## Open, in the order I would take them
 
