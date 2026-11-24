@@ -41,6 +41,7 @@ userspace/tamafb
 userspace/romverify
 userspace/fbtime
 scripts/__pycache__/
+tools/__pycache__/
 userspace/memlat
 userspace/storetest
 userspace/tamafb_*
