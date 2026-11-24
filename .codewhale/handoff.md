@@ -1,21 +1,23 @@
-# Handoff — Escapement / TinyDesk on T-Watch Ultra, 2026-11-23T22:55
+# Handoff — Escapement / TinyDesk on T-Watch Ultra, 2026-11-23T23:25
 
 Orientation, not authority. **Verify before acting on it.** The files, the flash
 and the board are the fact; this file is a claim.
 
 ## One line
 
-**A DESKTOP SHORTCUT CANNOT SHOW SLOT B'S APP MENU ANY MORE** (entry 9). The
-operator reported landing on "Slot B - select an app" while navigating the
-cartridge picker; the path was a `launched_direct` flag whose failure exits fell
-through into the menu. The two entries are now separate control flow.
+**THE PICKER DRAWS THE WHOLE MARGIN FRAME AND UP LEAVES THE CONSOLE** (entry 10).
+Every margin slot is drawn; unused ones are blank and inert. Up at a console's
+root returns to the Game Boy / Game Boy Color list, with the console you came from
+highlighted, so switching console costs a press.
 
-**A failure now names its cause** instead of the old catch-all "no ROM?" —
-`gb_last_error()` carries the reason up from `gb_start()`.
+**Awaiting one walked test** (owed since entry 10): Start menu → Game Boy Color →
+enter `retail` → Up (console root) → Up (console list, GBC highlighted) → Down,
+Enter (Game Boy) → confirm the margins look complete on every screen.
 
-**Awaiting one walked test**: launch GBC from the Start menu, pick a cartridge,
-play, Pusher A → the desktop must come back; and let one launch fail to see the
-real reason and still land on the desktop.
+**Blanks are drawn but not live.** Safe today because `slotb_run()` claims the
+pixels before the picker appears, so `edge_press()` (the only path that turns a
+margin press into a key) is unreachable. **Any new owner of the glass must claim
+it**, or a blank slot will type into a shell slot B does not have.
 
 ## What changed this cycle
 
@@ -33,22 +35,22 @@ real reason and still land on the desktop.
 
 ## Where things live
 
-- Project control: `/run/media/vash/GIT/Escapement`, `main`, **log at entry 9**.
+- Project control: `/run/media/vash/GIT/Escapement`, `main`, **log at entry 10**.
 - Active code: `/run/media/vash/GIT/tinydesk-twatch`, branch `t-watch-ultra`,
-  HEAD `09f680e`, pushed to `fork`. Push to `fork` (`aquasock/tinydesk`) only —
+  HEAD `d1f2bc0`, pushed to `fork`. Push to `fork` (`aquasock/tinydesk`) only —
   **never** `origin` (upstream, read-only).
 - `.ai/core.md` is RESTRICTED. Do not edit without an explicit instruction.
 
 ```
-Fork        /run/media/vash/GIT/tinydesk-twatch  branch t-watch-ultra  HEAD 09f680e
-Project     /run/media/vash/GIT/Escapement       branch main          log entry 9
+Fork        /run/media/vash/GIT/tinydesk-twatch  branch t-watch-ultra  HEAD d1f2bc0
+Project     /run/media/vash/GIT/Escapement       branch main          log entry 10
 Port        /dev/ttyACM0  (also /dev/serial/by-id/usb-Espressif_...-if00)
-Build       3,108,096 B  sha256 6c2ec10bcbc42a62c10d49e3c4f64d94824339aa20ddca8470e61089511a1092
+Build       3,108,192 B  sha256 88431e74feee2ee2b51011c6653e4c420f6b19b83422c17e12f1f659e7cd01f0
 Module      flac.bin 26,725 B sha256 23753524bebb76942668b32580cbd8749177f13da481ad67840878991dcb3ba0
             flac.data.bin 1,976 B sha256 4eccdad2da2a42f3deb7b79b156cf346f81a034401c1d66b386bf2e036587c11
-            host=0x3c2818d8  inst=0x42ae0000  data=0x3cce0000  app=3108096
-Backup      ~/twatch-backup/working-2026-11-23-2245-upbar-nomenu-modules.bin
-sha256      4b2ae2c76df098584204dffbccd02c9f1511aae206a1679cb13cc3b4f1ead2e0
+            host=0x3c2818d8  inst=0x42ae0000  data=0x3cce0000  app=3108192
+Backup      ~/twatch-backup/working-2026-11-23-2315-fullframe-consoleup.bin
+sha256      8ca339c50cfc4f2c1c4f3d286098308284b33488860a686484bc8df2692784f2
             (both slots AND both module regions verified byte-identical)
 DO NOT USE  working-2026-11-23-2230-upbar-nomenu.bin.STALE-MODULE
             (app slots right, codec blob stale — quarantined, not deleted)
