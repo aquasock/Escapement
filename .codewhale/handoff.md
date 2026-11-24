@@ -1,66 +1,28 @@
-# Handoff — Escapement / TinyDesk on T-Watch Ultra, 2026-11-23T17:55
+# Handoff — Escapement / TinyDesk on T-Watch Ultra, 2026-11-23T18:35
 
 Orientation, not authority. **Verify before acting on it.** The files, the flash
 and the board are the fact; this file is a claim.
 
 ## One line
 
-**THE START MENU LAUNCHES APPS DIRECTLY (entry 99).** "Game Boy Color", "NES"
-and "Pokemon Mini (B)" each reboot into slot B running that app — no menu in
-between. `slotb start` (no app) still gives slot B's own menu for changing games
-without a reboot.
+**THE CARD NOW HOLDS 1,143 CARTRIDGES IN ALPHABETICAL BUCKETS** (entry 2):
+543 GBC in `media/gbc/retail`, 600 DMG in `media/gb/retail`, ≤61 per bucket.
+Population is scripted: `tools/gbcstage.py --dry-run` then `--go`.
 
-**Exit differs by entry**, and that is deliberate:
-- direct launch → Pusher A returns to the **DESKTOP** (you came from there)
-- menu launch → Pusher A returns to the **MENU** (another game is one tap away)
+**The picker NAVIGATES** — console → provenance → bucket → cartridge, folders
+with a trailing slash, `..` to go up. `PK_MAX_ROM` is 64, so the bucket cap of 61
+is what makes every screen fit.
 
-`slotb play <gb|nes|pm>` writes the key to NVS and switches the slot;
-`slotb start` clears the key and shows the menu.
+**The tree is 4 taps deep and no finger has walked it.** Say whether the
+provenance level earns its tap; a single-child skip would save a press.
 
-**UNVERIFIED: the direct-launch exit.** `slotb play nes` was confirmed to start
-NES directly (stage 6), but the return-to-desktop on Pusher A was not exercised —
-that needs a finger. Confirm a direct launch ends at the desktop, not the menu.
+**The DMG path has never been run** — no `.gb` cartridge has booted in slot B.
+The first one launched is a real test of hardware-type detection.
 
-6.6% faster per frame and all preemption gone (entry 96, EMU-023). **Do not move
-`gbblit` to core 0** — 7.7% faster guest, 14% of frames thrown away.
+**Card paths moved again**, so the defaults now resolve retail → homebrew → flat:
+`gbc/retail`, `nes/retail`, `pokemini/` (was `min/`), `tama/` unchanged.
 
-**ALL THREE APPS ARE CONFIRMED IN SLOT B** — the operator ran NES and Pokemon
-Mini from the menu (entry 98 corrects entry 97, which wrongly claimed the card
-had no ROMs for them). Every emulator's default ROM is present:
-
-```
-/sd/media/gbc/homebrew   .gbc cartridges
-/sd/media/nes/homebrew   zelda.nes  smb.nes  game.nes
-/sd/media/min/homebrew   13 .min cartridges incl. Pokemon Pinball Mini
-/sd/media/tama           its own tree
-```
-
-**Tamagotchi is the only emulator NOT in slot B's menu** — one row in `s_apps[]`
-plus a `tama_install_touch_hook()` split, if wanted.
-
-**THE LOG WAS ROLLED OVER — 99 entries archived, new log opens at entry 1.**
-
-```
-.ai/archived_logs/core-log-2026-11-23-1747.tar.gz
-216,969 bytes compressed / 651,773 uncompressed / 99 entries
-sha256 1bf7e474da98a4f92ff245606ec23d33da0ccc04ae880e8b87473fd6197addc5
-```
-
-Verified by re-extracting and hashing, not by trusting `tar`. Rolled one entry
-early, at 99 rather than 100, on operator instruction — recorded in the new
-entry 1. **The archive is committed**; the previous rollover's was lost by not
-being committed.
-
-**Old archives are NOT to be read without the operator's approval.** Two
-locations exist: root `archived_logs/` (2026-11-11-2223) and `.ai/archived_logs/`
-(2026-11-14-1340, 2026-11-23-1747).
-
-**The new log has 99 free entries before the next rollover.**
-
-**NEVER trust a screen-capture listing as proof of a directory's contents** — the
-mirror interleaves and truncates when keystrokes and reads overlap. Three
-conclusions have been wrong this way (entries 91, 95, 98). Confirm with a second,
-differently-shaped command: `ls` the specific path, not its parent.
+**THE START MENU LAUNCHES APPS DIRECTLY.**
 
 ## WORKING WITH THE OPERATOR ON THE WATCH — read this first
 
@@ -81,11 +43,11 @@ host read during a picture hangs for ever.
 
 ## Where things live
 
-- Project-control repo: `/run/media/vash/GIT/Escapement`, `main`, **new log at entry 1**
+- Project-control repo: `/run/media/vash/GIT/Escapement`, `main`, **log at entry 2**
   (previous 99 entries archived — see below)
   (reference **BRD-006** in entry 92; **TOL-009** in entry 91).
 - Active code is the fork: `/run/media/vash/GIT/tinydesk-twatch`, branch
-  `t-watch-ultra`, at `7446391`, pushed to `fork`. Push to `fork`
+  `t-watch-ultra`, at `96e91e0`, pushed to `fork`. Push to `fork`
   (`aquasock/tinydesk`) only — **never** `origin` (upstream, read-only).
 - `.ai/core.md` is RESTRICTED. Do not edit without an explicit instruction.
 
@@ -210,16 +172,18 @@ resets reliably; `esptool` reads with `--after no_reset` leave the board parked.
 
 ## Current board state
 
-- Runs entry-94 build (3,103,296 B), desktop on `ota_0`; both slots hold the same
+- Runs entry-2 build (3,106,944 B), desktop on `ota_0`; both slots hold the same
   image. otadata holds a bootloader-written pending entry for `ota_0` (expected).
-- Module `host=0x3c281250`, MMU `0x42ae0000`/`0x3cce0000`.
+- Module `host=0x3c281788`, MMU `0x42ae0000`/`0x3cce0000`.
 - Cartridge chosen per boot from the picker (no remembered selection yet).
 
 ## Backup
 
-`~/twatch-backup/working-2026-11-23-1245-launcher.bin` — 16 MiB, verified
+`~/twatch-backup/working-2026-11-23-1830-picker-nav.bin` — 16 MiB, verified
 against the chip, sha256
-`3d7ac79f0474f7540f9c21084873dc9ab18052da490133823dec713cdbfa6c2c`.
+`7f1562a023e730e6ed0ff8cafcc4b2980bdc5b6c09687971832505717108d33b`.
+Both slots byte-identical to the build; both FLAC blobs current. Supersedes
+`working-2026-11-23-1245-launcher.bin`.
 Both `ota_0` and `ota_1` regions confirmed byte-identical to the build, FLAC blobs
 current. Supersedes `working-2026-11-23-1830-slotb-picker.bin` (entry 93).
 
