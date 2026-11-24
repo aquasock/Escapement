@@ -1,4 +1,4 @@
-# Handoff — Escapement / TinyDesk on T-Watch Ultra, 2026-11-23T19:40
+# Handoff — Escapement / TinyDesk on T-Watch Ultra, 2026-11-23T20:10
 
 Orientation, not authority. **Verify before acting on it.** The files, the flash
 and the board are the fact; this file is a claim.
@@ -13,19 +13,18 @@ Population is scripted: `tools/gbcstage.py --dry-run` then `--go`.
 with a trailing slash, `..` to go up. `PK_MAX_ROM` is 64, so the bucket cap of 61
 is what makes every screen fit.
 
-**The tree is 4 taps deep and THE OPERATOR HAS WALKED IT** (entry 3): console →
-provenance → bucket → cartridge, confirmed working. Whether the `retail`
-provenance level earns its tap is still open — it is the only directory with
-contents, so a single-child skip would save a press.
+**THE EMULATOR IS FULLY VERIFIED END TO END** (entry 4). The operator confirmed
+Pusher A exits from BOTH the cartridge picker and a running game, and ran a `.gb`
+cartridge — the first DMG launch on this board, so hardware-type detection
+(header byte 0x143) works. Both items owed since entry 1 are now closed.
 
-**The DMG path has NEVER been run.** No `.gb` cartridge has booted in slot B.
-`.gb` cartridges are now *visible* in the picker for the first time, but none has
-been launched, so hardware-type detection (header byte 0x143) is untested on this
-board. First DMG launch = the real test.
+**Rows carry no console prefix** — "GBC "/"GB  " cost 4 of 38 usable characters
+(10.5%) repeating what the navigation already said. The console is in the TITLE
+once: `Game Boy Color - retail`, `Game Boy Color - A`.
 
-**Which exit path the confirmed session took is unknown.** Slot B's trail reads
-stage 8 RETURN, but a game stopped by Pusher A and a picker abandoned by Pusher A
-both end there. The direct-launch game exit is still separately unconfirmed.
+**Still open, low priority:** the `retail` provenance level costs a tap and is
+the only directory with contents (a single-child skip would save a press); and
+the picker rescans the card every launch — 4 taps for 1,143 cartridges.
 
 **Card paths moved again**, so the defaults now resolve retail → homebrew → flat:
 `gbc/retail`, `nes/retail`, `pokemini/` (was `min/`), `tama/` unchanged.
@@ -51,11 +50,11 @@ host read during a picture hangs for ever.
 
 ## Where things live
 
-- Project-control repo: `/run/media/vash/GIT/Escapement`, `main`, **log at entry 3**
+- Project-control repo: `/run/media/vash/GIT/Escapement`, `main`, **log at entry 4**
   (previous 99 entries archived — see below)
   (reference **BRD-006** in entry 92; **TOL-009** in entry 91).
 - Active code is the fork: `/run/media/vash/GIT/tinydesk-twatch`, branch
-  `t-watch-ultra`, at `96e91e0`, pushed to `fork`. Push to `fork`
+  `t-watch-ultra`, at `55a2cd7`, pushed to `fork`. Push to `fork`
   (`aquasock/tinydesk`) only — **never** `origin` (upstream, read-only).
 - `.ai/core.md` is RESTRICTED. Do not edit without an explicit instruction.
 
@@ -180,16 +179,16 @@ resets reliably; `esptool` reads with `--after no_reset` leave the board parked.
 
 ## Current board state
 
-- Runs entry-2 build (3,106,944 B), desktop on `ota_0`; both slots hold the same
+- Runs entry-4 build (3,106,912 B), desktop on `ota_0`; both slots hold the same
   image. otadata holds a bootloader-written pending entry for `ota_0` (expected).
-- Module `host=0x3c281788`, MMU `0x42ae0000`/`0x3cce0000`.
+- Module `host=0x3c281768`, MMU `0x42ae0000`/`0x3cce0000`.
 - Cartridge chosen per boot from the picker (no remembered selection yet).
 
 ## Backup
 
-`~/twatch-backup/working-2026-11-23-1830-picker-nav.bin` — 16 MiB, verified
+`~/twatch-backup/working-2026-11-23-1955-noprefix.bin` — 16 MiB, verified
 against the chip, sha256
-`7f1562a023e730e6ed0ff8cafcc4b2980bdc5b6c09687971832505717108d33b`.
+`5ba52720333755b6d53f2d66404ec070ff1901ee6ba4278947067d366d986fb3`.
 Both slots byte-identical to the build; both FLAC blobs current. Supersedes
 `working-2026-11-23-1245-launcher.bin`.
 Both `ota_0` and `ota_1` regions confirmed byte-identical to the build, FLAC blobs

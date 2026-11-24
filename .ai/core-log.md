@@ -1,3 +1,33 @@
+## 4 COMMIT Unreleased 2026-11-23T20:06:33-07:00
+
+#### Coming From:
+
+Unreleased cc6297d
+
+#### Purpose:
+
+Remove the console prefix from cartridge rows, where it spent four characters of every line repeating what the navigation had already established.
+
+#### Outcome:
+
+THE CARTRIDGE ROWS NO LONGER CARRY A CONSOLE PREFIX, AND THE SAME SESSION CLOSED BOTH OPEN VERIFICATIONS THIS PROJECT HAD BEEN CARRYING. The fork carries the work at 55a2cd7. "GBC " or "GB  " on every row cost four of the thirty-eight usable characters -- 10.5 per cent of the line -- to repeat something the wearer had chosen one screen earlier, since the list is entered through the console it belongs to. Rows are pure filenames now, so a long title runs four characters further before it truncates, and the console is stated ONCE in the title where it costs the rows nothing: "Game Boy Color" at the console root, then "Game Boy Color - retail", then "Game Boy Color - A". NOTHING IDENTIFIES THE CONSOLE PER ROW ANY MORE AND THAT IS CORRECT RATHER THAN A LOSS: the branch that was chosen is the identification, and the case the prefix would still have flagged -- a `.gb` cartridge sitting inside the colour tree -- is a cartridge the firmware runs as CGB because that is where it lives, so the prefix was describing the directory rather than the file. THE OPERATOR CONFIRMED THREE THINGS IN ONE SESSION, AND TWO OF THEM HAVE BEEN OPEN SINCE ENTRY 1. Pusher A stops and returns from the CARTRIDGE PICKER, and it also stops and returns from a RUNNING GAME -- which is the direct-launch exit that entry 1 named as this log's first owed verification and that entries 2 and 3 could not settle, because slot B's stage trail ends at RETURN for a game stopped and for a picker abandoned alike and the board also lands there from a power cycle. And a `.gb` CARTRIDGE RAN, which closes the DMG path: original Game Boy cartridges had never been launched on this board, they became visible in the picker for the first time only in entry 2, and the core's hardware-type detection through header byte 0x143 had therefore never been exercised. It works, and the DMG library on the card is now six hundred cartridges deep rather than an untested branch. TWO FLASH CYCLES WERE NEEDED because the change went in twice, once for the prefix and once for the console-in-title refinement; each image moved the codec host address and each time `moddata.at` was re-read from the board and the FLAC blob relinked and reflashed, finishing at `host=0x3c281768` with the ELF and the blob agreeing. The final build is 3,106,912 bytes, both slots carry it, the picker was confirmed up at stage 5 before the session was recorded, and a full 16 MiB backup was taken and verified against the chip as `working-2026-11-23-1955-noprefix.bin`, sha256 `5ba52720333755b6d53f2d66404ec070ff1901ee6ba4278947067d366d986fb3`, with both slots byte-identical to the build and both module blobs current. THE CORE-SYNTAX AUDIT REQUIRED BY core.md WAS PERFORMED BEFORE COMMIT: core.md and core-syntax.md were re-read, the complete `.ai/` diff inspected, core.md is unchanged, this entry is checked against the template for header order, the six sections in their canonical order, prose-only Purpose, Outcome and Next Steps, eligible Files Modified and the three Status lines, the log stands at four entries against a ring of a hundred so ninety-six are free, and the known conformance debt archived with the previous log stands as entry 74 there. No reference record was added: the row layout is this project's own interface.
+
+#### Next Steps:
+
+THE DMG PATH RUNNING IS THE FIRST END-TO-END EVIDENCE FOR THE CORE'S MACHINE-TYPE DETECTION, but it is one cartridge and that detection has known quirks worth exercising while the library is close to hand: `gnuboy_load_rom()` overwrites the hardware type from the cartridge header on every load, so a DMG cartridge should render with the DMG palette rather than a Colour one, and a Super Game Boy cartridge sets its own type through byte 0x146. Running one or two of the SGB-enhanced titles in the DMG tree would settle whether the third type behaves as well as the two that are now proven. THE STARTUP AUDIO BURST IS NOW THE CLEAREST TECHNICAL CYCLE AVAILABLE and the recorded theory is known to be wrong, so it should be attacked with the instrument that already exists rather than with a theory: `gbhist.txt` on the card put 99 per cent of all drops in two episodes -- second 0 at 7,177 samples and second 14 at 3,915, against a trickle of 103 across eleven other seconds -- and `sound_stream_open()` is at line 1490 while `gnuboy_load_rom()` is at 1427, so the stream opens AFTER the ROM load and not before as the note claimed. A second episode mid-session points at the I2S ring draining rather than at startup. THE PROVENANCE LEVEL CAN STILL BE COLLAPSED TO ONE TAP if wanted: `retail` is the only directory with contents, so a single-child skip would save a press on every launch, and now that the console name lives in the title the title would still say which console was chosen. THE CARTRIDGE PICKER STILL RESCANS THE CARD ON EVERY LAUNCH and remembers nothing, which with 1,143 cartridges is four taps every time. UNCHANGED AND STILL OPEN: the Tamagotchi is the only emulator not in slot B's menu; the frame-pool stall is parked with its starved and blits-against-frames counters written every session; Pusher A is Game Boy only in the desktop; always-on gesture detection needs an upstream lock; `klio save` emits a fifo overflow message; the IMU injection line is parked; the savestate over-read in the vendored `gnuboy.c` is unfixed and unreachable; the two unidentified firmware header fields still gate custom firmware; and the statusbar stack size remains the operator's decision.
+
+#### Files Modified:
+
+None in this repository; the fork carries the change at 55a2cd7 (`ports/twatchultra/main/gbpick.c`, `ports/twatchultra/modules/moddata.at`).
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: PASS
+
+---
+
 ## 3 COMMIT Unreleased 2026-11-23T19:32:29-07:00
 
 #### Coming From:
