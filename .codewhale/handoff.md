@@ -1,4 +1,4 @@
-# Handoff — Escapement / TinyDesk on T-Watch Ultra, 2026-11-23T21:05
+# Handoff — Escapement / TinyDesk on T-Watch Ultra, 2026-11-23T21:25
 
 Orientation, not authority. **Verify before acting on it.** The files, the flash
 and the board are the fact; this file is a claim.
@@ -29,11 +29,13 @@ the picker rescans the card every launch — 4 taps for 1,143 cartridges.
 **Card paths moved again**, so the defaults now resolve retail → homebrew → flat:
 `gbc/retail`, `nes/retail`, `pokemini/` (was `min/`), `tama/` unchanged.
 
-**SLOT B BOOTS WITH NO COLOUR FLASH** (entry 6). `display_init()` draws RGB
-bring-up bands and then blacks the panel ~100 ms later; the desktop hides them
-under its first paint, slot B did not. `display_boot_pattern(false)` turns them
-off for slot B only — the instrument stays available for the desktop and any
-future panel fault (default ON).
+**NO COLOUR FLASH ON EITHER BOOT PATH** (entries 6–7). `display_init()` draws RGB
+bring-up bands and blacks the panel ~100 ms later. Now OFF BY DEFAULT everywhere —
+they flashed on the way into slot B *and* on the way back to the desktop.
+
+**The instrument is kept, not deleted**: `lcd.boot_pattern = 1` in `board.conf`
+turns them back on for a panel fault, no rebuild. **That path is implemented but
+UNEXERCISED** — nobody has put the line in and watched the bands return.
 
 **SLOT B APPS ARE NATIVE APPS NOW** (entry 5)**A `.tdlink` pointing at a `.py` CANNOT avoid the Terminal** — `td_script_run()`
 → `td_terminal_run()` is its only open path. That is why the old launchers showed
@@ -63,11 +65,11 @@ host read during a picture hangs for ever.
 
 ## Where things live
 
-- Project-control repo: `/run/media/vash/GIT/Escapement`, `main`, **log at entry 6**
+- Project-control repo: `/run/media/vash/GIT/Escapement`, `main`, **log at entry 7**
   (previous 99 entries archived — see below)
   (reference **BRD-006** in entry 92; **TOL-009** in entry 91).
 - Active code is the fork: `/run/media/vash/GIT/tinydesk-twatch`, branch
-  `t-watch-ultra`, at `b2d5de0`, pushed to `fork`. Push to `fork`
+  `t-watch-ultra`, at `a113ad5`, pushed to `fork`. Push to `fork`
   (`aquasock/tinydesk`) only — **never** `origin` (upstream, read-only).
 - `.ai/core.md` is RESTRICTED. Do not edit without an explicit instruction.
 
@@ -192,16 +194,16 @@ resets reliably; `esptool` reads with `--after no_reset` leave the board parked.
 
 ## Current board state
 
-- Runs entry-6 build (3,107,376 B), desktop on `ota_0`; both slots hold the same
+- Runs entry-7 build (3,107,440 B), desktop on `ota_0`; both slots hold the same
   image. otadata holds a bootloader-written pending entry for `ota_0` (expected).
-- Module `host=0x3c2817cc`, MMU `0x42ae0000`/`0x3cce0000`.
+- Module `host=0x3c2817e0`, MMU `0x42ae0000`/`0x3cce0000`.
 - Cartridge chosen per boot from the picker (no remembered selection yet).
 
 ## Backup
 
-`~/twatch-backup/working-2026-11-23-2100-nobands.bin` — 16 MiB, verified
+`~/twatch-backup/working-2026-11-23-2115-nobands-both.bin` — 16 MiB, verified
 against the chip, sha256
-`0831c3dff0ed06a78dfeb7ca88e48e180a6ce11e2317a32e1911b086325a23bb`.
+`391288b391cfa8a6a521c3579e2db52b7b934a892e91cd5ed14c58bb74c6d328`.
 Both slots byte-identical to the build; both FLAC blobs current. Supersedes
 `working-2026-11-23-1245-launcher.bin`.
 Both `ota_0` and `ota_1` regions confirmed byte-identical to the build, FLAC blobs
