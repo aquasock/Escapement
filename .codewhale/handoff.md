@@ -1,24 +1,22 @@
-# Handoff — Escapement / TinyDesk on T-Watch Ultra, 2026-11-24T00:25
+# Handoff — Escapement / TinyDesk on T-Watch Ultra, 2026-11-24T00:55
 
 Orientation, not authority. **Verify before acting on it.** The files, the flash
 and the board are the fact; this file is a claim.
 
 ## One line
 
-**THE CONSOLE SCREEN WAS DRAWING THE DIRECTORY LISTING'S LABELS** (entry 11).
-`s_labels` is `list_dir()`'s storage and was borrowed for the console choice, so
-after Up at a console root the console screen showed leftover folder names while
-Enter went to the console the row really named. That is the operator's "weird
-state": back out of Game Boy, Enter goes into Game Boy Color. Fixed — dedicated
-storage — plus a guard that snaps `s_cwd` back under `root_base`.
+**THE "WEIRD STATE" IS CLOSED — ON THE OPERATOR'S VERDICT** (entries 11–12). The
+cause was the console screen borrowing `list_dir()`'s label array, so after Up at
+a console root it drew leftover folder names while Enter went to the console the
+row named. Fixed. Operator: *"i think the issue is resolved. pass."*
 
-**NOT FIXED, NOW FINDABLE: a cartridge that will not open.** Every refusal writes
-reason + path to flash at **0x1B000**; read it with
-`tools/watch-slotbrec.py`. A `pick` record followed by a failure names the exact
-path. The sector was stale with the pre-entry-93 boot mark and has been erased.
+**What is proven vs assumed.** Proven: labels and Enter now agree; a 100-char DMG
+cartridge in a bucket opens (record `why="pick"`, no failure after); the session
+ended at stage 8 RETURN. **Not proven:** which of those the original "rom not
+found" was — the successful run overwrote the record that would have said.
 
-**Awaiting the operator's repeat of the failure** — go into Game Boy, back out,
-Enter, try the failing cartridge, then run the reader.
+**The record sector is LAST-WRITE-WINS.** If the symptom returns, read
+`tools/watch-slotbrec.py` BEFORE playing anything that works.
 
 **Blanks are drawn but not live.** Safe today because `slotb_run()` claims the
 pixels before the picker appears, so `edge_press()` (the only path that turns a
@@ -41,15 +39,15 @@ it**, or a blank slot will type into a shell slot B does not have.
 
 ## Where things live
 
-- Project control: `/run/media/vash/GIT/Escapement`, `main`, **log at entry 11**.
+- Project control: `/run/media/vash/GIT/Escapement`, `main`, **log at entry 12**.
 - Active code: `/run/media/vash/GIT/tinydesk-twatch`, branch `t-watch-ultra`,
-  HEAD `e15e01b`, pushed to `fork`. Push to `fork` (`aquasock/tinydesk`) only —
+  HEAD `75e8a00`, pushed to `fork`. Push to `fork` (`aquasock/tinydesk`) only —
   **never** `origin` (upstream, read-only).
 - `.ai/core.md` is RESTRICTED. Do not edit without an explicit instruction.
 
 ```
-Fork        /run/media/vash/GIT/tinydesk-twatch  branch t-watch-ultra  HEAD e15e01b
-Project     /run/media/vash/GIT/Escapement       branch main          log entry 11
+Fork        /run/media/vash/GIT/tinydesk-twatch  branch t-watch-ultra  HEAD 75e8a00
+Project     /run/media/vash/GIT/Escapement       branch main          log entry 12
 Port        /dev/ttyACM0  (also /dev/serial/by-id/usb-Espressif_...-if00)
 Build       3,108,672 B  sha256 1452a027fb2d78636caa4515a7f969d487934f0403d505b00bfc740f8cfd468b
 Module      flac.bin 26,725 B sha256 23753524bebb76942668b32580cbd8749177f13da481ad67840878991dcb3ba0
@@ -113,6 +111,10 @@ cd /run/media/vash/GIT/tinydesk-twatch && tools/watch-slotbrec.py
 ```
 
 Old `SLBS` content there is pre-entry-93 boot mark debris, not a record.
+
+**THE MAGIC IS A uint32, SO ITS BYTES ARE `CRBS`, NOT `SBRC`.** The first reader
+compared bytes against `b"SBRC"` and reported "no record" on a good one. Compare
+the number. Any new reader of this sector has the same trap.
 
 ## Open, in the order I would take them
 
