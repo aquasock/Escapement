@@ -1,236 +1,139 @@
-# Handoff — Escapement / TinyDesk on T-Watch Ultra, 2026-11-23T21:25
+# Handoff — Escapement / TinyDesk on T-Watch Ultra, 2026-11-23T22:55
 
 Orientation, not authority. **Verify before acting on it.** The files, the flash
 and the board are the fact; this file is a claim.
 
 ## One line
 
-**THE CARD NOW HOLDS 1,143 CARTRIDGES IN ALPHABETICAL BUCKETS** (entry 2):
-543 GBC in `media/gbc/retail`, 600 DMG in `media/gb/retail`, ≤61 per bucket.
-Population is scripted: `tools/gbcstage.py --dry-run` then `--go`.
+**A DESKTOP SHORTCUT CANNOT SHOW SLOT B'S APP MENU ANY MORE** (entry 9). The
+operator reported landing on "Slot B - select an app" while navigating the
+cartridge picker; the path was a `launched_direct` flag whose failure exits fell
+through into the menu. The two entries are now separate control flow.
 
-**The picker NAVIGATES** — console → provenance → bucket → cartridge, folders
-with a trailing slash, `..` to go up. `PK_MAX_ROM` is 64, so the bucket cap of 61
-is what makes every screen fit.
+**A failure now names its cause** instead of the old catch-all "no ROM?" —
+`gb_last_error()` carries the reason up from `gb_start()`.
 
-**THE EMULATOR IS FULLY VERIFIED END TO END** (entry 4). The operator confirmed
-Pusher A exits from BOTH the cartridge picker and a running game, and ran a `.gb`
-cartridge — the first DMG launch on this board, so hardware-type detection
-(header byte 0x143) works. Both items owed since entry 1 are now closed.
+**Awaiting one walked test**: launch GBC from the Start menu, pick a cartridge,
+play, Pusher A → the desktop must come back; and let one launch fail to see the
+real reason and still land on the desktop.
 
-**Rows carry no console prefix** — "GBC "/"GB  " cost 4 of 38 usable characters
-(10.5%) repeating what the navigation already said. The console is in the TITLE
-once: `Game Boy Color - retail`, `Game Boy Color - A`.
+## What changed this cycle
 
-**Still open, low priority:** the `retail` provenance level costs a tap and is
-the only directory with contents (a single-child skip would save a press); and
-the picker rescans the card every launch — 4 taps for 1,143 cartridges.
-
-**Card paths moved again**, so the defaults now resolve retail → homebrew → flat:
-`gbc/retail`, `nes/retail`, `pokemini/` (was `min/`), `tama/` unchanged.
-
-**NO COLOUR FLASH ON EITHER BOOT PATH** (entries 6–7). `display_init()` draws RGB
-bring-up bands and blacks the panel ~100 ms later. Now OFF BY DEFAULT everywhere —
-they flashed on the way into slot B *and* on the way back to the desktop.
-
-**The instrument is kept, not deleted**: `lcd.boot_pattern = 1` in `board.conf`
-turns them back on for a panel fault, no rebuild. **That path is implemented but
-UNEXERCISED** — nobody has put the line in and watched the bands return.
-
-**SLOT B APPS ARE NATIVE APPS NOW** (entry 5)**A `.tdlink` pointing at a `.py` CANNOT avoid the Terminal** — `td_script_run()`
-→ `td_terminal_run()` is its only open path. That is why the old launchers showed
-all that, and why they were deleted (they are also wiped by any full flash, being
-on the card's littlefs).
-
-**The desktop's OWN emulator entries (Pokemon Mini, Tamagotchi) ARE STILL SCRIPTS**
-and still open a Terminal. Left alone deliberately; same treatment applies if the
-noise bothers.
-
-## WORKING WITH THE OPERATOR ON THE WATCH — read this first
-
-**When the operator says they are testing, send no commands.** Not status, not
-`ls`, not a read "to check". Boot what they ask for, then stop.
-
-**NEVER reset the board mid-cycle with an instrument.** A `otatool read_otadata`
-run three seconds after `switch_ota_partition` restarted slot B mid-sequence.
-
-**`esptool ... --after no_reset` leaves the board in the bootloader (TOL-006).**
-Follow every marker read with:
-`esptool ... --before default_reset --after hard_reset run`.
-
-**THE USB MIRROR IS DEAD WHILE A PICTURE OWNS THE PANEL (DSP-003).** A blocking
-host read during a picture hangs for ever.
-
-**Do not pipe a long run through `tail`.** It buffers to exit.
+- **Picker (entry 8, fork `8904b22`)**: the `..  (back)` row is gone; the
+  bottom-strip bar right of Enter — Ctrl+Q on the desktop, meaningless in slot B —
+  is **"Up"** and climbs one directory. Drawn only where a parent exists; blanked
+  and inert at the console root. **Operator confirmed on the glass.**
+- **Slot B launch path (entry 9, fork `bbbbb9e`)**: `slotb_app_go(sel, direct)`
+  holds every exit decision; a launch with an NVS key runs one app and never
+  draws the menu. `slotb_app_t` gained a `why` hook.
+- **Modules (fork `09f680e`)**: the app grew to 3,108,096 B, so
+  `modules/check_addr_fresh.py` refused the link. `make modaddr` re-read the
+  board: mmap bases unchanged (0x42ae0000 / 0x3cce0000), **API table moved
+  0x3c2817e0 → 0x3c2818d8**. Blob + moddata reflashed, read back identical.
 
 ## Where things live
 
-- Project-control repo: `/run/media/vash/GIT/Escapement`, `main`, **log at entry 7**
-  (previous 99 entries archived — see below)
-  (reference **BRD-006** in entry 92; **TOL-009** in entry 91).
-- Active code is the fork: `/run/media/vash/GIT/tinydesk-twatch`, branch
-  `t-watch-ultra`, at `a113ad5`, pushed to `fork`. Push to `fork`
-  (`aquasock/tinydesk`) only — **never** `origin` (upstream, read-only).
+- Project control: `/run/media/vash/GIT/Escapement`, `main`, **log at entry 9**.
+- Active code: `/run/media/vash/GIT/tinydesk-twatch`, branch `t-watch-ultra`,
+  HEAD `09f680e`, pushed to `fork`. Push to `fork` (`aquasock/tinydesk`) only —
+  **never** `origin` (upstream, read-only).
 - `.ai/core.md` is RESTRICTED. Do not edit without an explicit instruction.
 
-## SLOT B — how it works (entries 91–92)
-
-One image in **both** `ota_0` (0x20000) and `ota_1` (0x400000). The slot the
-bootloader picked decides the personality.
-
-- **Seam:** `board_startup_override(const char *board_conf)` in
-  `ports/esp_idf/app/main.c`, **weak**, called after `nvs_flash_init()` and
-  before netif/shell/desktop. Returns true → `app_main` stops there.
-- **Implementation:** `ports/twatchultra/main/slotb.c`, strong, returns false on
-  `ota_0`.
-- **Entry:** `ota rollback` in a shell, or
-  `otatool switch_ota_partition --name ota_1`.
-- **Exit:** Pusher A → flag → boot task calls `gb_stop()` (SRAM saved) →
-  **erase otadata** → restart. Erase, not `set_boot_partition`: see below.
-- **Entry:** Start menu "Game Boy Color" → `slotb start`; or `slotb status`.
-- **Picker:** `gbpick.c` scans `/sd/media/gbc` (2 deep), then `/sd` (2 deep);
-  right column ↓/↑ (index 4/3), bottom strip Enter (index 1). Other ten margin
-  buttons are blanked. Picker is also the failure report (text on the glass).
-- **Emulator:** the port's own `gb.c`, **not a copy**. `gb_install_touch_hook()`
-  and `gb_install_key_hook()` let it run without its shell command.
-
-### ORDER THAT MATTERS in `slotb_run()`
-
-`board_power_rails_preinit()` → `display_init(NULL)` → `display_pixels_claim(true)`
-→ **`slotb_peripherals()`** → board.conf → SD mount → touch hook → `pwrkey_init`
-→ `gb_start(NULL)` → `slotb_confirm()` → wait for flag → `gb_stop()` → return.
-
-### THE TWO TRAPS THAT COST THIS WORK — read before changing anything
-
-1. **A weak definition in an already-included object satisfies every reference**,
-   so the linker never fetches the strong one from `libmain.a`. The module is
-   absent from the image and the firmware still builds, flashes and boots.
-   `nm <elf> | grep board_startup_override` must show **`T`**, not `W`.
-   Fixed by `-Wl,--undefined=slotb_force_link`. See **TOL-009**.
-2. **A touch handler must fire on the press EDGE, not per report.** The CST9217
-   re-reports a held finger every ~66 ms (TCH records the interval; HAP-001 uses
-   it for the click). Acting per report moved the picker 5–8 rows per tap, and
-   would have made one tap select *and* commit a ROM. Track prev-state; a release
-   frame (n == 0) clears it.
-3. **Registering a hook does not start a driver.** `touch_add_app_touch()` and
-   `pwrkey_set_app_key()` install into a poll loop that `touch_init()` /
-   `pwrkey_init()` create. Haptics need BOTH the rail (`board_haptic_power_on()`)
-   AND `haptic_init()` (which writes the library and wave sequence). Three dead
-   peripherals came from this one mistake.
-
-### Board fact behind the "panel worked by luck" (BRD-006)
-
-The **XL9555's CONFIG and OUTPUT registers survive an ESP32-S3 reset.** After a
-warm reboot the panel and motor rails are still driven; on a **cold boot every
-expander pin is an input**, so nothing is powered. Never infer a rail from what
-the glass shows — drive the pins explicitly.
-
-## Diagnostics in flash padding
-
 ```
-0x1A000  slot B stage trail   (only when slot B runs)
-0x1B000  RETIRED — was a per-boot write; removed in entry 93. Stale bytes may remain.
+Fork        /run/media/vash/GIT/tinydesk-twatch  branch t-watch-ultra  HEAD 09f680e
+Project     /run/media/vash/GIT/Escapement       branch main          log entry 9
+Port        /dev/ttyACM0  (also /dev/serial/by-id/usb-Espressif_...-if00)
+Build       3,108,096 B  sha256 6c2ec10bcbc42a62c10d49e3c4f64d94824339aa20ddca8470e61089511a1092
+Module      flac.bin 26,725 B sha256 23753524bebb76942668b32580cbd8749177f13da481ad67840878991dcb3ba0
+            flac.data.bin 1,976 B sha256 4eccdad2da2a42f3deb7b79b156cf346f81a034401c1d66b386bf2e036587c11
+            host=0x3c2818d8  inst=0x42ae0000  data=0x3cce0000  app=3108096
+Backup      ~/twatch-backup/working-2026-11-23-2245-upbar-nomenu-modules.bin
+sha256      4b2ae2c76df098584204dffbccd02c9f1511aae206a1679cb13cc3b4f1ead2e0
+            (both slots AND both module regions verified byte-identical)
+DO NOT USE  working-2026-11-23-2230-upbar-nomenu.bin.STALE-MODULE
+            (app slots right, codec blob stale — quarantined, not deleted)
+Layout      ota_0 0x20000, ota_1 0x400000 (0x3E0000 each), coredump 0x7E0000,
+            otadata 0x7F0000, storage 0x800000, modules 0xC00000, moddata 0xE00000
 ```
 
-The desktop's per-boot mark is **gone**. The 0x1A000 trail stays as insurance
-against a hang (it distinguishes "stopped here" from "never started"); remove it
-once several sessions pass without one.
+## THE TRAPS THIS CYCLE RE-TAUGHT
 
-Stages: 1 ENTER, 2 RAILS, 3 DISPLAY, 4 BOARDCFG, 5 SD, 6 EMU STARTED, 7 EMU
-STOPPED, 8 RETURN, 9 SETBOOT FAILED; 90 DISPLAY, 91 BOARDCFG, 92 SD, 93 NO ROM.
-200+subtype = boot slot (0x10 ota_0, 0x11 ota_1).
+1. **The IDF project root is `ports/twatchultra`, not the repo root.** The repo
+   root holds a separate host CMake tree (`build/`, Unix Makefiles, ~40 host
+   tests). Running `idf.py build` from the root fails on a generator mismatch;
+   recovering that tree cost a reconfigure (and it works — `test_twatch_edges`).
+2. **A backup taken between flashes is not a backup.** The first 16 MiB read of
+   the cycle landed after the app was written and before the codec, so it holds
+   an app needing `host=0x3c2818d8` beside a blob linked for `0x3c2817e0`. Take
+   the backup AFTER the last region of a cycle is flashed.
+3. **The image size changing moves the module API address**, always. The gate is
+   `python3 modules/check_addr_fresh.py ../build/tinydesk.bin moddata.at` — run it
+   before flashing, and `make modaddr && make flac` when it refuses.
+
+## Instrument traps that have cost real time
+
+- `esptool ... --after hard_reset run` does **not** reset this board out of the
+  bootloader. `otatool` (`read_otadata`, `switch_ota_partition`) does.
+- Screen captures interleave with keystrokes; `ls` can come back blank or
+  garbled. Re-check with a different command shape. Four wrong conclusions came
+  from this.
+- A rebuilt image is **never** byte-identical (build date embedded).
+- `otadata` enum: NEW 0x0, PENDING_VERIFY 0x1, **VALID 0x2**, INVALID 0x3,
+  ABORTED 0x4, UNDEFINED 0xFFFFFFFF.
+- A reset inside the 30 s confirm window rolls back to the other slot; slot B's
+  exit erases otadata for that reason.
+- **When the operator says they are testing, send no commands.** The USB mirror
+  is dead while a picture owns the panel (DSP-003).
+
+## Slot B stage trail at flash 0x1A000 (magic "SLBS")
+
+1 ENTER, 2 RAILS, 3 DISPLAY, 4 BOARDCFG, 5 SD, 6 EMU_START, 7 EMU_STOP,
+8 RETURN, 9 SETBOOT_FAILED, **10 MENU** (out of band — written every time the app
+menu is drawn, so a menu found on the glass can be read rather than guessed at).
+FAIL codes 90..93 for display, board config, SD and no-ROM.
+
+## Open, in the order I would take them
+
+1. **Walk the exit path** (owed by entry 9).
+2. **The desktop's two emulator entries are still `.tdlink` → `.py`** and open a
+   Terminal — the same noise entries 5–6 removed from slot B.
+3. **Startup audio burst**: 99% of drops are two episodes (sec 0 = 7,177;
+   sec 14 = 3,915). The recorded theory ("stream opens before ROM load") is
+   **wrong**: `sound_stream_open()` is near line 1490, `gnuboy_load_rom()` near
+   1427. Likely the I2S ring draining. Instrument: the per-second `gbhist` record.
+4. Picker rescans the card on every launch (4 taps for 1,143 cartridges) and the
+   `retail` provenance level is the only populated one.
+5. A failed cartridge returns to the desktop, not the picker — right by
+   instruction, costly for someone sampling 1,143 ROMs. Needs a remembered
+   directory in `gbpick_run()` plus a retry, and should be built on a report.
+6. Tamagotchi is the only emulator not in slot B's menu.
+
+## Build / flash
 
 ```sh
-esptool -p <by-id> -b 921600 --before default_reset --after no_reset \
-        read_flash 0x1A000 0x2000 /tmp/mark.bin
-# then: ... --before default_reset --after hard_reset run
-```
-
-**Delete `slotb_boot_mark()` first** — it erases a flash sector on every desktop
-boot.
-
-## Build, flash, relink
-
-```sh
+cd /run/media/vash/GIT/tinydesk-twatch/ports/twatchultra
 export IDF_PATH=/home/vash/esp/esp-idf-5.3.1
 export IDF_TOOLS_PATH=/home/vash/esp/idf-tools
 export IDF_PYTHON_ENV_PATH=/home/vash/esp/idf-tools/python_env/idf5.3_py3.14_env
 export PATH=$(ls -d /home/vash/esp/idf-tools/tools/xtensa-esp-elf/*/xtensa-esp-elf/bin|head -1):$IDF_PYTHON_ENV_PATH/bin:$PATH
 python "$IDF_PATH/tools/idf.py" build
-```
 
-Port: `/dev/serial/by-id/usb-Espressif_USB_JTAG_serial_debug_unit_80:45:6B:46:DF:54-if00`
-(watch is `303a:1001`; the TinyTang also enumerates as ttyACM — never open by number).
-
-**Flash BOTH slots after every build** (slot B is what makes the feature work):
-```sh
-esptool -p <by-id> -b 921600 --before default_reset --after hard_reset \
+esptool.py -p /dev/ttyACM0 -b 921600 --before default_reset --after no_reset \
         write_flash 0x20000 build/tinydesk.bin 0x400000 build/tinydesk.bin
+python $IDF_PATH/components/app_update/otatool.py -p /dev/ttyACM0 erase_otadata
 ```
-Add `0x7F0000 build/ota_data_initial.bin` to force the boot back to `ota_0`.
 
-**ESP-IDF EMBEDS THE BUILD DATE AND TIME**, so *every* rebuild changes the image
-even for a comment-only edit. A rebuilt binary is never byte-identical — reflash
-if you want the backup and the board to match the source.
+Module, only when the image SIZE changes (the gate says so):
 
-**Relink the module whenever the image SIZE changes:**
 ```sh
-xtensa-esp32s3-elf-nm build/tinydesk.elf | grep -E ' g_modhost_ptr| g_modbss$'
-grep -E 'MODHOST_PTR_AT|MODBSS_AT' modules/build/modaddr.h
-# if they differ:
-cd ports/twatchultra/modules
-python3 read_modaddr.py --port <by-id> -o moddata.at   # ~4 min
-make flac                                              # prints host=0x...
-esptool write_flash 0xC00000 build/flac.bin 0xE00000 build/flac.data.bin
+cd modules && python3 check_addr_fresh.py ../build/tinydesk.bin moddata.at
+make modaddr && make flac
+esptool.py -p /dev/ttyACM0 write_flash 0xC00000 build/flac.bin 0xE00000 build/flac.data.bin
 ```
 
-**NEVER `rm sdkconfig`** — see TOL-008. Copy aside, compare after build.
+## Card
 
-**`esptool ... --before default_reset --after hard_reset run` DOES NOT RESET THIS
-BOARD OUT OF THE BOOTLOADER.** It exits 0 and the board stays in the stub, so
-anything you then "measure" was measured with nothing running. This invalidated
-most of one session's tests. **Use `otatool` for switching and resetting** — it
-resets reliably; `esptool` reads with `--after no_reset` leave the board parked.
-
-## Current board state
-
-- Runs entry-7 build (3,107,440 B), desktop on `ota_0`; both slots hold the same
-  image. otadata holds a bootloader-written pending entry for `ota_0` (expected).
-- Module `host=0x3c2817e0`, MMU `0x42ae0000`/`0x3cce0000`.
-- Cartridge chosen per boot from the picker (no remembered selection yet).
-
-## Backup
-
-`~/twatch-backup/working-2026-11-23-2115-nobands-both.bin` — 16 MiB, verified
-against the chip, sha256
-`391288b391cfa8a6a521c3579e2db52b7b934a892e91cd5ed14c58bb74c6d328`.
-Both slots byte-identical to the build; both FLAC blobs current. Supersedes
-`working-2026-11-23-1245-launcher.bin`.
-Both `ota_0` and `ota_1` regions confirmed byte-identical to the build, FLAC blobs
-current. Supersedes `working-2026-11-23-1830-slotb-picker.bin` (entry 93).
-
-## Next steps, in order
-
-1. **Settle the rollback anomaly** — reset-within-30-s returning to slot B.
-   Test properly: BOTH slots with valid otadata entries, reset inside the window,
-   `otatool` output VISIBLE. Probable fix: confirm the desktop's image on boot
-   after a local switch instead of after 30 s — but that is the desktop's OTA
-   policy and needs operator approval.
-2. **Remember the last cartridge** — the picker rescans every boot.
-3. **Measure the frame-time claim** — compare a slot B `gbhist` against the same
-   ROM under the desktop. Never checked against a run.
-4. Remove the 0x1A000 trail once several sessions pass without a hang.
-5. **Launcher files are NOT in the image** — `/root/Apps/gbslotb.py` and
-   `Start menu/Game Boy Color.tdlink` live on littlefs `storage`. A full-image
-   flash or factory restore removes them; sources are in `scripts/apps/`.
-6. Open: frame-pool stall (parked), startup audio burst (~5,100 samples),
-   Pusher A for NES/PM in the desktop, always-on gestures, `klio save` overflow,
-   injection parked at 78, DMG unproven, savestate over-read, header 0x2c/0x44.
-
-## Standing facts
-
-- Internal RAM is the binding constraint; the optimisation line is closed four
-  ways (entries 87–90).
-- I2S DMA and the display's SPI bus share one internal pool (AUD-003).
-- Slot is 0x3E0000; 24% free at 3.1 MB.
-- **Back up the working tree before destructive experiments.**
+`/run/media/vash/ESCAPEMENT` when in a PC — `media/gbc/retail` (543),
+`media/gb/retail` (600), bucket cap 61 in `tools/gbcstage.py`, `media/nes/retail`,
+`media/pokemini/retail`, `media/tama/rom.bin`. ROM defaults resolve
+**retail → homebrew → flat root** (`GB_ROM_HB`, `NES_ROM_HB`, `PM_ROM_HB`).

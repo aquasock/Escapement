@@ -1,3 +1,63 @@
+## 9 COMMIT Unreleased 2026-11-23T22:50:00-07:00
+
+#### Coming From:
+
+Unreleased 922a62e
+
+#### Purpose:
+
+Make it impossible for the desktop's Start-menu shortcuts to land the wearer on slot B's three-app menu, and name the real reason when an emulator refuses to start.
+
+#### Outcome:
+
+A SHORTCUT LAUNCH CAN NO LONGER REACH THE APP MENU, AND THE GUARANTEE IS CONTROL FLOW RATHER THAN A PROMISE. The operator reported it directly: tapping "Game Boy Color" and then moving through the cartridge picker kept landing on "Slot B - select an app", with the three apps listed, and asked for the screen not to exist on that path. THE PATH WAS REAL AND THE CODE SHOWED IT. A direct launch ran inside the same `for (;;)` as the menu, carrying a `launched_direct` local that was set on the first pass and cleared with the `direct` key index; the exits that read it were the ones after a game stopped or a picker was abandoned, and every *failure* fell past it into the menu -- so a cartridge that would not load, a heap short of PSRAM, or a leaked blitter put a menu in front of someone who had already chosen an app. The two entries are now separate control flow: a launch that arrives with an NVS key runs `slotb_app_go(app, true)` and there is no menu-drawing code anywhere below it, while the menu loop is the only place a menu exists. THE FAILURE MESSAGE WAS ALSO LYING AND NOW NAMES ITS CAUSE. Every refusal in `gb_start()` had only a `printf`, and slot B has no console, so the glass showed "did not start / no ROM? put one in /sd/media" for a bad dump, a short read, a full heap and a wedged blitter alike. `gb_last_error()` carries the reason up -- a blitter never exited, already running, cannot open the cartridge, not a cartridge (size), no PSRAM for the cartridge, the card returned a short read, no PSRAM for the frame, the emulator core did not init, unsupported cartridge or mapper -- and the app table gained a `why` hook so an emulator with nothing to say still says nothing rather than something wrong. `SLOTB_STAGE_MENU` (stage 10) is written at flash `0x1A000` every time the menu is drawn, which answers the one question the trail could not: a menu found on the glass can now be read as "booted without a launch key" instead of guessed at. THIS CYCLE ALSO PAYS THE MIGRAINE THAT ENTRY 7 WARNED ABOUT AND IT WAS CAUGHT BY A GATE RATHER THAN BY THE GLASS. The app image grew from 3,107,440 to 3,108,096 bytes, and `modules/check_addr_fresh.py` refused the link with both numbers printed; `make modaddr` re-read the live mapping off the board through the storage partition, the two mmap bases had NOT moved at 0x42ae0000 and 0x3cce0000, but the API table had -- `host=0x3c2817e0` to `host=0x3c2818d8` -- which is the address whose mismatch makes a decoder read its constants 248 bytes off and report a corrupt file for a good one. Both module regions were reflashed and read back byte-identical, and `check_addr_fresh.py` passes against the shipped image. THE FIRST BACKUP OF THE CYCLE WAS INCOHERENT AND IS QUARANTINED RATHER THAN LEFT TO BE PICKED UP IN AN EMERGENCY. `working-2026-11-23-2230-upbar-nomenu.bin` was taken after the app was flashed but before the codec was, so its `modules` region holds a blob linked for the previous API address; it was renamed with a `.STALE-MODULE` suffix and the cycle re-backed up afterwards, to `working-2026-11-23-2245-upbar-nomenu-modules.bin`, sha256 `4b2ae2c76df098584204dffbccd02c9f1511aae206a1679cb13cc3b4f1ead2e0`, whose app slots and both module regions were each compared byte-identical to the build. One tool trap is worth carrying: the IDF project root is `ports/twatchultra`, NOT the repository root, and this cycle's first build was run from the root where a separate host CMake tree lives -- it failed on a generator mismatch, and that host tree lost its cache and reconfigured, which is why `test_twatch_edges` was rebuilt and re-run (1,591 checks, 0 failures) as the proof that nothing host-side was damaged. THE CORE-SYNTAX AUDIT REQUIRED BY core.md WAS PERFORMED BEFORE COMMIT: core.md and core-syntax.md were re-read, the complete `.ai/` diff inspected, core.md is unchanged, this entry is checked against the template for header order, the six sections in their canonical order, prose-only Purpose, Outcome and Next Steps, eligible Files Modified and the three Status lines, the log stands at nine entries against a ring of a hundred so ninety-one are free, and the known conformance debt archived with the previous log stands as entry 74 there recorded. No reference record was added: this is this project's own launch path, and the facts that matter to a future reader are the stage numbers in `slotb.c` and the address gate in `modules/`.
+
+#### Next Steps:
+
+THE OPERATOR WALKS IT, AND THAT IS THE ONLY TEST THAT COUNTS FOR A SCREEN THAT SHOULD NOT APPEAR. Launch "Game Boy Color" from the Start menu, pick a cartridge, play, and leave with Pusher A -- the desktop must come back; then, deliberately, let one launch fail (a `.zip` renamed to `.gbc`, or a directory with no cartridges) and confirm the glass names the cause and still ends at the desktop. THE MENU STILL EXISTS FOR `slotb start` AND THAT IS DELIBERATE, because changing games without a reboot is worth a tap; it is now reachable only from the shell, and `SLOTB_STAGE_MENU` at `0x1A000` will say so if it ever appears where it should not. A FAILED CARTRIDGE RETURNS TO THE DESKTOP RATHER THAN TO THE PICKER, which is what was asked for and is also the worse choice for someone sampling 1,143 cartridges: the picker would keep their place and the desktop costs a full relaunch. If the operator wants that, the change is a remembered directory in `gbpick_run()` plus a retry from `slotb_app_go()`, and it should be built on a report rather than on this note. THE DESKTOP'S TWO EMULATOR ENTRIES ARE STILL `.tdlink`-to-`.py` SCRIPTS and still open a Terminal, the same noise entries 5 and 6 removed from slot B. THE STARTUP AUDIO BURST REMAINS THE CLEAREST TECHNICAL CYCLE and its recorded theory is known to be wrong. THE PROVENANCE LEVEL CAN STILL BE COLLAPSED and the picker still rescans the card on every launch. UNCHANGED AND STILL OPEN: the Tamagotchi is the only emulator not in slot B's menu; the frame-pool stall is parked with its counters written every session; Pusher A is Game Boy only in the desktop; always-on gesture detection needs an upstream lock; `klio save` emits a fifo overflow message; the IMU injection line is parked; an SGB-enhanced title would exercise the third machine type; the savestate over-read in the vendored `gnuboy.c` is unfixed and unreachable; the two unidentified firmware header fields still gate custom firmware; and the statusbar stack size remains the operator's decision.
+
+#### Files Modified:
+
+None in this repository; the fork carries the change at `09f680e` (`ports/twatchultra/main/slotb.c`, `ports/twatchultra/main/gb.c`, `ports/twatchultra/main/gb.h`, `ports/twatchultra/modules/moddata.at`).
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: NOT RUN
+
+---
+
+## 8 COMMIT Unreleased 2026-11-23T22:40:00-07:00
+
+#### Coming From:
+
+Unreleased 922a62e
+
+#### Purpose:
+
+Replace the cartridge picker's `..  (back)` row with an Up button on the bottom strip, so the list spends its screens on cartridges instead of on the way out.
+
+#### Outcome:
+
+THE LIST NO LONGER CARRIES A ROW THAT EXISTS ONLY TO BE LEFT. The operator asked for the `..  (back)` label to go and for the third bottom-strip bar -- Ctrl+Q on the desktop, where it closes a window, which means nothing in slot B, which has no shell and no window -- to be relabelled "Up" and made the way out of a folder. Both are done: `list_dir()` lost its parent-injection branch along with the `first_real` offset that existed to keep `..` from competing alphabetically with a real folder, the rows now use all 22 lines for folders and cartridges, and `gbpick_list_run()` gained `can_go_up` and `up_out`. THE BAR IS DRAWN ONLY WHERE THERE IS SOMEWHERE TO CLIMB TO, which is the part that keeps it honest: at the console root it is blanked AND marked not-live, so a press there neither acts nor buzzes, and the footer drops its `up:back` words rather than advertising a bar that does nothing -- the label/duty disagreement `edges.h` was written to prevent. The app menu and the console chooser pass `false`, because they are single screens. THE OPERATOR CONFIRMED IT ON THE GLASS: "looks good. Up works perfect." ONE THING WAS REPORTED RATHER THAN CHANGED, because it is a judgement only a thumb can make: the right column's U+2191 moves the highlight and the strip's "Up" climbs a directory, so one screen now has two different "ups", and `display_margin_btn_label()` can rename it to "Back" or "Up dir" in one word if that reads wrong in use. THE BUILD IS 3,107,600 BYTES AND THE FLASH WAS VERIFIED RATHER THAN ASSUMED: sha256 `ee1e2c7878ae1b56b3232a15ff1cbbd52cdd2b02ae9de1ccde385a4a3b7388c6`, both OTA slots written and read back byte-identical, otadata erased so the desktop is the default boot, and the host `test_twatch_edges` rebuilt and run at 1,591 checks with 0 failures. THE FORK CARRIES IT AT 8904b22. THE CORE-SYNTAX AUDIT REQUIRED BY core.md WAS PERFORMED BEFORE COMMIT: core.md and core-syntax.md were re-read, the complete `.ai/` diff inspected, core.md is unchanged, this entry is checked against the template for header order, the six sections in their canonical order, prose-only Purpose, Outcome and Next Steps, eligible Files Modified and the three Status lines, the log stands at eight entries against a ring of a hundred so ninety-two are free, and the known conformance debt archived with the previous log stands as entry 74 there recorded. No reference record was added: this is this project's own picker.
+
+#### Next Steps:
+
+NONE OF ITS OWN; it was accepted on the glass in the same session that began the next entry, and the two were flashed one after the other, so the image now on the watch is the later one. The rename of the Up bar remains a one-word change if the two-ups confusion turns out to matter in use. THE CARTRIDGE PICKER STILL RESCANS THE CARD ON EVERY LAUNCH and remembers nothing, which is four taps for 1,143 cartridges, and the `retail` provenance level is still the only directory with contents. UNCHANGED AND STILL OPEN: the Tamagotchi is the only emulator not in slot B's menu; the frame-pool stall is parked with its counters written every session; the desktop's two emulator entries still open a Terminal; the startup audio burst is unexplained and its recorded theory is wrong; Pusher A is Game Boy only in the desktop; always-on gesture detection needs an upstream lock; `klio save` emits a fifo overflow message; the IMU injection line is parked; an SGB-enhanced title would exercise the third machine type; the savestate over-read in the vendored `gnuboy.c` is unfixed and unreachable; the two unidentified firmware header fields still gate custom firmware; and the statusbar stack size remains the operator's decision.
+
+#### Files Modified:
+
+None in this repository; the fork carries the change at 8904b22 (`ports/twatchultra/main/gbpick.c`, `ports/twatchultra/main/gbpick.h`, `ports/twatchultra/main/slotb.c`).
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: PASS
+
+---
+
 ## 7 COMMIT Unreleased 2026-11-23T21:22:05-07:00
 
 #### Coming From:
