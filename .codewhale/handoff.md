@@ -1,4 +1,4 @@
-# Handoff — Escapement / TinyDesk on T-Watch Ultra, 2026-11-23T17:50
+# Handoff — Escapement / TinyDesk on T-Watch Ultra, 2026-11-23T17:55
 
 Orientation, not authority. **Verify before acting on it.** The files, the flash
 and the board are the fact; this file is a claim.
@@ -38,11 +38,24 @@ had no ROMs for them). Every emulator's default ROM is present:
 **Tamagotchi is the only emulator NOT in slot B's menu** — one row in `s_apps[]`
 plus a `tama_install_touch_hook()` split, if wanted.
 
-**THE LOG IS AT 99 OF 100 — THE NEXT ENTRY IS THE HUNDREDTH AND MUST ROLL.**
-Do this FIRST, before any engineering: tar.gz the active log into `archived_logs`
-with the current date and time, clear `core-log.md`, and write a handover entry as
-entry 1 naming the archive and summarising the live state. Every further change
-would otherwise be stranded in a log that has to be archived anyway.
+**THE LOG WAS ROLLED OVER — 99 entries archived, new log opens at entry 1.**
+
+```
+.ai/archived_logs/core-log-2026-11-23-1747.tar.gz
+216,969 bytes compressed / 651,773 uncompressed / 99 entries
+sha256 1bf7e474da98a4f92ff245606ec23d33da0ccc04ae880e8b87473fd6197addc5
+```
+
+Verified by re-extracting and hashing, not by trusting `tar`. Rolled one entry
+early, at 99 rather than 100, on operator instruction — recorded in the new
+entry 1. **The archive is committed**; the previous rollover's was lost by not
+being committed.
+
+**Old archives are NOT to be read without the operator's approval.** Two
+locations exist: root `archived_logs/` (2026-11-11-2223) and `.ai/archived_logs/`
+(2026-11-14-1340, 2026-11-23-1747).
+
+**The new log has 99 free entries before the next rollover.**
 
 **NEVER trust a screen-capture listing as proof of a directory's contents** — the
 mirror interleaves and truncates when keystrokes and reads overlap. Three
@@ -68,7 +81,8 @@ host read during a picture hangs for ever.
 
 ## Where things live
 
-- Project-control repo: `/run/media/vash/GIT/Escapement`, `main`, entry 99
+- Project-control repo: `/run/media/vash/GIT/Escapement`, `main`, **new log at entry 1**
+  (previous 99 entries archived — see below)
   (reference **BRD-006** in entry 92; **TOL-009** in entry 91).
 - Active code is the fork: `/run/media/vash/GIT/tinydesk-twatch`, branch
   `t-watch-ultra`, at `7446391`, pushed to `fork`. Push to `fork`
