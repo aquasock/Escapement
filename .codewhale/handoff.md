@@ -1,31 +1,41 @@
-# Handoff — Escapement / TinyDesk on T-Watch Ultra, 2026-11-24T01:05
+# Handoff — Escapement / TinyDesk on T-Watch Ultra, 2026-11-24T11:50
 
 Orientation, not authority. **Verify before acting on it.** The files, the flash
 and the board are the fact; this file is a claim.
 
 ## One line
 
-**THE "WEIRD STATE" IS CLOSED — ON THE OPERATOR'S VERDICT** (entries 11–12). The
-cause was the console screen borrowing `list_dir()`'s label array, so after Up at
-a console root it drew leftover folder names while Enter went to the console the
-row named. Fixed. Operator: *"i think the issue is resolved. pass."*
+**THE PICKER'S FLASH IS CLOSED — ON THE OPERATOR'S VERDICT** (entry 13). Every
+selector move called `draw_screen()`, which opened with `display_fill(0x0000)` —
+a full-panel push of black, ~100 ms — and then painted 23 bands back on top of
+those same pixels. ~190 ms per press, the first half of it a black frame. Fixed
+by making the black part of the content and repainting three bands per move.
+Operator: *"works perfect. pass."*
 
-**What is proven vs assumed.** Proven: labels and Enter now agree; a 100-char DMG
-cartridge in a bucket opens (record `why="pick"`, no failure after); the session
-ended at stage 8 RETURN. **Not proven:** which of those the original "rom not
-found" was — the successful run overwrote the record that would have said.
+**Still open from before:** the original "rom not found" (entries 11–12) is
+closed on the operator's verdict, **not** on a demonstrated cause — the
+successful run overwrote the record that would have said which fault it was.
 
-**The record sector is LAST-WRITE-WINS.** If the symptom returns, read
-`tools/watch-slotbrec.py` BEFORE playing anything that works.
+## Standing invariants that cost a cycle each
 
-**Blanks are drawn but not live.** Safe today because `slotb_run()` claims the
-pixels before the picker appears, so `edge_press()` (the only path that turns a
-margin press into a key) is unreachable. **Any new owner of the glass must claim
-it**, or a blank slot will type into a shell slot B does not have.
+- **The `0x1B000` failure record sector is LAST-WRITE-WINS.** If the "rom not
+  found" symptom returns, read `tools/watch-slotbrec.py` BEFORE playing anything
+  that works, or the evidence is gone.
+- **Blanks are drawn but not live.** Safe today because `slotb_run()` claims the
+  pixels before the picker appears, so `edge_press()` (the only path that turns a
+  margin press into a key) is unreachable. **Any new owner of the glass must
+  claim it**, or a blank slot types into a shell slot B does not have.
+- **No `display_fill()` in a redraw path.** It pushes the whole panel and then
+  the caller paints over it, which is a visible flash and double the panel time.
+  Paint the bands; gate the fill on `paint_black()`-style background bands. The
+  picker's `gbpick_message()` keeps its fill on purpose — it is a terminal screen.
+- **The picker's bands tile the framebuffer under a `_Static_assert`.** With the
+  fill gone, an unclaimed row is a permanent stripe, not a blink. Do not widen
+  `PK_ROWS` or move `PK_LIST_Y` without re-checking it.
 
-## What changed this cycle
+## What changed, entries 8–13 (all pushed)
 
-Entries 8–12, all pushed. Read the entry, not this list, before trusting a claim.
+Read the entry, not this list, before trusting a claim.
 
 - **Entry 8 (fork `8904b22`)**: the picker's `..  (back)` row is gone; the bar
   right of Enter is **"Up"**. Operator confirmed.
@@ -41,48 +51,55 @@ Entries 8–12, all pushed. Read the entry, not this list, before trusting a cla
   `0x1B000` failure record and `tools/watch-slotbrec.py`.
 - **Entry 12 (fork `75e8a00`)**: the reader had the magic byte order wrong and
   rejected a good record; fixed. Operator passed the whole area.
-
-Every one of these grew the image, so `moddata.at` was re-measured each time —
-`host` walked 0x3c2817e0 → 0x3c2818d8 → **0x3c28193c**.
+- **Entry 13 (fork `8dff372`)**: the picker no longer paints a black frame before
+  every repaint. A move repaints the two changed rows plus the footer (~11 ms);
+  a page change repaints the body. Operator passed it.
 
 ## Where things live
 
-- Project control: `/run/media/vash/GIT/Escapement`, `main`, **log at entry 12**.
+- Project control: `/run/media/vash/GIT/Escapement`, `main`, **log at entry 13**.
 - Active code: `/run/media/vash/GIT/tinydesk-twatch`, branch `t-watch-ultra`,
-  HEAD `75e8a00`, pushed to `fork`. Push to `fork` (`aquasock/tinydesk`) only —
+  HEAD `8dff372`, pushed to `fork`. Push to `fork` (`aquasock/tinydesk`) only —
   **never** `origin` (upstream, read-only).
 - `.ai/core.md` is RESTRICTED. Do not edit without an explicit instruction.
 
 ```
-Fork        /run/media/vash/GIT/tinydesk-twatch  branch t-watch-ultra  HEAD 75e8a00
-Project     /run/media/vash/GIT/Escapement       branch main          log entry 12
+Fork        /run/media/vash/GIT/tinydesk-twatch  branch t-watch-ultra  HEAD 8dff372
+Project     /run/media/vash/GIT/Escapement       branch main          log entry 13
 Port        /dev/ttyACM0  (also /dev/serial/by-id/usb-Espressif_...-if00)
-Build       3,108,672 B  sha256 1452a027fb2d78636caa4515a7f969d487934f0403d505b00bfc740f8cfd468b
-Module      flac.bin 26,725 B sha256 2f95dea442fbaa61031e1248944d934b44cda27d68ad07941791ecf80373380d
-            flac.data.bin 1,976 B sha256 4eccdad2da2a42f3deb7b79b156cf346f81a034401c1d66b386bf2e036587c11
-            host=0x3c28193c  inst=0x42ae0000  data=0x3cce0000  app=3108672
-Backup      ~/twatch-backup/working-2026-11-24-0010-rootlabels-faillog.bin
-sha256      e9b635564c79e3ec8fba64ef181d1728ff3a0473303890046efb8c0ebca9ca65
-            (both slots AND both module regions verified byte-identical)
+Build       3,108,912 B  sha256 48af5daa106c562af996e364d6c6a357d4c93d6bb47504684802075aab8acc6e
+Module      flac.bin unchanged this cycle — NOT reflashed, NOT re-tested
+            0xC00000 / 0xE00000 hold the blob from the 3,108,672-byte app
+            host=0x3c28193c (g_modhost_ptr) inst=0x42ae0000 data=0x3cce0000
+            app=3108912  <-- all three checked against the new ELF, none moved
+Backup      ~/twatch-backup/working-2026-11-24-1145-picker-noredraw-flash.bin
+sha256      d848982012187ff1eecea51a5b4357c3a12f68d9b111782ded1a8affbb2534d4
+            (whole 16 MiB; both app slots verified byte-identical to the build)
 DO NOT USE  working-2026-11-23-2230-upbar-nomenu.bin.STALE-MODULE
             (app slots right, codec blob stale — quarantined, not deleted)
 Layout      ota_0 0x20000, ota_1 0x400000 (0x3E0000 each), coredump 0x7E0000,
             otadata 0x7F0000, storage 0x800000, modules 0xC00000, moddata 0xE00000
 ```
 
-## THE TRAPS THIS CYCLE RE-TAUGHT
+## THE TRAPS THIS AREA RE-TAUGHT
 
 1. **The IDF project root is `ports/twatchultra`, not the repo root.** The repo
    root holds a separate host CMake tree (`build/`, Unix Makefiles, ~40 host
-   tests). Running `idf.py build` from the root fails on a generator mismatch;
-   recovering that tree cost a reconfigure (and it works — `test_twatch_edges`).
-2. **A backup taken between flashes is not a backup.** The first 16 MiB read of
-   the cycle landed after the app was written and before the codec, so it holds
-   an app needing `host=0x3c2818d8` beside a blob linked for `0x3c2817e0`. Take
-   the backup AFTER the last region of a cycle is flashed.
-3. **The image size changing moves the module API address**, always. The gate is
-   `python3 modules/check_addr_fresh.py ../build/tinydesk.bin moddata.at` — run it
-   before flashing, and `make modaddr && make flac` when it refuses.
+   tests). Running `idf.py build` from the root fails on a generator mismatch.
+2. **`export.sh` fails on this machine** — it wants `riscv32-esp-elf-gdb`, which
+   is not installed, and returns non-zero before exporting anything. Export the
+   environment by hand instead; the recipe below works and is what entry 13 used.
+3. **A backup taken between flashes is not a backup.** Take it AFTER the last
+   region of a cycle is flashed, and verify the app slots inside it rather than
+   trusting the command that wrote it.
+4. **A size change *usually* moves the module addresses — check, do not assume.**
+   The gate is `python3 modules/check_addr_fresh.py ../build/tinydesk.bin
+   moddata.at`, and it only compares sizes. The three addresses a blob depends on
+   are `inst`, `data` (both in `moddata.at`) and `g_modhost_ptr` (regenerated by
+   `gen_addr.py ../build/tinydesk.elf build/modaddr.h`). Entry 13 grew the image
+   by 240 bytes and none of the three moved.
+5. **A host test passing is not evidence about the glass.** `test_twatch_edges`
+   covers display and margin rules only. `gbpick.c` runs on the board alone.
 
 ## Instrument traps that have cost real time
 
@@ -91,11 +108,12 @@ Layout      ota_0 0x20000, ota_1 0x400000 (0x3E0000 each), coredump 0x7E0000,
 - Screen captures interleave with keystrokes; `ls` can come back blank or
   garbled. Re-check with a different command shape. Four wrong conclusions came
   from this.
-- A rebuilt image is **never** byte-identical (build date embedded).
+- A rebuilt image is **never** byte-identical (build date embedded) — so compare
+  a rebuild against its own read-back, not against last cycle's hash.
 - `otadata` enum: NEW 0x0, PENDING_VERIFY 0x1, **VALID 0x2**, INVALID 0x3,
   ABORTED 0x4, UNDEFINED 0xFFFFFFFF.
 - A reset inside the 30 s confirm window rolls back to the other slot; slot B's
-  exit erases otadata for that reason.
+  exit, and this project's flash procedure, erase otadata for that reason.
 - **When the operator says they are testing, send no commands.** The USB mirror
   is dead while a picture owns the panel (DSP-003).
 
@@ -126,13 +144,13 @@ the number. Any new reader of this sector has the same trap.
 
 ## Open, in the order I would take them
 
-1. **The desktop's two emulator entries are still `.tdlink` → `.py`** and open a
-   Terminal — the same noise entries 5–6 removed from slot B. Loudest remaining
-   rough edge on the glass.
-2. **Startup audio burst**: 99% of drops are two episodes (sec 0 = 7,177;
+1. **Startup audio burst**: 99% of drops are two episodes (sec 0 = 7,177;
    sec 14 = 3,915). The recorded theory ("stream opens before ROM load") is
    **wrong**: `sound_stream_open()` is near line 1490, `gnuboy_load_rom()` near
    1427. Likely the I2S ring draining. Instrument: the per-second `gbhist` record.
+2. **The desktop's two emulator entries are still `.tdlink` → `.py`** and open a
+   Terminal — the same noise entries 5–6 removed from slot B. Loudest remaining
+   rough edge on the glass.
 3. **Picker rescans the card on every launch** — five taps to a cartridge now that
    a console level sits above the tree. A remembered selection is the cheapest
    remaining win. The `retail` provenance level can also be collapsed to one tap.
@@ -147,10 +165,9 @@ the number. Any new reader of this sector has the same trap.
    runtime. The record sector is last-write-wins; a ring of eight would keep a
    session's worth of failures.
 
-**Walked and closed this session:** the exit path (entry 12 — stage 8 RETURN,
-desktop returns), the console labels, the blank margins, Up-at-root, and the
-Up bar itself. Do not re-open these on the strength of this file; re-read the
-entries.
+**Walked and closed: do not re-open these on the strength of this file.** The exit
+path and stage 8 RETURN (entry 12), the console labels, the blank margins,
+Up-at-root, the Up bar (entries 10–12), and the picker's redraw (entry 13).
 
 ## Build / flash
 
@@ -159,20 +176,27 @@ cd /run/media/vash/GIT/tinydesk-twatch/ports/twatchultra
 export IDF_PATH=/home/vash/esp/esp-idf-5.3.1
 export IDF_TOOLS_PATH=/home/vash/esp/idf-tools
 export IDF_PYTHON_ENV_PATH=/home/vash/esp/idf-tools/python_env/idf5.3_py3.14_env
-export PATH=$(ls -d /home/vash/esp/idf-tools/tools/xtensa-esp-elf/*/xtensa-esp-elf/bin|head -1):$IDF_PYTHON_ENV_PATH/bin:$PATH
-python "$IDF_PATH/tools/idf.py" build
+export ESP_ROM_ELF_DIR=/home/vash/esp/idf-tools/tools/esp-rom-elfs/20240305
+export PATH=$IDF_PYTHON_ENV_PATH/bin:$(ls -d /home/vash/esp/idf-tools/tools/xtensa-esp-elf/*/xtensa-esp-elf/bin|head -1):$IDF_PATH/tools:$PATH
+python $IDF_PATH/tools/idf.py build
 
-esptool.py -p /dev/ttyACM0 -b 921600 --before default_reset --after no_reset \
-        write_flash 0x20000 build/tinydesk.bin 0x400000 build/tinydesk.bin
-python $IDF_PATH/components/app_update/otatool.py -p /dev/ttyACM0 erase_otadata
+# both slots, then read them back and compare, then clear otadata
+python -m esptool --chip esp32s3 -p /dev/ttyACM0 -b 460800 --before default_reset \
+       --after no_reset write_flash 0x20000 build/tinydesk.bin 0x400000 build/tinydesk.bin
+python -m esptool ... read_flash 0x20000 <size> /tmp/a.bin     # and 0x400000
+cmp build/tinydesk.bin /tmp/a.bin && cmp build/tinydesk.bin /tmp/b.bin
+python -m esptool ... erase_region 0x7F0000 0x2000
+python -m esptool ... --after hard_reset chip_id                # leaves bootloader
 ```
 
-Module, only when the image SIZE changes (the gate says so):
+Module, only when `inst`, `data` or `g_modhost_ptr` has moved:
 
 ```sh
-cd modules && python3 check_addr_fresh.py ../build/tinydesk.bin moddata.at
-make modaddr && make flac
-esptool.py -p /dev/ttyACM0 write_flash 0xC00000 build/flac.bin 0xE00000 build/flac.data.bin
+cd modules
+python3 check_addr_fresh.py ../build/tinydesk.bin moddata.at
+python3 gen_addr.py ../build/tinydesk.elf build/modaddr.h   # compare to the old one
+python3 read_modaddr.py --port /dev/ttyACM0 -o moddata.at   # needs a booted board
+make flac
 ```
 
 ## Card

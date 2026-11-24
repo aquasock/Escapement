@@ -1,3 +1,33 @@
+## 13 COMMIT Unreleased 2026-11-24T11:40:01-07:00
+
+#### Coming From:
+
+Unreleased 52d360f
+
+#### Purpose:
+
+Stop the flash the operator saw on every selector move in slot B's cartridge picker.
+
+#### Outcome:
+
+THE FLASH WAS A FULL-PANEL PUSH OF BLACK BEFORE EVERY REPAINT, AND IT WAS THERE BY CONSTRUCTION RATHER THAN BY ACCIDENT. `draw_screen()` in `gbpick.c` opened with `display_fill(0x0000)`, which writes all 320x416 of the framebuffer and pushes the whole panel -- about 100 ms at this port's own measured cost of a full frame (LCD-013) -- and then painted the title, the 22 rows and the footer back on top of exactly those pixels. `move_sel()` called it on every arrow press, so each press cost roughly 190 ms of panel time and the first half of it was a black frame followed by the list returning. The operator's report was exact and so was the diagnosis: "every time i move the selector around in the rom selector on slot B, the entire fb flashes". THE FIX REMOVES THE SEPARATE BLACK PASS RATHER THAN MAKING IT FASTER, because the flash is the black frame and not the pixel count -- halving the cost of a fill that is immediately painted over would have left the flash visible. The black now lives in the bands that were already black: the three gap strips at rows 0-8, 24-40 and 408-416, and the unused row slots past the end of the list, which the old fill used to cover for. Every band is pushed with its final content, so no frame exists in which the screen is empty. A MOVE NOW REPAINTS THREE BANDS: the row that lost the highlight, the row that gained it, and the footer, whose `n/m` counter changes on every step -- about 11 ms of panel time, against the ~190 ms it replaced. A page change at row 22 really does change every row, so that case repaints the body and the footer, and even then no black frame is interleaved. THE BAND LAYOUT IS AN ASSERTION RATHER THAN A COMMENT, and that is the one part of this cycle that guards a worse failure than the one fixed: with the fill gone, any row the bands do not claim would show whatever the previous screen left in the framebuffer permanently, so a `_Static_assert` requires the six bands to sum to `DISPLAY_H` exactly, and the build refuses rather than shipping a stripe. The picker's error screen (`gbpick_message()`) deliberately keeps its `display_fill()`: it is a terminal screen that is supposed to clear everything, and it is reached once on a failure rather than on every press. Slot B's app menu draws through the same `gbpick_list_run()` and gets the fix unchanged. THE IMAGE IS 3,108,912 BYTES AND THE FLASH WAS VERIFIED RATHER THAN ASSUMED: sha256 `48af5daa106c562af996e364d6c6a357d4c93d6bb47504684802075aab8acc6e`, written to both OTA slots and read back byte-identical from `0x20000` and `0x400000`, with otadata erased so the desktop is the default boot; the board then booted and was confirmed on the desktop by reading the USB mirror, 0xe8fd0 bytes (23 percent) of the app slot still free. THE HOST TEST PASSED BUT DOES NOT TEST THIS CHANGE and the distinction is worth keeping: `test_twatch_edges` rebuilt and ran at 1,591 checks with 0 failures, and it covers the display and margin rules, not `gbpick.c`, which is on the glass only. `moddata.at` WAS RE-MEASURED BECAUSE THE IMAGE GREW, by the rule entry 12 set: the MMU pair did not move -- still `0x42ae0000`/`0x3cce0000` -- so only `app=` changed, to 3,108,912. THE MODULE BLOBS WERE CHECKED RATHER THAN ASSUMED TO SURVIVE THIS, because the size that grew by 240 bytes is the one thing that moves their addresses: the MMU pair is unchanged, `check_addr_fresh.py` passes, and `g_modhost_ptr` -- the API table pointer a blob bakes into its header and the loader refuses on a mismatch -- is still `0x3c28193c` when regenerated from the new ELF, so no blob needed relinking or reflashing. That was checked because the earlier record said such an address moves with every rebuild, and "usually" is not the same as "this time". THE OPERATOR CONFIRMED IT ON THE GLASS: "works perfect. pass." THE CORE-SYNTAX AUDIT REQUIRED BY core.md WAS PERFORMED BEFORE THIS COMMIT: core.md and core-syntax.md were re-read, the complete `.ai/` diff inspected, core.md confirmed unchanged, and this entry checked against the template, the six-section order, the prose rules, the sequential numbering and the 100-entry limit. `core-reference.md` needed no record, because nothing about this cycle was an external fact -- the panel's push cost was already LCD-013 and the fault was this project's own drawing order.
+
+#### Next Steps:
+
+THE PICKER'S REDRAW IS NOW THE CHEAPEST THING ON THE SCREEN AND THE NEXT MOVE IS INFORMATION RATHER THAN SPEED: a page change still repaints all 23 bands because the rows genuinely change, and if that ever reads as slow the fix is a second page buffer, not a smaller repaint. THE CONSOLE LIST, THE PROVENANCE LEVEL AND THE FULL MARGIN FRAME HAVE ALL BEEN WALKED BY A FINGER and needed nothing further; what remains unexercised in this area is still `lcd.boot_pattern = 1` in `board.conf`, implemented and never switched on, which costs a reboot rather than a flash to test. THE PICKER STILL RESCANS THE CARD ON EVERY LAUNCH, which is five taps to a cartridge on a fresh launch and the cheapest remaining improvement, and a remembered selection is now the only thing between this screen and a single press. THE DESKTOP'S TWO EMULATOR ENTRIES ARE STILL `.tdlink`-to-`.py` SCRIPTS and still open a Terminal, which is the loudest remaining rough edge on the glass. THE STARTUP AUDIO BURST REMAINS THE CLEAREST TECHNICAL CYCLE and its recorded theory is known to be wrong. THE `retail` PROVENANCE LEVEL CAN STILL BE COLLAPSED TO ONE TAP. THE 0x1A000 TRAIL AND THE 0x1B000 RECORD ARE BOTH OWED A REMOVAL once slot B has run a few cycles without an unexplained failure; neither is read at runtime. UNCHANGED AND STILL OPEN: the Tamagotchi is the only emulator not in slot B's menu; the frame-pool stall is parked with its counters written every session; Pusher A is Game Boy only in the desktop; always-on gesture detection needs an upstream lock; `klio save` emits a fifo overflow message; the IMU injection line is parked; an SGB-enhanced title would exercise the third machine type; the savestate over-read in the vendored `gnuboy.c` is unfixed and unreachable; the two unidentified firmware header fields still gate custom firmware; and the statusbar stack size remains the operator's decision.
+
+#### Files Modified:
+
+None in this repository; the fork carries the change at `8dff372` (`ports/twatchultra/main/gbpick.c`, `ports/twatchultra/modules/moddata.at`).
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: PASS
+
+---
+
 ## 12 COMMIT Unreleased 2026-11-24T00:50:00-07:00
 
 #### Coming From:
