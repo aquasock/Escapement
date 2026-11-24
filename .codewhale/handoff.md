@@ -1,19 +1,25 @@
-# Handoff — Escapement / TinyDesk on T-Watch Ultra, 2026-11-23T16:10
+# Handoff — Escapement / TinyDesk on T-Watch Ultra, 2026-11-23T17:50
 
 Orientation, not authority. **Verify before acting on it.** The files, the flash
 and the board are the fact; this file is a claim.
 
 ## One line
 
-**SLOT B IS A PERFORMANCE SLOT WITH A MENU (entry 97).** "Slot B - select an
-app": Game Boy Color / NES / Pokemon Mini. **Pusher A means BACK** — inside an
-app it stops it and returns to the menu; in the menu it leaves for the desktop.
-So changing games costs a tap, not a reboot.
+**THE START MENU LAUNCHES APPS DIRECTLY (entry 99).** "Game Boy Color", "NES"
+and "Pokemon Mini (B)" each reboot into slot B running that app — no menu in
+between. `slotb start` (no app) still gives slot B's own menu for changing games
+without a reboot.
 
-```
-slot B  frames=4185  wall=10670us  cpu=10695  lost=0  over=7  blits=frames
-desktop frames=3911  wall=11427us  cpu=11096  lost=334 over=29
-```
+**Exit differs by entry**, and that is deliberate:
+- direct launch → Pusher A returns to the **DESKTOP** (you came from there)
+- menu launch → Pusher A returns to the **MENU** (another game is one tap away)
+
+`slotb play <gb|nes|pm>` writes the key to NVS and switches the slot;
+`slotb start` clears the key and shows the menu.
+
+**UNVERIFIED: the direct-launch exit.** `slotb play nes` was confirmed to start
+NES directly (stage 6), but the return-to-desktop on Pusher A was not exercised —
+that needs a finger. Confirm a direct launch ends at the desktop, not the menu.
 
 6.6% faster per frame and all preemption gone (entry 96, EMU-023). **Do not move
 `gbblit` to core 0** — 7.7% faster guest, 14% of frames thrown away.
@@ -32,9 +38,11 @@ had no ROMs for them). Every emulator's default ROM is present:
 **Tamagotchi is the only emulator NOT in slot B's menu** — one row in `s_apps[]`
 plus a `tama_install_touch_hook()` split, if wanted.
 
-**Log is at 98 of 100.** TWO entries left before the archive-and-restart rule:
-at 100, tar.gz the log into `archived_logs`, clear it, reopen with a handover
-entry naming the archive. Plan for it rather than stumble into it.
+**THE LOG IS AT 99 OF 100 — THE NEXT ENTRY IS THE HUNDREDTH AND MUST ROLL.**
+Do this FIRST, before any engineering: tar.gz the active log into `archived_logs`
+with the current date and time, clear `core-log.md`, and write a handover entry as
+entry 1 naming the archive and summarising the live state. Every further change
+would otherwise be stranded in a log that has to be archived anyway.
 
 **NEVER trust a screen-capture listing as proof of a directory's contents** — the
 mirror interleaves and truncates when keystrokes and reads overlap. Three
@@ -60,10 +68,10 @@ host read during a picture hangs for ever.
 
 ## Where things live
 
-- Project-control repo: `/run/media/vash/GIT/Escapement`, `main`, entry 98
+- Project-control repo: `/run/media/vash/GIT/Escapement`, `main`, entry 99
   (reference **BRD-006** in entry 92; **TOL-009** in entry 91).
 - Active code is the fork: `/run/media/vash/GIT/tinydesk-twatch`, branch
-  `t-watch-ultra`, at `328fcd4`, pushed to `fork`. Push to `fork`
+  `t-watch-ultra`, at `7446391`, pushed to `fork`. Push to `fork`
   (`aquasock/tinydesk`) only — **never** `origin` (upstream, read-only).
 - `.ai/core.md` is RESTRICTED. Do not edit without an explicit instruction.
 

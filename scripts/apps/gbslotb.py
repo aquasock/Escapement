@@ -1,2 +1,2 @@
 import tinydesk
-tinydesk.shell("slotb start")
+tinydesk.shell("slotb play gb")

@@ -1,3 +1,36 @@
+## 99 COMMIT Unreleased 2026-11-23T17:46:18-07:00
+
+#### Coming From:
+
+Unreleased c0cb698
+
+#### Purpose:
+
+Make a Start menu shortcut launch its own app directly, so slot B's menu is not a second choice the wearer has to make after already making one.
+
+#### Outcome:
+
+THE OPERATOR ASKED WHY SLOT B HAS AN APP PICKER WHEN THE START MENU ALREADY KNOWS WHICH APP IS WANTED, AND THEY WERE RIGHT: FOR THE COMMON CASE IT SHOULD NOT. The fork carries the work at 7446391. `slotb play <gb|nes|pm>` stores the key in NVS, sets `ota_1` as the boot partition and restarts, and slot B reads that key and starts the app DIRECTLY, skipping the menu; `slotb start` with no app clears the key and shows the menu, so a stale key can never hijack a later entry into slot B. THE EXIT DIFFERS BY HOW IT WAS ENTERED, and that is the part that makes the flow feel right rather than merely shorter: a DIRECT launch returns to the DESKTOP when Pusher A ends the app, because the shortcut said "NES" and the wearer came from the desktop; an app launched FROM THE MENU returns to the menu, so another game is one tap away. Two presses now cover desktop to game and back, and the menu is kept for the different job of changing games without a reboot. THE MENU IS NOT REDUNDANT AND WAS NOT REMOVED, because it answers a question the Start menu cannot: with a game already running, changing games through slot B costs a tap, while going back to the desktop and launching again costs a reboot. The cartridge picker inside Game Boy is a third question again -- which CARTRIDGE, not which app -- and stays where it is. NVS IS THE CARRIER AND THE CHOICE IS DELIBERATE. `nvs_flash_init()` has already run by the time `board_startup_override()` is called, so the value is readable at the exact moment slot B needs it; it is a dozen bytes in a wear-levelled partition, written once per launch rather than once per frame; and it is cleared as it is read, so the instruction is one-shot and cannot survive into a later session. A key that no longer names an app falls back to the menu rather than failing, because a menu is always a usable answer and a refused boot is not. THE KEY IS WRITTEN BEFORE THE BOOT PARTITION, so a launch whose NVS write failed still lands somewhere coherent -- the menu -- rather than switching the slot and then failing to say where to go. VERIFIED ON HARDWARE, both paths and the distinction between them: `slotb play nes` reached stage 6 APP STARTED having skipped the menu entirely, and `slotb start` afterwards reached stage 5 with the menu up and no key present, which is the pair of behaviours that had to be separated. The six launcher files were written on the watch by the documented `echo` method rather than by a longer command, and `gbslotb.py` plus its `.tdlink` were read back verbatim to confirm the pattern before the other two were created from it. THE IMAGE IS 3,105,664 BYTES with module `host=0x3c281600`; `moddata.at` was refreshed from the board and the FLAC blob relinked and reflashed, and the final check confirmed both blobs byte-identical to the build inside the backup. A FULL 16 MiB BACKUP WAS TAKEN AND VERIFIED: `working-2026-11-23-1740-directlaunch.bin`, sha256 `25fc728d48fe8fe2aaf4388fdaa968e876b57b4e59fa1c9c17ed89e07730da7f`, compared against the chip with the board held in the bootloader, sidecar re-checked, both slots confirmed byte-identical. THE CORE-SYNTAX AUDIT REQUIRED BY core.md WAS PERFORMED BEFORE COMMIT: core.md and core-syntax.md were re-read, the complete `.ai/` diff inspected, core.md is unchanged, entry 99 is checked against the template for header order, the six sections in order, prose-only Purpose, Outcome and Next Steps, eligible Files Modified and the three Status lines, the log stands at 99 entries against a ring of 100 SO THE NEXT ENTRY IS THE HUNDREDTH AND THE ARCHIVE RULE APPLIES TO IT, and the known conformance debt in entries 66 through 73 stands as entry 74 recorded it. No reference record was added: this is this project's own launch mechanism and its own NVS choice.
+
+#### Next Steps:
+
+THE NEXT ENTRY IS NUMBER 100 AND THE LOG MUST ROLL: `.ai/core.md` requires the active log to be tar.gz'd into `archived_logs` with the current date and time, the active log cleared, and a handover entry written as entry 1 that names the archive and summarises the live project state. That work should be the FIRST thing the next cycle does, before any engineering, because every further change would otherwise be stranded in a log that has to be archived anyway, and doing it deliberately is the difference between an archive that reads well and one assembled in a hurry. THE DIRECT-LAUNCH EXIT IS UNVERIFIED FOR THE ONE CASE THAT MATTERS MOST: `slotb play` was confirmed to START an app directly, but the return-to-desktop-on-Pusher-A path was not exercised, because Pusher A needs a finger. The operator should confirm that a direct launch of NES ends at the desktop rather than the slot B menu, since that distinction is the whole point of the two entry modes. THE TAMAGOTCHI REMAINS THE ONLY EMULATOR NOT IN SLOT B'S MENU and `/sd/media/tama` holds its tree; it is one row in `s_apps[]`, one `tama_install_touch_hook()` split, and one launcher script, if the operator wants a fourth entry. THE STARTUP AUDIO BURST is still the one number that got worse in slot B (21 of 70 seconds with drops against 7 of 66 on the desktop) and has not been investigated; it remains the strongest candidate for the next technical cycle after the archive. THE CARTRIDGE PICKER STILL RESCANS THE CARD ON EVERY LAUNCH with no memory of the last choice. THE FRAME-POOL STALL FROM ENTRY 89 remains parked, now instrumented by entry 96's `starved` and blits-against-frames totals. TWO SMALL REMOVALS ARE OWED once slot B has run more sessions without a hang: the 0x1A000 stage trail, and the desktop's `ota status` line about a sequence number an exit erases. UNCHANGED AND STILL OPEN: Pusher A is still GBC-only in the desktop, always-on gesture detection still needs an upstream lock in `src/wm.c`, `klio save` still emits `meta 12 fifo overflow`, the injection line stays parked at entry 78, the DMG path is unproven, the savestate over-read in `gnuboy.c` is still unfixed, the two unidentified firmware header fields at 0x2c and 0x44 still gate custom firmware, and the statusbar stack decision is still the operator's.
+
+#### Files Modified:
+
+- scripts/apps/gbslotb.py
+- scripts/apps/nesslotb.py
+- scripts/apps/pmslotb.py
+- scripts/apps/README.md
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: NOT RUN
+
+---
+
 ## 98 COMMIT Unreleased 2026-11-23T16:03:32-07:00
 
 #### Coming From:

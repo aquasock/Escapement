@@ -8,7 +8,9 @@ install does not create them. These copies exist so they can be restored.
 ```
 pm.py     -> /root/Apps/pm.py     Pokemon Mini  (Start menu: "Pokémon Mini")
 tama.py   -> /root/Apps/tama.py   Tamagotchi V3 (Start menu: "Tamagotchi V2-3")
-gbslotb.py -> /root/Apps/gbslotb.py  Game Boy in slot B (Start menu: "Game Boy Color")
+gbslotb.py -> /root/Apps/gbslotb.py  Game Boy in slot B (menu: "Game Boy Color")
+nesslotb.py -> /root/Apps/nesslotb.py  NES in slot B     (menu: "NES")
+pmslotb.py -> /root/Apps/pmslotb.py  Pokemon Mini in slot B (menu: "Pokemon Mini (B)")
 ```
 
 Each is paired with a shortcut file the desktop reads:
@@ -17,13 +19,21 @@ Each is paired with a shortcut file the desktop reads:
 /root/Start menu/Pokémon Mini.tdlink      target=/root/Apps/pm.py
 /root/Start menu/Tamagotchi V2-3.tdlink   target=/root/Apps/tama.py
 /root/Start menu/Game Boy Color.tdlink    target=/root/Apps/gbslotb.py
+/root/Start menu/NES.tdlink               target=/root/Apps/nesslotb.py
+/root/Start menu/Pokemon Mini (B).tdlink  target=/root/Apps/pmslotb.py
 ```
 
-`gbslotb.py` is different in kind from the other two: `pm` and `tama` start an
-emulator inside the desktop, while this one REBOOTS THE WATCH into slot B, a
-personality with no desktop at all. It runs the firmware's `slotb start`
-command, which sets `ota_1` as the boot partition and restarts. Leaving slot B
-is Pusher A, which saves SRAM and returns the boot to `ota_0`.
+THE THREE `*slotb.py` LAUNCHERS ARE DIFFERENT IN KIND. `pm` and `tama` start an
+emulator inside the desktop; these REBOOT THE WATCH into slot B, a personality
+with no desktop at all.
+
+Each runs `slotb play <key>`, which stores the key in NVS, sets `ota_1` as the
+boot partition and restarts. Slot B reads the key and starts that app directly,
+skipping its menu -- so a shortcut that says "NES" lands in the NES, and pressing
+Pusher A there returns to the DESKTOP, because that is where the wearer came
+from. `slotb start` (no app) clears the key and shows slot B's own menu instead,
+and apps launched from that menu return to the menu so another game is one tap
+away.
 
 ## Why these are so short, and what they must not lose
 
