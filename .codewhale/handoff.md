@@ -1,4 +1,4 @@
-# Handoff — Escapement / TinyDesk on T-Watch Ultra, 2026-11-23T20:10
+# Handoff — Escapement / TinyDesk on T-Watch Ultra, 2026-11-23T20:32
 
 Orientation, not authority. **Verify before acting on it.** The files, the flash
 and the board are the fact; this file is a claim.
@@ -29,7 +29,19 @@ the picker rescans the card every launch — 4 taps for 1,143 cartridges.
 **Card paths moved again**, so the defaults now resolve retail → homebrew → flat:
 `gbc/retail`, `nes/retail`, `pokemini/` (was `min/`), `tama/` unchanged.
 
-**THE START MENU LAUNCHES APPS DIRECTLY.**
+**SLOT B APPS ARE NATIVE APPS NOW** (entry 5), not card-side scripts. Launching
+one goes straight to black and then the picker — no Terminal, no echoed command,
+no reboot text. They live in `board_apps_register()` in `link_twatch.c` and call
+`slotb_launch("<key>")`.
+
+**A `.tdlink` pointing at a `.py` CANNOT avoid the Terminal** — `td_script_run()`
+→ `td_terminal_run()` is its only open path. That is why the old launchers showed
+all that, and why they were deleted (they are also wiped by any full flash, being
+on the card's littlefs).
+
+**The desktop's OWN emulator entries (Pokemon Mini, Tamagotchi) ARE STILL SCRIPTS**
+and still open a Terminal. Left alone deliberately; same treatment applies if the
+noise bothers.
 
 ## WORKING WITH THE OPERATOR ON THE WATCH — read this first
 
@@ -50,11 +62,11 @@ host read during a picture hangs for ever.
 
 ## Where things live
 
-- Project-control repo: `/run/media/vash/GIT/Escapement`, `main`, **log at entry 4**
+- Project-control repo: `/run/media/vash/GIT/Escapement`, `main`, **log at entry 5**
   (previous 99 entries archived — see below)
   (reference **BRD-006** in entry 92; **TOL-009** in entry 91).
 - Active code is the fork: `/run/media/vash/GIT/tinydesk-twatch`, branch
-  `t-watch-ultra`, at `55a2cd7`, pushed to `fork`. Push to `fork`
+  `t-watch-ultra`, at `f8bd41b`, pushed to `fork`. Push to `fork`
   (`aquasock/tinydesk`) only — **never** `origin` (upstream, read-only).
 - `.ai/core.md` is RESTRICTED. Do not edit without an explicit instruction.
 
@@ -179,16 +191,16 @@ resets reliably; `esptool` reads with `--after no_reset` leave the board parked.
 
 ## Current board state
 
-- Runs entry-4 build (3,106,912 B), desktop on `ota_0`; both slots hold the same
+- Runs entry-5 build (3,107,312 B), desktop on `ota_0`; both slots hold the same
   image. otadata holds a bootloader-written pending entry for `ota_0` (expected).
-- Module `host=0x3c281768`, MMU `0x42ae0000`/`0x3cce0000`.
+- Module `host=0x3c2817cc`, MMU `0x42ae0000`/`0x3cce0000`.
 - Cartridge chosen per boot from the picker (no remembered selection yet).
 
 ## Backup
 
-`~/twatch-backup/working-2026-11-23-1955-noprefix.bin` — 16 MiB, verified
+`~/twatch-backup/working-2026-11-23-2030-native-launchers.bin` — 16 MiB, verified
 against the chip, sha256
-`5ba52720333755b6d53f2d66404ec070ff1901ee6ba4278947067d366d986fb3`.
+`a59dc105212fb57f51ea83cb12b72db13a0fc211d5de69e052ba48e236efdbe4`.
 Both slots byte-identical to the build; both FLAC blobs current. Supersedes
 `working-2026-11-23-1245-launcher.bin`.
 Both `ota_0` and `ota_1` regions confirmed byte-identical to the build, FLAC blobs
