@@ -22,8 +22,6 @@ Escapement is a TinyDesk port to the Lilygo T Watch Ultra. The earlier attempt t
 
 - Respect all standard licensing and attribution conventions.
 
-- Use CERN's colibri library (CERN-OHL-W-2.0), via the colibri-sv SystemVerilog port, as a good-practice reference when designing or modifying FPGA logic. Take ideas and conventions only: do not copy, translate or closely port its modules. If adapting a module is ever justified, stop and get user approval first, then follow CERN-OHL-W-2.0 and record it in THIRD_PARTY.md.
-
 ---
 
 ## AI Agent Recovery Policy
@@ -36,15 +34,13 @@ Read this core.md file first. Treat core.md is the primary project-level source 
 
 - The GitHub repository for this project is: https://github.com/aquasock/Escapement.git
 
-- Open-flow.
+- open source whenever possible.
 
 - The user's local GitHub repositories must always stay up to date with their online repositories.
 
 - The tar.gz archives stored in the "archived_logs" folder are not to be referenced unless approval from the user is given first.
 
 - Do not create branches if possible. Always work off of main unless otherwise instructed.
-
-
 
 ---
 
@@ -62,7 +58,7 @@ Read this core.md file first. Treat core.md is the primary project-level source 
 
 - Generated binary regression artifacts and diagnostic tools the user is intended to run should normally be produced by deterministic scripts committed under "tools" and generated locally by the user or agent.
 
-- Treat core-log.md as a ring buffer. Only 100 entries are ever allowed. If the log is full, tar.gz it with the current date and time into the "archived_logs" folder, clear the current core-log.md, and add an handoff entry in the empty core-log.md.
+- Treat core-log.md as a running log. Only 100 entries are ever allowed. If the log is full, tar.gz it with the current date and time into the "archived_logs" folder, clear the current core-log.md, and add an handoff entry in the empty core-log.md.
 
 - The folder labeled ".ai" on the GitHub repository’s root is your core project folder and contains your core directives (core.md), running project memory (core-log.md), reference library (core-reference.md), and syntax guidelines (core-syntax.md).
 
