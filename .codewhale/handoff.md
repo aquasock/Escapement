@@ -1,4 +1,4 @@
-# Handoff — Escapement / TinyDesk on T-Watch Ultra, 2026-11-24T00:55
+# Handoff — Escapement / TinyDesk on T-Watch Ultra, 2026-11-24T01:05
 
 Orientation, not authority. **Verify before acting on it.** The files, the flash
 and the board are the fact; this file is a claim.
@@ -25,17 +25,25 @@ it**, or a blank slot will type into a shell slot B does not have.
 
 ## What changed this cycle
 
-- **Picker (entry 8, fork `8904b22`)**: the `..  (back)` row is gone; the
-  bottom-strip bar right of Enter — Ctrl+Q on the desktop, meaningless in slot B —
-  is **"Up"** and climbs one directory. Drawn only where a parent exists; blanked
-  and inert at the console root. **Operator confirmed on the glass.**
-- **Slot B launch path (entry 9, fork `bbbbb9e`)**: `slotb_app_go(sel, direct)`
-  holds every exit decision; a launch with an NVS key runs one app and never
-  draws the menu. `slotb_app_t` gained a `why` hook.
-- **Modules (fork `09f680e`)**: the app grew to 3,108,096 B, so
-  `modules/check_addr_fresh.py` refused the link. `make modaddr` re-read the
-  board: mmap bases unchanged (0x42ae0000 / 0x3cce0000), **API table moved
-  0x3c2817e0 → 0x3c2818d8**. Blob + moddata reflashed, read back identical.
+Entries 8–12, all pushed. Read the entry, not this list, before trusting a claim.
+
+- **Entry 8 (fork `8904b22`)**: the picker's `..  (back)` row is gone; the bar
+  right of Enter is **"Up"**. Operator confirmed.
+- **Entry 9 (fork `bbbbb9e`)**: `slotb_app_go(sel, direct)` owns every exit
+  decision, so a desktop shortcut can never draw the app menu. `gb_last_error()`
+  names the real reason a start refused.
+- **Entry 10 (fork `d1f2bc0`)**: every margin slot is drawn (unused ones blank);
+  Up at a console root returns to the console list with the current console
+  highlighted, so switching console costs a press.
+- **Entry 11 (fork `e15e01b`)**: the console screen had been borrowing
+  `list_dir()`'s label array and drew leftover folder names; fixed with dedicated
+  storage, plus a guard that snaps `s_cwd` back under `root_base`. Added the
+  `0x1B000` failure record and `tools/watch-slotbrec.py`.
+- **Entry 12 (fork `75e8a00`)**: the reader had the magic byte order wrong and
+  rejected a good record; fixed. Operator passed the whole area.
+
+Every one of these grew the image, so `moddata.at` was re-measured each time —
+`host` walked 0x3c2817e0 → 0x3c2818d8 → **0x3c28193c**.
 
 ## Where things live
 
@@ -50,7 +58,7 @@ Fork        /run/media/vash/GIT/tinydesk-twatch  branch t-watch-ultra  HEAD 75e8
 Project     /run/media/vash/GIT/Escapement       branch main          log entry 12
 Port        /dev/ttyACM0  (also /dev/serial/by-id/usb-Espressif_...-if00)
 Build       3,108,672 B  sha256 1452a027fb2d78636caa4515a7f969d487934f0403d505b00bfc740f8cfd468b
-Module      flac.bin 26,725 B sha256 23753524bebb76942668b32580cbd8749177f13da481ad67840878991dcb3ba0
+Module      flac.bin 26,725 B sha256 2f95dea442fbaa61031e1248944d934b44cda27d68ad07941791ecf80373380d
             flac.data.bin 1,976 B sha256 4eccdad2da2a42f3deb7b79b156cf346f81a034401c1d66b386bf2e036587c11
             host=0x3c28193c  inst=0x42ae0000  data=0x3cce0000  app=3108672
 Backup      ~/twatch-backup/working-2026-11-24-0010-rootlabels-faillog.bin
@@ -118,19 +126,31 @@ the number. Any new reader of this sector has the same trap.
 
 ## Open, in the order I would take them
 
-1. **Walk the exit path** (owed by entry 9).
-2. **The desktop's two emulator entries are still `.tdlink` → `.py`** and open a
-   Terminal — the same noise entries 5–6 removed from slot B.
-3. **Startup audio burst**: 99% of drops are two episodes (sec 0 = 7,177;
+1. **The desktop's two emulator entries are still `.tdlink` → `.py`** and open a
+   Terminal — the same noise entries 5–6 removed from slot B. Loudest remaining
+   rough edge on the glass.
+2. **Startup audio burst**: 99% of drops are two episodes (sec 0 = 7,177;
    sec 14 = 3,915). The recorded theory ("stream opens before ROM load") is
    **wrong**: `sound_stream_open()` is near line 1490, `gnuboy_load_rom()` near
    1427. Likely the I2S ring draining. Instrument: the per-second `gbhist` record.
-4. Picker rescans the card on every launch (4 taps for 1,143 cartridges) and the
-   `retail` provenance level is the only populated one.
-5. A failed cartridge returns to the desktop, not the picker — right by
+3. **Picker rescans the card on every launch** — five taps to a cartridge now that
+   a console level sits above the tree. A remembered selection is the cheapest
+   remaining win. The `retail` provenance level can also be collapsed to one tap.
+4. **A failed cartridge returns to the desktop, not the picker** — right by
    instruction, costly for someone sampling 1,143 ROMs. Needs a remembered
    directory in `gbpick_run()` plus a retry, and should be built on a report.
-6. Tamagotchi is the only emulator not in slot B's menu.
+5. **Tamagotchi is the only emulator not in slot B's menu.**
+6. **`lcd.boot_pattern = 1` in `board.conf` re-enables the RGB bring-up bands** —
+   implemented, default off, **never exercised**. One line and a reboot to test.
+7. **The `0x1A000` trail and the `0x1B000` record are both owed removal** once
+   slot B runs a few cycles without an unexplained failure. Neither is read at
+   runtime. The record sector is last-write-wins; a ring of eight would keep a
+   session's worth of failures.
+
+**Walked and closed this session:** the exit path (entry 12 — stage 8 RETURN,
+desktop returns), the console labels, the blank margins, Up-at-root, and the
+Up bar itself. Do not re-open these on the strength of this file; re-read the
+entries.
 
 ## Build / flash
 
