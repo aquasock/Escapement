@@ -210,10 +210,12 @@ Read the entry, not this list, before trusting a claim.
   HEAD `94ac276`, pushed to `fork`. Push to `fork` (`aquasock/tinydesk`) only —
   **never** `origin` (upstream, read-only).
 - `.ai/core.md` is RESTRICTED. Do not edit without an explicit instruction.
-- **The flash holds only entry 28's build.** Entry 27's image is on neither OTA
-  slot; it is reproducible from `8db2c31`. No `working-*.bin` backup covers
-  either — the last one is `working-2026-11-25-0145-tama-layout.bin`, two cycles
-  behind.
+- **The flash holds only entry 28's build**, and a full backup of it now exists:
+  `~/twatch-backup/working-2026-11-25-0910-tama-save-top.bin`, 16,777,216 B,
+  sha256 `2f896ab1ab238201234a743157af2e41c9536e6d950a1faee782da0e567073af`,
+  read and verified against the chip with the board held in the bootloader. Both
+  OTA slots inside it hash to `475e44c4…`, the entry 28 build. Entry 27's image is
+  on neither slot and is reproducible only from `8db2c31`.
 
 ```
 Fork        /run/media/vash/GIT/tinydesk-twatch  branch t-watch-ultra  HEAD 94ac276
