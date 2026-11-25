@@ -1,3 +1,33 @@
+## 28 COMMIT Unreleased 2026-11-25T09:02:01-07:00
+
+#### Coming From:
+
+Unreleased ee9cc1a
+
+#### Purpose:
+
+Move the Tamagotchi's Save button to the top of the left column at the operator's direction.
+
+#### Outcome:
+
+THE TAMAGOTCHI'S SAVE IS NOW THE TOP BUTTON IN THE LEFT COLUMN AND THE OPERATOR PASSED IT ON THE GLASS -- *"pass"*. It sat one slot lower, so the column read blank, Save, Load and the pair looked like the second and third of something rather than the two a player uses together; the shape is now Save, blank, Load with the last two slots empty, which is the Game Boy's and Pokemon Mini's arrangement and makes all three consoles agree. SLOT 1 STAYS BLANK RATHER THAN LOAD MOVING UP BESIDE SAVE, because the blank is what keeps the two from reading as an adjacent block, and Load keeps the third slot it shares with the volume on the other two consoles. THREE TABLES HAD TO MOVE TOGETHER AND THE HOST TEST IS WHY THAT IS CHECKABLE AT ALL: the label in `left_label_app()` in `edges.h`, the action map in `tama_ui.c` and the painter's held-state array in `paint_column_state()` in `tama.c` each name the slot independently, and `tests/test_tama_ui.c` walks the first two and fails when they disagree, so its slot indexes followed the move; it passes 182 checks with 0 failures and `test_twatch_edges` passes 1591 with 0 failures, while the full suite passes 46 of 47 with only `board_keys` failing on `lcd.boot_pattern`, the pre-existing undocumented board key entries 26 and 27 already record. THE IMAGE IS THE SAME SIZE AS ENTRY 27's, 3,122,416 bytes, sha256 `475e44c46bfa74c55c7ff09b25150a5b08600cb15eb26bc05f6e7bc01cae1923`, and that is what let `check_addr_fresh.py` return success rather than refuse: the two module mmap bases move only when the image size moves, so no `make modaddr` and no module reflash were owed. Both OTA slots were written and read back byte-identical to the build, three hashes agreeing, and otadata was erased; the bootloader then wrote a valid `ota_seq=1` entry of its own, which is the evidence that the board started the new image rather than merely that the write returned. ENTRY 27 NOW HAS ITS VERDICT AND IT IS PASS: the operator ran the Tamagotchi and reported the Hold reveal working -- *"works perfect"* -- which closes the one shipped change in this log that had no user result, and the reveal, the release, the paused branch and the silent unarmed press all behaved as recorded. THE SHARED APP TABLE WAS CHECKED FOR INHERITANCE BEFORE THE CHANGE WAS TRUSTED, because `left_label_app()` is not the Tamagotchi's own table: Game Boy, Pokemon Mini and the cartridge picker each overwrite every left slot explicitly on entry, so none of them can pick up a word it did not write, and the Chrome-and-label order that makes that true was read rather than assumed. THE OPERATOR'S DIRECTION WAS ONE LINE AND THE REST OF THIS ENTRY IS THE COST OF HONOURING IT HONESTLY: a slot index is not stored anywhere, so moving a button means moving three independent names of it and the test that keeps them paired. NO BACKUP WAS TAKEN: both slots now hold this build and entry 27's image is on neither, reproducible only from the fork's `8db2c31`. THE CORE-SYNTAX AUDIT REQUIRED BY core.md WAS PERFORMED BEFORE THIS COMMIT: core.md and core-syntax.md were re-read, the complete `.ai/` diff inspected, core.md confirmed unchanged, and this entry checked against the template, the six-section order, the prose rules, the numbering and the 100-entry limit.
+
+#### Next Steps:
+
+THE NEXT CYCLE SHOULD CORRECT `ports/twatchultra/README.md`, which is this port's authoritative subsystem record and still describes the Tamagotchi's margins as *Left column: Pause, Save, Load, Speed, Sound. Right column: Hold, Shot, blank, blank, Reset* -- a layout that entries 22 through 27 replaced twice over, so the sentence predates the move of Pause and Speed to the right column, the clearing of the picker's words off both columns, and this move of Save to the top; it is documentation with no build or deployment, and it is the one place a future reader would be actively misled rather than merely out of date. THE TWO TAMAGOTCHI START MENU ENTRIES REMAIN -- the native `Tama V3` and the card-side `py Tamagotchi V2-3` `.tdlink` that opens a Terminal first, whose removal is a shell command on the littlefs plus an update to `scripts/apps/README.md`. Shot, Reset and Exit still have no margin slot and are reachable only from the shell, Exit also through Pusher A; and the Tamagotchi still has no checkpoint feedback on the glass and a single shared `tama.sav` rather than one per cartridge, which becomes a collision the moment the picker offers a second image. NO BACKUP COVERS THIS BUILD and the last verified one, `working-2026-11-25-0145-tama-layout.bin`, holds firmware two cycles old, so a restore today returns to the layout before the Hold reveal and before this move. UNCHANGED AND STILL OPEN: the volume for Game Boy and Pokemon Mini is exercised on Game Boy alone; savestates give no feedback on the glass for either of those two; the cross-cartridge savestate refusal is unexercised on Pokemon Mini and does not exist for the Tamagotchi; the picker's start-up repaints each left column label at full height and rescans the card on every launch; a failed cartridge returns to the desktop rather than the picker; `/root/Apps/pm.py` is orphaned; the 0x1A000 trail and the 0x1B000 record are owed removal; the unchecked `spi_device_acquire_bus()` return is the operator's decision; the stall-log experiment is stashed as `stash@{0}` and must not be restored as-is because its watchdog writes to the card from the blit task; and `core-syntax.md` still names the wrong device.
+
+#### Files Modified:
+
+None in this repository; the fork carries the change at `94ac276` (`ports/twatchultra/main/edges.h`, `ports/twatchultra/main/tama.c`, `ports/twatchultra/main/tama_ui.c`, `tests/test_tama_ui.c`).
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: PASS
+
+---
+
 ## 27 COMMIT Unreleased 2026-11-25T02:06:15-07:00
 
 #### Coming From:
