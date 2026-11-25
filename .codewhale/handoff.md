@@ -1,15 +1,15 @@
-# Handoff — Escapement / TinyDesk on T-Watch Ultra, 2026-11-24T13:10
+# Handoff — Escapement / TinyDesk on T-Watch Ultra, 2026-11-24T18:00
 
 Orientation, not authority. **Verify before acting on it.** The files, the flash
 and the board are the fact; this file is a claim.
 
 ## One line
 
-**THE VOLUME BUTTON IS CLOSED — ON THE OPERATOR'S VERDICT** (entry 14). The third
-left button on slot B's emulators cycles Mute / 25% / 50% / 75% / Max, starting
-Muted, cubic taper. Its first version **panicked the watch on the first press**
-and the coredump named why; fixed by relabelling from the blit task instead of
-the touch callback. Operator: *"works great, pass."*
+**THE HOLD BUTTON AND THE WHITE-BLOCK ARTIFACT ARE BOTH CLOSED — ON THE
+OPERATOR'S VERDICT** (entries 15–16). Game Boy's top-right slot is **Hold**: it
+blanks the other five column words while pressed and restores them on release.
+The long-standing white one-character block in the framebuffer's top-left was the
+**terminal's block cursor**, painted by inverting a cell; it is off now.
 
 **Still open from before:** the original "rom not found" (entries 11–12) is
 closed on the operator's verdict, **not** on a demonstrated cause — the
@@ -27,6 +27,17 @@ successful run overwrote the record that would have said which fault it was.
 - **A dynamic label needs a latch drained in BOTH loop branches.** An idle or
   paused cartridge produces no frames; a running one always has a frame waiting
   and never reaches the idle branch. One branch only = a label that sits stale.
+- **A column repaint covers the glass, not just the framebuffer, and it is
+  painted LATER than the app's own controls.** So repaint only the slots whose
+  words changed: `display_margin_labels(col, texts, last_slot)` stops the window
+  at `last_slot`'s bottom row. Repainting the full column and then redrawing the
+  controls is correct and *visible* — a clip and a repaint on every press, which
+  the operator reported. `_Static_assert`s in `gb.c` pin A, B and the d-pad below
+  the word region.
+- **The terminal cursor must not be painted.** `display_cursor_draw()` defaults
+  off. The desktop shows and homes the cursor leaving a full-screen screen, so a
+  cell-based driver would invert cell (0,0) into a solid white block — EXT-004.
+  A real text caret is the INVERSION, never the U+2588 glyph.
 - **The `0x1B000` failure record sector is LAST-WRITE-WINS.** If the "rom not
   found" symptom returns, read `tools/watch-slotbrec.py` BEFORE playing anything
   that works, or the evidence is gone.
@@ -38,7 +49,7 @@ successful run overwrote the record that would have said which fault it was.
 - **The picker's bands tile the framebuffer under a `_Static_assert`.** With the
   fill gone, an unclaimed row is a permanent stripe, not a blink.
 
-## What changed, entries 8–14 (all pushed)
+## What changed, entries 8–16 (all pushed)
 
 Read the entry, not this list, before trusting a claim.
 
@@ -57,30 +68,38 @@ Read the entry, not this list, before trusting a claim.
 - **Entry 14 (fork `3a28bb6`, supersedes the crashing `f9fa9a6`)**: Mute/25/50/75/
   Max volume on the third left button of Game Boy, NES and Pokemon Mini; and the
   panic that version caused, fixed.
+- **Entry 15 (fork `c1a5975`, supersedes its own `27a7d3d`)**: Game Boy's
+  top-right slot is Hold — blanks the other five column words and makes them
+  inert while pressed. Two wrong versions first (A clipped, then A visibly
+  clipped-and-redrawn); the shipped one stops the repaint above the cluster.
+- **Entry 16 (fork `eef4294`)**: the white block was the terminal's block cursor;
+  `display_cursor_draw()` gates it off by default. EXT-004 records the contract.
 
 ## Where things live
 
-- Project control: `/run/media/vash/GIT/Escapement`, `main`, **log at entry 14**.
+- Project control: `/run/media/vash/GIT/Escapement`, `main`, **log at entry 16**.
 - Active code: `/run/media/vash/GIT/tinydesk-twatch`, branch `t-watch-ultra`,
-  HEAD `3a28bb6`, pushed to `fork`. Push to `fork` (`aquasock/tinydesk`) only —
+  HEAD `eef4294`, pushed to `fork`. Push to `fork` (`aquasock/tinydesk`) only —
   **never** `origin` (upstream, read-only).
 - `.ai/core.md` is RESTRICTED. Do not edit without an explicit instruction.
 
 ```
-Fork        /run/media/vash/GIT/tinydesk-twatch  branch t-watch-ultra  HEAD 3a28bb6
-Project     /run/media/vash/GIT/Escapement       branch main          log entry 14
+Fork        /run/media/vash/GIT/tinydesk-twatch  branch t-watch-ultra  HEAD eef4294
+Project     /run/media/vash/GIT/Escapement       branch main          log entry 16
 Port        /dev/ttyACM0  (also /dev/serial/by-id/usb-Espressif_...-if00)
-Build       3,109,472 B  sha256 2c95bee5ee152a26918651cc8cb4b2f1de511a37e00245a4b7f12579a4ae62be
+Build       3,110,320 B  sha256 fbf48061d0b6d72d0224c146c0e79e2748efa0e1e8a4f730aff7bd57c40e15c0
 Module      flac.bin 26,725 B sha256 5aedae4b00ea71b5610b9dc1d5a814a569399024429730ecbc737372d829a562
             flac.data.bin 1,976 B sha256 4eccdad2da2a42f3deb7b79b156cf346f81a034401c1d66b386bf2e036587c11
             host=0x3c281968  inst=0x42ae0000  data=0x3cce0000  app=3109456
-            (host moved at f9fa9a6; the blob was rebuilt and reflashed there,
-             and 3a28bb6 did not move it again — checked, not assumed)
-Backup      ~/twatch-backup/working-2026-11-24-1350-volume-button-fixed.bin
-sha256      8ff006f042f10f612737f777501db4555075940cc50da85c55e3480f9f72e31c
+            (unchanged since f9fa9a6; checked against the ELF after every
+             build this session, and nothing moved)
+Backup      ~/twatch-backup/working-2026-11-24-1745-hold-volume-cursor.bin
+sha256      5469b78aa2d585428eb4e02356e86cd8387870858a6eb8a2c37c24e87302cd58
             (whole 16 MiB; both app slots and the blob verified inside it)
 SUPERSEDED  working-2026-11-24-1320-volume-button.bin — holds the CRASHING
             f9fa9a6 build (volume painted from the touch task). Do not restore.
+            working-2026-11-24-1350-volume-button-fixed.bin — right for its
+            cycle, superseded by the Hold button.
 DO NOT USE  working-2026-11-23-2230-upbar-nomenu.bin.STALE-MODULE
 Layout      ota_0 0x20000, ota_1 0x400000 (0x3E0000 each), coredump 0x7E0000,
             otadata 0x7F0000, storage 0x800000, modules 0xC00000, moddata 0xE00000
@@ -129,9 +148,19 @@ Layout      ota_0 0x20000, ota_1 0x400000 (0x3E0000 each), coredump 0x7E0000,
   exit, and this project's flash procedure, erase otadata for that reason.
 - **When the operator says they are testing, send no commands.** The USB mirror
   is dead while a picture owns the panel (DSP-003).
+- **The USB mirror cannot show a panel artifact.** It carries the terminal stream,
+  not framebuffer pixels. A defect the operator can see at a cell may be invisible
+  to `tools/watch-screen.py` and to every host check — the cursor block of entry 16
+  was. Ask what the size, colour, position and permanence are, then look for the
+  mechanism that produces exactly those four.
 - **A panic reading `assert failed: <fn> <file>:<line>` means a driver contract
   was broken, not a bug in the driver.** Check the task in the coredump's task
   table against which task is allowed to call that function.
+- **Before closing a cycle, check the commit CONTAINS what it calls.**
+  `git show HEAD:<file> | grep <symbol>` for the declaration as well as the use;
+  a commit that calls a function it does not declare will not build from a clean
+  checkout, and the tree can look clean while that is true. It happened once here
+  (`65301a4`) and needed `--force-with-lease` to repair.
 
 ## Slot B stage trail at flash 0x1A000 (magic "SLBS")
 
@@ -161,41 +190,50 @@ the number. Any new reader of this sector has the same trap.
 ## Open, in the order I would take them
 
 1. **The other left-column buttons still have no duty.** Game Boy and NES draw
-   "Pause" and "Reset" and handle neither (`gb.c`/`nes.c` contain no
-   `EDGE_LEFT` handling except the volume slot — entries 13–14's own defect,
-   reported twice and still there); the Pokemon Mini's "Exit" and "Save" buzz
-   and do nothing. Pause is the one a wearer reaches for most. Use the volume
-   button's shape: hit test in the callback, act via a latch the blit task drains.
-2. **The volume is only tested on Game Boy.** The code path is shared; the test
+   "Pause" and "Reset" and handle neither (`gb.c`/`nes.c` still only handle
+   `EDGE_LEFT` for the volume slot — reported in entries 13, 14 and 15 and still
+   there); the Pokemon Mini's "Exit" and "Save" buzz and do nothing. Pause is
+   the one a wearer reaches for most. Use the Hold button's shape: hit test in
+   the callback, act via a latch the blit task drains.
+2. **The Hold button blanks and nothing else**, which is what was asked for; its
+   function is unnamed and nothing should be built for it until it is.
+3. **The picker's start-up repaints each left-column label at full height**, about
+   ten full-height pushes before the first frame. Pre-existing, visible only as
+   launch latency, and `paint_column_range()` is the tool for it.
+4. **The volume is only tested on Game Boy.** The code path is shared; the test
    is not. Whether the NES and Pokemon Mini steps sound as even is unverified.
-3. **Startup audio burst**: 99% of drops are two episodes (sec 0 = 7,177;
+5. **Startup audio burst**: 99% of drops are two episodes (sec 0 = 7,177;
    sec 14 = 3,915). The recorded theory ("stream opens before ROM load") is
    **wrong**: `sound_stream_open()` is near line 1490, `gnuboy_load_rom()` near
    1427. Likely the I2S ring draining. Instrument: the per-second `gbhist` record.
    **Note:** streams now start Muted, so the burst is inaudible unless the volume
    is raised first — which may itself change what `gbhist` shows.
-4. **The desktop's two emulator entries are still `.tdlink` → `.py`** and open a
+6. **The desktop's two emulator entries are still `.tdlink` → `.py`** and open a
    Terminal — the same noise entries 5–6 removed from slot B.
-5. **Picker rescans the card on every launch** — five taps to a cartridge. A
+7. **Picker rescans the card on every launch** — five taps to a cartridge. A
    remembered selection is the cheapest remaining win, and the `retail` level can
    be collapsed to one tap.
-6. **A failed cartridge returns to the desktop, not the picker** — costly for
+8. **A failed cartridge returns to the desktop, not the picker** — costly for
    someone sampling 1,143 ROMs. Needs a remembered directory plus a retry, and
    should be built on a report.
-7. **Tamagotchi is the only emulator not in slot B's menu.**
-8. **`lcd.boot_pattern = 1` in `board.conf` re-enables the RGB bring-up bands** —
-   implemented, default off, **never exercised**. One line and a reboot to test.
-9. **The `0x1A000` trail and the `0x1B000` record are both owed removal** once
-   slot B runs a few cycles without an unexplained failure.
-10. **Open question, the operator's to decide:** `spi_device_acquire_bus()`'s
+9. **Tamagotchi is the only emulator not in slot B's menu.**
+10. **`lcd.boot_pattern = 1` in `board.conf` re-enables the RGB bring-up bands** —
+    implemented, default off, **never exercised**. One line and a reboot to test.
+11. **The `0x1A000` trail and the `0x1B000` record are both owed removal** once
+    slot B runs a few cycles without an unexplained failure.
+12. **Open question, the operator's to decide:** `spi_device_acquire_bus()`'s
     return is unchecked in `paint_column()`, so a second-writer mistake panics
     instead of skipping a repaint. Loud is what made entry 14 a one-read
     diagnosis; checking it trades that for resilience.
+13. **`core-syntax.md` still names the wrong target** — "deployed to the Tang"
+    and "the active Tang-Phosphor log". The formatting rules are sound, the
+    device name is not. Needs the operator's word because it is a `.ai/` file.
 
 **Walked and closed: do not re-open these on the strength of this file.** The exit
 path and stage 8 RETURN (entry 12), the console labels, the blank margins,
-Up-at-root, the Up bar (entries 10–12), the picker's redraw (entry 13), and the
-volume button on Game Boy (entry 14).
+Up-at-root, the Up bar (entries 10–12), the picker's redraw (entry 13), the
+volume button on Game Boy (entry 14), the Hold button (entry 15), and the
+white block in the framebuffer's corner (entry 16).
 
 ## Build / flash
 
