@@ -301,6 +301,7 @@ Topic IDs are the `record_id` prefix. An entry reserves a name; it does not clai
 | How do I open a Terminal on the watch from a host, reliably? | TOL | TOL-007 |
 | Why does a fullscreen app flicker against the console? | EXT | EXT-003 |
 | Why does pressing an on-glass app button crash the watch? | DISPLAY | DSP-009 |
+| Why is there a solid white block in the framebuffer's top-left corner? | EXT | EXT-004 |
 
 ---
 
@@ -398,6 +399,7 @@ TOL-004: "ESP-IDF's xRingbufferSend() returns BaseType_t pdTRUE/pdFALSE, NOT a b
 EXT-001: "The SPLB32 Tamagotchi core runs at 4.05x realtime headless on this board, and 1.00x while painting 320x400 at 4 fps from the flash-resident ROM; the display path is the bottleneck"
 EXT-002: "The linear flash window 0x42000000 is readable from userspace, so a 512 KB ROM at 0x42480000 costs zero RAM -- the fix for contiguity on NOMMU; file mmap costs 2x the file and MAP_SHARED fails ENODEV"
 EXT-003: "A fullscreen app on fb0 flickers against fbcon because every printk repaints the console over it; console_loglevel decides it, and /etc/sysctl.conf sets kernel.printk = 1 4 1 7"
+EXT-004: "TinyDesk's render layer SHOWS the terminal cursor and homes it when it leaves a full-screen screen (`ESC[?25h` ... `ESC[H`), so a cell-based panel driver ends up with `cursor_visible` true at cell (0,0); painting that cursor means INVERTING the cell's colours, which on a dark taskbar cell is a solid white one-character block in the top-left corner of the framebuffer"
 
 EMU-001: "Doubles cost 711 ns against 121 ns for the integer equivalent, so SPLB32's accumulators are 64-bit fixed-point at CYC_SHIFT=7; float is not slow but fatal, because the kernel does not enable the FPU coprocessor for user tasks and the process dies with SIGSEGV"
 EMU-002: "Entering the time screen takes about 1.5 s because the guest computes for 580.1 ms of emulated time and emulated time then runs at about a third of real; parked by user decision, with 43-135 ms per frame during the stall still unexplained"
@@ -977,6 +979,21 @@ BRD-006: "The XL9555 expander's CONFIG and OUTPUT registers survive an ESP32-S3 
     - "on the watch: `/proc/sys/kernel/printk` reading 7 4 1 7 while the emulator ran, with NAK lines arriving continuously"
     - "docs/tamagotchi.md: the flicker and the sysctl"
   verification: "Observed on hardware 2026-11-09 with the Tamagotchi emulator running: the operator reported the console taking over the frame each time it printed. Dropping the level to 1 stopped it immediately and the game held the panel. The message level was identified by trying 3 first, which did not help because NAK bailout is KERN_ERR."
+
+- record_id: EXT-004
+  kind: EXTERNAL
+  topic_id: EXT
+  title: "TinyDesk shows and homes its cursor, so a cell-based panel driver paints a solid block at cell (0,0)"
+  status: VERIFIED
+  verified_date: 2026-11-24
+  statement: "TinyDesk's render layer emits `ESC[?25l` when it enters a full-screen screen and `ESC[?7h ESC[?25h ESC[?1049l` when it leaves one, and the shell's editor emits `ESC[?25h ESC[0m ESC[2J ESC[H` -- show cursor, reset attributes, clear, home. `td_vterm_init()` also starts with `cursor_visible = true`. So after either path the terminal model holds `cursor_visible` true with the cursor at cell (0,0), which for a driver drawing the framebuffer from the cell grid is the framebuffer's top-left cell. Drawing such a cursor is not a glyph: the vterm renderer INVERTS the cell's foreground and background for that one cell."
+  consequence: "A cell-based panel driver that honours `cursor_visible` therefore paints one inverted cell at the top-left, and on a dark taskbar cell that is a solid light block exactly one character in size. It is permanent rather than blinking because the paint loop keeps honouring the cursor once it stops moving, and it appears on a boot path where the desktop's first paint finds the cursor homed. The port does not want it anywhere -- the desktop is a window manager drawing cells and a terminal window's caret is the shell's own content -- so `display_cursor_draw()` gates the inversion and defaults to off (`ports/twatchultra/main/display.c`). A driver that DOES want a text caret must implement the inversion, not the U+2588 glyph: the two look the same on the glass and only one of them is what the terminal asked for."
+  sources:
+    - "tinydesk src/render.c:205 and :220, the `ESC[?25l` on entry and `ESC[?7h ESC[?25h ESC[?1049l` on exit"
+    - "tinydesk third_party/tdsh/ports/esp_idf/components/tdsh/src/tdsh_nano.c:1200, editor_leave_screen()"
+    - "tinydesk src/vterm.c:62, `vt->cursor_visible = true` in td_vterm_init()"
+    - "tinydesk-twatch ports/twatchultra/main/display.c: paint_cell()'s inversion and display_cursor_draw()"
+  verification: "Established by reading the four call sites and the framebuffer painter, then confirmed fixed on the glass 2026-11-24: the operator had reported a solid white one-character block at the framebuffer's top-left corner on every reboot into slot A, for a long time and predating recent work, and it was gone after the inversion was gated off (core-log entry 16). THE CONFIRMATION CAME FROM THE OPERATOR, NOT FROM THIS AGENT: the artifact needed the glass, and the USB mirror carries the terminal stream rather than framebuffer pixels, so it could not be observed from a host. The size, colour, position and permanence could all be predicted from the mechanism before the test, and all four matched."
 
 - record_id: BRD-005
   kind: BOARD

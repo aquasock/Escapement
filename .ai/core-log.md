@@ -1,3 +1,33 @@
+## 16 COMMIT Unreleased 2026-11-24T17:59:15-07:00
+
+#### Coming From:
+
+Unreleased fdd91b2
+
+#### Purpose:
+
+Remove the solid white one-character block that appeared in the top-left of the framebuffer whenever the watch rebooted into slot A after leaving slot B.
+
+#### Outcome:
+
+THE BLOCK WAS THE TERMINAL'S BLOCK CURSOR, AND IT IS GONE -- CONFIRMED BY THE OPERATOR, WHO HAD REPORTED IT AS LONG-STANDING AND NOT CAUSED BY RECENT WORK. The desktop's render layer shows the cursor when it leaves a full-screen screen and homes it -- `ESC[?7h ESC[?25h ESC[?1049l` at `src/render.c:220`, and `ESC[?25h ESC[0m ESC[2J ESC[H` in the shell's editor at `tdsh_nano.c:1200` -- while `td_vterm_init()` starts with `cursor_visible = true`, so the terminal model arrives at the first desktop paint holding a visible cursor at cell (0,0), which for a driver drawing from the cell grid is the framebuffer's top-left cell. THE PAINTER DOES NOT DRAW A GLYPH FOR IT, IT INVERTS THE CELL: `paint_cell()` swaps foreground and background, so the taskbar's dark cell with a light foreground became a solid light block exactly one character in size, and it stayed because the paint loop keeps honouring the cursor once it stops moving. Every property the operator described falls out of that mechanism -- one cell, top-left, white, permanent -- which is why the diagnosis did not need a reproduction to name the candidate, though it did need one to confirm it. The inversion is now gated on `display_cursor_draw()`, which defaults to OFF, and the gate covers both the paint path and the `repaint`/`dcheck` comparison so neither can resurrect it. Nothing on this port wants a block cursor: the desktop is a window manager drawing cells, and a terminal window's caret is the shell's own content. THE CYCLE IS WORTH RECORDING FOR ITS SEARCH AS MUCH AS ITS FIX. Four candidates were eliminated by reading before the right one was found: a stray glyph (nothing in the port draws U+2588, and `paint_cell()` paints the BACKGROUND for a missing glyph, so an unknown character cannot produce white); the mouse pointer (the port does enable it, from `hid_input.c:745` when the first mouse attaches, but its glyph is U+25B2, a triangle rendered as a glyph rather than an inversion, so it cannot produce a solid white cell); an empty progress or scrollbar bar (no scrollable window is open on that path); and a status strip artifact (that paint task pushes only rows 6..40, above the framebuffer). What settled it was the combination of the block's exact size with its permanence and its arrival only on the boot path that re-enters the desktop, which is the shape of a piece of terminal STATE being honoured rather than anything being drawn deliberately. `core-reference.md` gained EXT-004 for the TinyDesk cursor contract, including the distinction that matters for any future driver: a text caret must be the inversion, not the glyph, because the two look identical on the glass and only one is what the terminal asked for. THE BUILD IS 3,110,320 BYTES AND THE FLASH WAS VERIFIED: sha256 `fbf48061d0b6d72d0224c146c0e79e2748efa0e1e8a4f730aff7bd57c40e15c0`, both OTA slots written and read back byte-identical, otadata erased, the board confirmed on the desktop through the USB mirror with `[Start]` rendering normally at cell (0,0), `test_twatch_edges` at 1,591 checks with 0 failures, and the module addresses regenerated from the new ELF with none moved. THE HONEST LIMIT IS RECORDED RATHER THAN GLOSSED: the artifact could not be observed from a host at all -- the USB mirror carries the terminal stream, not framebuffer pixels -- so this cycle's evidence is the mechanism plus the operator's confirmation, and the entry that preceded the flash deliberately said so and named the fallback (an instrumented read of cell (0,0)) in case the fix had missed. THE CORE-SYNTAX AUDIT REQUIRED BY core.md WAS PERFORMED BEFORE THIS COMMIT: core.md and core-syntax.md were re-read, the complete `.ai/` diff inspected, core.md confirmed unchanged, this entry checked against the template, the six-section order, the prose rules, the numbering and the 100-entry limit, and EXT-004 checked against the record template with all its fields and a matching fast-lookup line.
+
+#### Next Steps:
+
+NOTHING IN THIS AREA REMAINS OPEN; the fix is a default change with no follow-up owed, and the only thing it could ever need is `display_cursor_draw(true)` if some future screen genuinely wants a text caret. THE OTHER LEFT-COLUMN BUTTONS STILL OWE THEIR DUTY and remain the cheapest honest cleanup: Game Boy and NES draw "Pause" and "Reset" that neither handles and the Pokemon Mini draws "Exit" and "Save" that buzz and do nothing. THE HOLD BUTTON IS A BLANKER ONLY, awaiting the function the operator has not yet named. THE VOLUME IS STILL EXERCISED ON GAME BOY ALONE. THE PICKER'S START-UP STILL REPAINTS EACH LEFT COLUMN LABEL AT FULL HEIGHT, around ten pushes before the first frame, and `paint_column_range()` now exists to fix it. THE STARTUP AUDIO BURST REMAINS THE CLEAREST TECHNICAL CYCLE with its recorded theory known to be wrong and its sound now muted by default. THE DESKTOP'S TWO EMULATOR ENTRIES ARE STILL `.tdlink`-to-`.py` SCRIPTS. THE PICKER STILL RESCANS THE CARD ON EVERY LAUNCH. THE 0x1A000 TRAIL AND THE 0x1B000 RECORD ARE BOTH OWED A REMOVAL. THE UNCHECKED `spi_device_acquire_bus()` RETURN REMAINS THE OPERATOR'S DECISION, since leaving it loud is what made DSP-009 a one-read diagnosis. UNCHANGED AND STILL OPEN: the Tamagotchi is the only emulator not in slot B's menu; the frame-pool stall is parked with its counters written every session; Pusher A is Game Boy only in the desktop; always-on gesture detection needs an upstream lock; `klio save` emits a fifo overflow message; the IMU injection line is parked; an SGB-enhanced title would exercise the third machine type; the savestate over-read in the vendored `gnuboy.c` is unfixed and unreachable; the two unidentified firmware header fields still gate custom firmware; and the statusbar stack size remains the operator's decision.
+
+#### Files Modified:
+
+None in this repository; the fork carries the change at `eef4294` (`ports/twatchultra/main/display.c`, `ports/twatchultra/main/display.h`).
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: PASS
+
+---
+
 ## 15 COMMIT Unreleased 2026-11-24T17:58:41-07:00
 
 #### Coming From:
