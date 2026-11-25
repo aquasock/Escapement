@@ -1,32 +1,31 @@
-# Handoff — Escapement / TinyDesk on T-Watch Ultra, 2026-11-25T02:06
+# Handoff — Escapement / TinyDesk on T-Watch Ultra, 2026-11-25T09:02
 
 Orientation, not authority. **Verify before acting on it.** The files, the flash
 and the board are the fact; this file is a claim.
 
 ## One line
 
-**ONE SHIPPED CHANGE HAS NO USER VERDICT — START THERE** (entry 27). The
-Tamagotchi's Save and Load are now revealed by Hold rather than merely gated by
-it. It is built, flashed and both slots verified, but the operator ended the
-session before the emulator ran. Everything else this session passed on the glass.
-
-**Also this session:** the Tamagotchi picker plus its slot B and desktop entry
-(entry 25); its margins cleared of the picker's leftover words and both columns
-relaid out (entry 26); Pokemon Mini reached margin parity with Game Boy (entries
-21–23); page buttons and menu icons (entry 24).
-
-**Earlier this session:** the tearing is fixed (entry 20, TE sync); the terminal
-cursor is not painted (entry 16).
+**NOTHING IS OUTSTANDING ON THE GLASS.** Entry 28 (`94ac276`) moved the
+Tamagotchi's Save to the top of the left column and the operator passed it; the
+same message closed entry 27, whose Hold reveal had been shipped without a
+verdict. The log has no entry with a missing or failed user test. The left column
+now reads Save / blank / Load on all three consoles.
 
 **Latest shipped behaviour:** all three consoles pick their cartridge from the same
 navigator. Game Boy and Pokemon Mini reveal Save/Load savestates on Hold. The
 Tamagotchi also reveals Save/Load on Hold — into its own `tama.sav`, not a
-savestate — and its right column reads Hold / blank / sound level / rate / Pause.
-The terminal cursor is not painted.
+savestate — with Save at the top of the left column and Load in the third. Its right
+column reads Hold / blank / sound level / rate / Pause. The terminal cursor is not
+painted.
 
 **Still open from before:** the original "rom not found" (entries 11–12) is
 closed on the operator's verdict, **not** on a demonstrated cause — the
 successful run overwrote the record that would have said which fault it was.
+
+**Known stale document:** `ports/twatchultra/README.md` still describes the
+Tamagotchi's margins as `Pause, Save, Load, Speed, Sound` / `Hold, Shot, blank,
+blank, Reset`. That is two layout cycles old. It is named as the next cycle in
+entry 28; do not trust it until it is fixed.
 
 ## Standing invariants that cost a cycle each
 
@@ -56,6 +55,14 @@ successful run overwrote the record that would have said which fault it was.
 - **A hidden word must be an explicit `" "`, never a `NULL`.** A `NULL` clears the
   override and falls back to the shared table — showing exactly the word being
   hidden. Both `gb.c` and `tama.c` depend on this for their Hold-reveal Save/Load.
+- **A slot index is named in THREE independent places, and the host test is the
+  only thing holding them together.** The label (`left_label_app()` / `right_label_app()`
+  in `edges.h`), the action (`s_map` in `tama_ui.c`, or the emulator's own handler)
+  and the painter (`paint_column_state()` / `pm_paint_state()`). Moving a button means
+  moving all three plus `tests/test_tama_ui.c`'s slot indexes. `left_label_app()` is
+  the SHARED app-mode table, not any one app's: Game Boy, Pokemon Mini and the picker
+  each overwrite every left slot on entry, which is the only reason a change there
+  cannot leak into them. Check that before editing it.
 - **The Hold latch is drained ABOVE the pause branch, in both branches.** A paused
   guest produces no frames, and a pause is precisely when a player reaches for Save.
   A busy-only or idle-only drain leaves the held state unpainted for as long as the
@@ -188,22 +195,31 @@ Read the entry, not this list, before trusting a claim.
 - **Entry 26 (fork `9941946`)**: the picker's words off the Tamagotchi's margins,
   and both columns relaid out — right is Hold/blank/Sound/rate/Pause, left is
   Save and Load. Pause and Speed moved; Shot, Reset and Exit lost their slots.
-- **Entry 27 (fork `8db2c31`, **USER TEST: NOT RUN**)**: Save and Load revealed by
-  Hold. Built, flashed, slots verified, host test green — never seen on the glass.
+- **Entry 27 (fork `8db2c31`)**: Save and Load revealed by Hold. Built, flashed,
+  slots verified, host test green; **user test passed in the session after**, and
+  the verdict is recorded in entry 28.
+- **Entry 28 (fork `94ac276`)**: the Tamagotchi's Save moved from left slot 1 to
+  slot 0 — Save / blank / Load, matching Game Boy and Pokemon Mini. Three tables
+  moved together (`left_label_app()`, `tama_ui.c`'s map, `paint_column_state()`).
+  Image size unchanged, so `check_addr_fresh.py` passed and no module reflash.
 
 ## Where things live
 
-- Project control: `/run/media/vash/GIT/Escapement`, `main`, **log at entry 27**.
+- Project control: `/run/media/vash/GIT/Escapement`, `main`, **log at entry 28**.
 - Active code: `/run/media/vash/GIT/tinydesk-twatch`, branch `t-watch-ultra`,
-  HEAD `8db2c31`, pushed to `fork`. Push to `fork` (`aquasock/tinydesk`) only —
+  HEAD `94ac276`, pushed to `fork`. Push to `fork` (`aquasock/tinydesk`) only —
   **never** `origin` (upstream, read-only).
 - `.ai/core.md` is RESTRICTED. Do not edit without an explicit instruction.
+- **The flash holds only entry 28's build.** Entry 27's image is on neither OTA
+  slot; it is reproducible from `8db2c31`. No `working-*.bin` backup covers
+  either — the last one is `working-2026-11-25-0145-tama-layout.bin`, two cycles
+  behind.
 
 ```
-Fork        /run/media/vash/GIT/tinydesk-twatch  branch t-watch-ultra  HEAD 8db2c31
-Project     /run/media/vash/GIT/Escapement       branch main          log entry 27
+Fork        /run/media/vash/GIT/tinydesk-twatch  branch t-watch-ultra  HEAD 94ac276
+Project     /run/media/vash/GIT/Escapement       branch main          log entry 28
 Port        /dev/ttyACM0  (also /dev/serial/by-id/usb-Espressif_...-if00)
-Build       3,122,416 B  sha256 7081c22617b6570a733c5b2a7e695a356e6d2faa886949413e10681bf518481a
+Build       3,122,416 B  sha256 475e44c46bfa74c55c7ff09b25150a5b08600cb15eb26bc05f6e7bc01cae1923
 Module      flac.bin 26,725 B sha256 947fc4eb86d878fc318f1e3b514ac309587744d47df338a384f765f417b58ff6
             flac.data.bin 1,976 B sha256 4eccdad2da2a42f3deb7b79b156cf346f81a034401c1d66b386bf2e036587c11
             host=0x3c281bf0  inst=0x42ae0000  data=0x3cce0000  app=3122416
