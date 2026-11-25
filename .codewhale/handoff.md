@@ -5,29 +5,25 @@ and the board are the fact; this file is a claim.
 
 ## One line
 
-**ONE CHANGE AWAITS A VERDICT.** The Tamagotchi's Sound button now uses the same
-volume control as Game Boy, NES and Pokemon Mini: it boots MUTED and each press
-steps UP -- Mute, 25%, 50%, 75%, Max -- wrapping back to Mute. Fork `7d28941`,
-committed locally and **NOT PUSHED**; entry 30 is not written.
+**NOTHING IS OUTSTANDING ON THE GLASS.** Entry 30 put the Tamagotchi's Sound
+button on the shared volume control and the operator passed it -- *"works
+perfect. pass"*. All four emulators now use one control: boots muted, steps up
+Mute / 25 / 50 / 75 / Max, wraps to Mute. Log at entry 30; fork `7d28941`
+pushed; a verified 16 MiB backup of that exact build exists.
 
-**What was verified from the shell on the board:** `tama status` reads
-`1x Mute` immediately after a fresh start, then 25%, 50%, 75%, Max and back to
-Mute across five presses. That is the whole requested behaviour; the label on
-the right column comes from `sound_volume_label()`, so the glass and the report
-agree by construction. 46 of 47 host tests pass, `board_keys` being the
-pre-existing `lcd.boot_pattern` failure.
+**The volume is one implementation now, and the way it became two is worth
+keeping.** `sound.c`'s comment on its own "applies" flag cited the Tamagotchi as
+the reason the flag existed -- the pet "keeps its own Sound toggle from the
+desktop", so it could not undo a mute it inherited. Entry 26 gave the pet a
+Sound button on the glass. The argument died and the private table in `tama.c`
+outlived it by four cycles. A comment in one file justified a design on a fact
+owned by another, and nothing invalidated it when that fact changed.
 
-**What was NOT verified:** that each level SOUNDS right. The gain is applied once
-in `sound_stream_write()` (the private multiply in `tama.c` is deleted, so it
-cannot be squared), and at Mute the guest is still stepped with no rendering, so
-muting cannot change the pet's speed -- but audibility is the operator's to judge.
-
-**Why the two steppers existed.** `sound.c`'s own comment cited the Tamagotchi as
-the reason its "applies" flag existed, because the pet had no volume button and
-so could not undo a mute. Entry 26 gave it one; the rationale went stale and the
-private table stayed. Deleting it removes a second implementation of a control
-this port already had, running in the opposite direction and with a different
-taper.
+**Watch for the gain being applied twice.** It now happens only in
+`sound_stream_write()`. The pet used to multiply its own samples before they
+reached that funnel; leaving both in would have squared it -- Max correct and
+every step below it quieter than its label, which sounds plausible until
+compared against the other three emulators.
 
 **Latest shipped behaviour:** all three consoles pick their cartridge from the same
 navigator. Game Boy and Pokemon Mini reveal Save/Load savestates on Hold. The
@@ -216,6 +212,9 @@ Read the entry, not this list, before trusting a claim.
 - **Entry 27 (fork `8db2c31`)**: Save and Load revealed by Hold. Built, flashed,
   slots verified, host test green; **user test passed in the session after**, and
   the verdict is recorded in entry 28.
+- **Entry 30 (fork `7d28941`)**: the Tamagotchi's Sound on the shared volume
+  control -- boots muted, steps up, wraps. Deleted its private stepper; added
+  `sound_volume_step()` and `sound_volume_muted()` to `sound.c`.
 - **Entry 29 (fork `257be10`, supersedes `41949bf`)**: the Tamagotchi's up-time
   counter in the top strip, in guest seconds derived from the emulator's cycle
   count. Load persists it in a sidecar `/sd/saves/tama/tama.age`. Fixed two
@@ -230,7 +229,7 @@ Read the entry, not this list, before trusting a claim.
 
 - Project control: `/run/media/vash/GIT/Escapement`, `main`, **log at entry 28**.
 - Active code: `/run/media/vash/GIT/tinydesk-twatch`, branch `t-watch-ultra`,
-  HEAD `7d28941`, **NOT PUSHED** -- pending the verdict on the volume control. Push to `fork` (`aquasock/tinydesk`) only —
+  HEAD `7d28941`, pushed to `fork`. Push to `fork` (`aquasock/tinydesk`) only —
   **never** `origin` (upstream, read-only).
 - `.ai/core.md` is RESTRICTED. Do not edit without an explicit instruction.
 - **The flash holds entry 29's build**, and a full backup of it exists:
@@ -242,17 +241,17 @@ Read the entry, not this list, before trusting a claim.
 
 ```
 Fork        /run/media/vash/GIT/tinydesk-twatch  branch t-watch-ultra  HEAD 7d28941
-Project     /run/media/vash/GIT/Escapement       branch main          log entry 29
+Project     /run/media/vash/GIT/Escapement       branch main          log entry 30
 Port        /dev/ttyACM0  (also /dev/serial/by-id/usb-Espressif_...-if00)
 Build       3,125,072 B  sha256 a041d53ae95b9bd21b4c68291a8b662fce848c2e7b80dd950b1610455d31c559
 Module      flac.bin 26,725 B sha256 947fc4eb86d878fc318f1e3b514ac309587744d47df338a384f765f417b58ff6
             flac.data.bin 1,976 B sha256 4eccdad2da2a42f3deb7b79b156cf346f81a034401c1d66b386bf2e036587c11
             host=0x3c281d78  inst=0x42ae0000  data=0x3cce0000  app=3125072
             (host moves with almost every build; re-check, then rebuild)
-Backup      ~/twatch-backup/working-2026-11-25-1145-tama-uptime.bin
-sha256      be09e1f877aa3df3e7ce193f2e07ccbef3dfbceb6685e95ad5614d41f1d36f13
-            Holds ENTRY 29's build (slots hash f30f3ef7...). This cycle's build is
-            newer and NOT covered by any backup yet -- take one after the verdict.
+Backup      ~/twatch-backup/working-2026-11-25-1245-tama-volume.bin
+sha256      860c7a87f3cac80a54287bd40a327a6c54ec7fac26da5d4ad98ea9ff74a3045b
+            Holds ENTRY 30's build (slots hash a041d53a...), verified against the
+            chip. The previous backup holds entry 29.
             (whole 16 MiB; both app slots and flac.bin verified inside)
 SUPERSEDED  working-2026-11-24-1320-volume-button.bin — holds the CRASHING
             f9fa9a6 build (volume painted from the touch task). Do not restore.
