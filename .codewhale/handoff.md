@@ -6,34 +6,44 @@ and the board are the fact; this file is a claim.
 ## One line
 
 **ONE CHANGE AWAITS A VERDICT** (no log entry yet). The Tamagotchi's up-time
-counter is built, flashed to both slots and functionally verified on the board,
-but the operator has not seen it on the glass, so entry 29 has NOT been written.
-The fork carries it at **`41949bf`**, committed ahead of the verdict so the work
-would not be lost; the Escapement log entry stays unwritten until the verdict is
-in, per core-syntax's "after the cycle reaches a terminal result".
+counter is built and flashed, and the reason the operator saw nothing has been
+found and fixed: **the top strip did not exist in slot B at all**. The Start
+menu's emulator entries reboot into slot B; `board_startup_override()` runs in
+app_main before `hal_start()` calls `link_init()`, and `link_init()` was the only
+thing that started the strip. So slot B ran with rows 0..43 dark and no app
+could put anything there. `slotb_run()` now starts it, after `display_init()`
+(whose `panel_fill()` would wipe it) and with `statusbar_clock_present(false)`
+because slot B never reaches `fill_sysinfo()` and has no clock to show.
 
-**What was verified on hardware, from the shell over the console:** starting the
-Tama puts `app='0d00h00m'` on the strip with the date and clock suppressed;
-the age advanced 00m -> 10m with guest time; 4x measured **3.99 guest seconds per
-wall second**; pause held `cyc` unchanged over 10 s; Reset took the age to
-`0d00h00m`; Load restored `base=428s` and the age to 07m; stopping released the
-claim (`app=None`, date and clock rebuilt). 98 host checks pass in the new
-`test_tama_age`, and the full suite passes 46 of 47 with only the pre-existing
+**Fork state: `257be10`, committed, NOT PUSHED.** Two commits await the verdict:
+`41949bf` (the counter itself) and `257be10` (the slot B fix plus an honest
+band push). Entry 29 has NOT been written; it waits on the glass.
+
+**What was verified on hardware:** desktop path -- claim held (`app='0d00h10m'`,
+date and clock suppressed), `bands lost=0`, strip rectangle 88..311 at rows
+6..37. Age advanced 00m -> 10m with guest time; 4x measured 3.99 guest seconds
+per wall second; pause held `cyc` unchanged over 10 s; Reset took the age to
+`0d00h00m`; Load restored `base=428s`. Slot B -- booted via a hand-written
+otadata entry, ran with the strip task started, and the coredump partition is
+byte-identical to before, so the new task does not fault. 98 host checks pass in
+`test_tama_age`; the suite is 46 of 47 with only the pre-existing
 `board_keys`/`lcd.boot_pattern` failure.
 
-**ONE THING WAS NOT VERIFIED, AND IT IS THE THING TO LOOK AT.** After the
-emulator stopped, the strip's own `pushes` counter read 17 and its last-painted
-key still said `app|0d00h10m` while `sb_build` had already returned the
-date/clock — i.e. the release repaint may not have reached the glass, or the
-reads may have been stale. The reads were made over a console whose diff stream
-drops unchanged cells and whose shell can go busy, so this is **unconfirmed,
-not a demonstrated fault**. If the strip stays on the age after `tama stop`, the
-cause is in `sb_paint()`'s width guard (the union of the app line and the
-date+clock line is exactly `SB_MAX_W`, 224 px) and it is where to look first.
+**SECOND DEFECT FOUND AND FIXED, worth knowing about.** `push_pixels_raw_buf()`
+returned `void` and `display_panel_push()` returned `true` whatever happened, so
+a band refused because another task held the panel bus was reported as painted.
+The strip then recorded its text as shown and never retried -- a label missing
+from the glass while every counter reported success. That is why the earlier
+"verification" of this feature was worthless: it measured counters, not pixels.
+The push now reports its result, a refused band is retried in place, and
+`statusbar` prints `bands lost`.
 
-**Also observed:** after the final flash the strip showed `--/--|--:--`, meaning
-the strip's clock was unset at that moment. Pre-existing and unrelated to the
-age, but it means the strip does not repaint at all until the clock is set.
+**NOT verified:** the slot B glass itself. Slot B has no console and no mirror,
+so I can prove the task runs and does not fault, but not that the label appears.
+That is the operator's to confirm -- and it is the whole point of the change.
+
+**Also observed:** the strip shows `--/-- --:--` in slot A until the clock is
+set. Pre-existing, unrelated to the age.
 
 ## Previously
 
@@ -238,7 +248,7 @@ Read the entry, not this list, before trusting a claim.
 
 - Project control: `/run/media/vash/GIT/Escapement`, `main`, **log at entry 28**.
 - Active code: `/run/media/vash/GIT/tinydesk-twatch`, branch `t-watch-ultra`,
-  HEAD `41949bf`, **NOT YET PUSHED** (commit it with the verdict, then push). Push to `fork` (`aquasock/tinydesk`) only —
+  HEAD `257be10`, **NOT YET PUSHED** (push with the verdict). Push to `fork` (`aquasock/tinydesk`) only —
   **never** `origin` (upstream, read-only).
 - `.ai/core.md` is RESTRICTED. Do not edit without an explicit instruction.
 - **The flash holds only entry 28's build**, and a full backup of it now exists:
@@ -249,7 +259,7 @@ Read the entry, not this list, before trusting a claim.
   on neither slot and is reproducible only from `8db2c31`.
 
 ```
-Fork        /run/media/vash/GIT/tinydesk-twatch  branch t-watch-ultra  HEAD 41949bf
+Fork        /run/media/vash/GIT/tinydesk-twatch  branch t-watch-ultra  HEAD 257be10
 Project     /run/media/vash/GIT/Escapement       branch main          log entry 28
 Port        /dev/ttyACM0  (also /dev/serial/by-id/usb-Espressif_...-if00)
 Build       3,124,944 B  sha256 40e9288881a450e04ff34bf30cea8c32b939ead55a1373cf5ff7939c594a883e
