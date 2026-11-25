@@ -1,3 +1,33 @@
+## 19 COMMIT Unreleased 2026-11-24T21:13:03-07:00
+
+#### Coming From:
+
+Unreleased b920535
+
+#### Purpose:
+
+Read the CO5300 datasheet and the T-Watch Ultra schematic for the tearing-effect contract, and correct what entry 18 had recorded about it.
+
+#### Outcome:
+
+THE TEARING-EFFECT CONTRACT IS NOW WRITTEN DOWN, AND READING IT CORRECTED A CLAIM THIS LOG MADE ONE ENTRY EARLIER. Entry 18 recorded that the TE output was never enabled; that is WRONG, and the correction matters because it changes the work from a panel-side question to a host-side one. The CO5300 has three tearing-effect modes selected by two commands: TEON (35h) with parameter M, where M=0 is V-blanking only and M=1 adds H-blanking, and STESL (44h) with a 16-bit line number N, where N!=0 puts a single pulse at line N and N=0 is defined to be equivalent to TEON with M=0. In the mode this port enables, the line is HIGH for the V-porch, and the datasheet defines that interval as one in which the display is NOT updated from the frame memory, against the visible period in which it is. TE is active LOW only in Sleep In mode, rise and fall are specified at 15 ns or less, the output is unaffected by MADCTL bit ML, and STESL takes effect on the frame AFTER the one in progress. THE DRIVER HAS BEEN SENDING TEON ALL ALONG: the init table in `display.c` contains `{0x35, {0x00}}`, which is TEON with M=0, so the panel has been emitting a synchronisation pulse at every refresh that nothing reads. What is missing is host-side only -- `gpio_config()` is called for LCD_CS and LCD_RST and never for GPIO 6, and no code reads the pin -- and the schematic confirms LCD_TE runs straight to IO6 with no series or pull resistor, so the line is left floating as an unconfigured pin while the panel drives it. THREE THINGS BLOCK A NAIVE FIX AND ALL THREE ARE NOW RECORDED. The pulse width CANNOT BE COMPUTED FROM THE DATASHEET because the vertical timing table lists VBP, VFP and VSW as TBD, so the blanking window has to be measured on the board. Mode 1 and Mode 3 are different tools rather than variants of one: blank-only gives the porch, a fraction of 16.7 ms at 60 Hz, while STESL can place the reference edge at whatever line the push wants to start from. And GSL (45h) reads the CURRENT SCAN LINE, which would let a writer track scanout rather than guess ahead of it -- but this port treats the panel as write-only, so whether that read answers is itself unestablished. A blind edge wait is therefore the wrong default: it can add up to a full refresh period per frame, 16.7 ms, against a guest measured at 6.9 ms of work in a 16.7 ms budget, and could cost more than the tearing it fixes. THE CYCLE WAS DOCUMENTATION AND CORRECTION ONLY: no code changed, nothing was built or deployed, and the watch still runs entry 17's firmware. The correction was carried into LCD-015 in place, per the reference's own rule that a record holds what is true now and that history lives in git and this log, with a revision note naming both entries. THE CORE-SYNTAX AUDIT REQUIRED BY core.md WAS PERFORMED BEFORE THIS COMMIT: core.md and core-syntax.md were re-read, the complete `.ai/` diff inspected, core.md confirmed unchanged, this entry checked against the template, the six-section order, the prose rules, the numbering and the 100-entry limit, and LCD-015 re-checked after editing for all nine fields, exactly one fast-lookup line and a routing row that names the same id.
+
+#### Next Steps:
+
+THE TE GATE IS THE NEXT CYCLE AND IT NOW HAS A CONTRACT TO BUILD AGAINST, but the order of work is not the obvious one. MEASURE FIRST: the datasheet will not give the blanking window, so the first step is an instrument that timestamps TE edges and a push, on a build that writes from a task that does NOT own the panel -- entry 18's watchdog wrote from the blit task and is the leading candidate for the two freezes seen while it ran. From that measurement the choice between Mode 1's porch and Mode 3's placed edge becomes evidence rather than preference. THEN DECIDE THE COST, and abandon the idea if the gate cannot fit inside the frame budget the guest leaves -- 9.8 ms of headroom is not much to spend on a torn frame that only appears when a whole screen changes. GSL IS WORTH ONE PROBE before the design is fixed, because tracking scanout is strictly more useful than waiting for blanking and costs one read per band if the panel answers at all. THE STALL-LOG EXPERIMENT REMAINS STASHED AND UNUSED, `stash@{0}` on the fork, and should not be restored as-is. THE SAVESTATE STILL GIVES NO FEEDBACK ON THE GLASS. THE OTHER LEFT-COLUMN BUTTONS STILL HAVE NO DUTY: blank on Game Boy, while the NES draws "Pause" and "Reset" with no handler and the Pokemon Mini's "Exit" and "Save" buzz and do nothing. THE VOLUME IS STILL EXERCISED ON GAME BOY ALONE. THE PICKER'S START-UP STILL REPAINTS EACH LEFT COLUMN LABEL AT FULL HEIGHT. THE STARTUP AUDIO BURST REMAINS AN OPEN TECHNICAL QUESTION with its recorded theory known to be wrong. THE DESKTOP'S TWO EMULATOR ENTRIES ARE STILL `.tdlink`-to-`.py` SCRIPTS. THE PICKER STILL RESCANS THE CARD ON EVERY LAUNCH. THE 0x1A000 TRAIL AND THE 0x1B000 RECORD ARE BOTH OWED A REMOVAL. THE UNCHECKED `spi_device_acquire_bus()` RETURN REMAINS THE OPERATOR'S DECISION. THE TWO VENDORED-CORE SAVESTATE LIMITS ARE OWED A FIX if a savestate ever gains a second slot or a shared file. UNCHANGED AND STILL OPEN: the Tamagotchi is the only emulator not in slot B's menu; the frame-pool stall is parked with its counters written every session; Pusher A is Game Boy only in the desktop; always-on gesture detection needs an upstream lock; `klio save` emits a fifo overflow message; the IMU injection line is parked; an SGB-enhanced title would exercise the third machine type; the savestate over-read in the vendored `gnuboy.c` is unfixed and unreachable; the two unidentified firmware header fields still gate custom firmware; and the statusbar stack size remains the operator's decision.
+
+#### Files Modified:
+
+None.
+
+#### Status:
+
+- Build: N/A
+- Deployment: N/A
+- User Test: N/A
+
+---
+
 ## 18 COMMIT Unreleased 2026-11-24T21:04:26-07:00
 
 #### Coming From:
