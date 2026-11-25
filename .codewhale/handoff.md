@@ -5,33 +5,32 @@ and the board are the fact; this file is a claim.
 
 ## One line
 
-**ONE CHANGE AWAITS A VERDICT.** Two Start menu entries are gone: the NES (from
-both the desktop Start menu and slot B's menu) and the card-side `Tamagotchi
-V2-3.tdlink`. Fork `0cc6c8f`, committed locally and **NOT PUSHED**; entry 31 is
-not written. `scripts/apps/README.md` is updated in Escapement.
+**NOTHING IS OUTSTANDING ON THE GLASS.** Entry 31 retired the NES and the
+card-side Tamagotchi launcher from the menus and the operator passed it -- *"pass"*.
+Log at entry 31; fork `0cc6c8f` pushed; a verified 16 MiB backup of that exact
+build exists.
 
-**The NES decision, in the operator's words:** it will not ship, the screen is too
-small for a wearer to see 320x240 output, and the CODE IS KEPT. `nes.c` is
-untouched and `nes` still runs from a Terminal in the desktop -- verified with
-`nes status` on the board after the change.
+**THE FIRST THING TO FIX IS A FALSEHOOD IN THIS REPOSITORY.** `README.md`'s status
+block still lists `emulators    NES, Game Boy / GBC, Pokemon Mini, Tamagotchi V3`.
+The NES does not ship. That was reported and deliberately left alone because it is
+outside what the operator asked for -- it is a one-line change and it should be
+the next commit.
 
-**Verified on the board:**
-- `slotb play` with no key prints `apps: gb pm tama` -- NES is out of the table
-  that both the slot B menu and `slotb play <key>` resolve through.
-- The desktop Start menu, read off the glass, now ends
-  `Music / GBC / PokéMini / Tama V3` with no NES row and no `Tamagotchi V2-3`.
-- `/root/Start menu/` is empty, confirmed by `cat` on the old path rather than by
-  a return code -- see the `rm -f` note below.
+**The NES is backburnered, not deleted.** `nes.c` is untouched and `nes` still
+runs from a Terminal in the desktop; `nes status` was checked on the board after
+the flash. What went is the OFFER: `s_app_nes` in `link_twatch.c` and the NES row
+in `slotb.c`'s `s_apps[]`. To revive it, put those two back and nothing else.
+`nes_install_touch_hook()` is still installed at slot B init and still declines
+unless the emulator is running, so that side needs no change either.
 
-**A tdsh quirk worth remembering.** `rm -f` is not a valid form there: the flag is
-read as a filename, so it prints `rm '-f': No such file or directory` and returns
-1, then removes the real operand anyway. A status check says failure while the
-deletion happened. Write plain `rm X` and verify with `cat`.
+**Removing a row from `s_apps[]` changes two menus at once, by design.** That
+table is what slot B's menu draws AND what `slotb play <key>` resolves through, so
+an app there cannot be launchable-but-invisible or visible-but-unlaunchable. Do
+not remove a row from one surface only.
 
-**STILL CLAIMING NES SHIPS, and deliberately not changed here:** the top-level
-`README.md` status block lists `emulators    NES, Game Boy / GBC, Pokemon Mini,
-Tamagotchi V3`. That is now false and is a one-line fix, but it is outside what
-was asked and is reported rather than silently changed.
+**A tdsh quirk that makes a status check lie.** `rm` does not accept `-f`: the flag
+is read as a filename, so `rm -f X` prints `rm '-f': No such file or directory`
+and returns 1 -- and deletes X anyway. Use plain `rm X` and verify with `cat`.
 
 **Latest shipped behaviour:** all three consoles pick their cartridge from the same
 navigator. Game Boy and Pokemon Mini reveal Save/Load savestates on Hold. The
@@ -220,6 +219,9 @@ Read the entry, not this list, before trusting a claim.
 - **Entry 27 (fork `8db2c31`)**: Save and Load revealed by Hold. Built, flashed,
   slots verified, host test green; **user test passed in the session after**, and
   the verdict is recorded in entry 28.
+- **Entry 31 (fork `0cc6c8f`)**: the NES and the card-side `Tamagotchi V2-3`
+  launcher off both menus. NES code kept, reachable by the `nes` shell command.
+  The `.tdlink` was deleted on the device, not in this repository.
 - **Entry 30 (fork `7d28941`)**: the Tamagotchi's Sound on the shared volume
   control -- boots muted, steps up, wraps. Deleted its private stepper; added
   `sound_volume_step()` and `sound_volume_muted()` to `sound.c`.
@@ -237,7 +239,7 @@ Read the entry, not this list, before trusting a claim.
 
 - Project control: `/run/media/vash/GIT/Escapement`, `main`, **log at entry 28**.
 - Active code: `/run/media/vash/GIT/tinydesk-twatch`, branch `t-watch-ultra`,
-  HEAD `0cc6c8f`, **NOT PUSHED** -- pending the verdict on the menu removals. Push to `fork` (`aquasock/tinydesk`) only —
+  HEAD `0cc6c8f`, pushed to `fork`. Push to `fork` (`aquasock/tinydesk`) only —
   **never** `origin` (upstream, read-only).
 - `.ai/core.md` is RESTRICTED. Do not edit without an explicit instruction.
 - **The flash holds entry 29's build**, and a full backup of it exists:
@@ -249,17 +251,17 @@ Read the entry, not this list, before trusting a claim.
 
 ```
 Fork        /run/media/vash/GIT/tinydesk-twatch  branch t-watch-ultra  HEAD 0cc6c8f
-Project     /run/media/vash/GIT/Escapement       branch main          log entry 30
+Project     /run/media/vash/GIT/Escapement       branch main          log entry 31
 Port        /dev/ttyACM0  (also /dev/serial/by-id/usb-Espressif_...-if00)
 Build       3,125,120 B  sha256 a14c6d11b57a32977de75caac0848bffa8ac8c5b9f4532f8eaf4f9509cd82081
 Module      flac.bin 26,725 B sha256 947fc4eb86d878fc318f1e3b514ac309587744d47df338a384f765f417b58ff6
             flac.data.bin 1,976 B sha256 4eccdad2da2a42f3deb7b79b156cf346f81a034401c1d66b386bf2e036587c11
             host=0x3c281d78  inst=0x42ae0000  data=0x3cce0000  app=3125120
             (host moves with almost every build; re-check, then rebuild)
-Backup      ~/twatch-backup/working-2026-11-25-1245-tama-volume.bin
-sha256      860c7a87f3cac80a54287bd40a327a6c54ec7fac26da5d4ad98ea9ff74a3045b
-            Holds ENTRY 30's build (slots hash a041d53a...), verified against the
-            chip. The previous backup holds entry 29.
+Backup      ~/twatch-backup/working-2026-11-25-1330-nes-retired.bin
+sha256      6d541a5fd4f97f2322d4bdc1536b2ed74c9814d5d805d88012b1c891d222aad6
+            Holds ENTRY 31's build (slots hash a14c6d11...), verified against the
+            chip. The previous backup holds entry 30.
             (whole 16 MiB; both app slots and flac.bin verified inside)
 SUPERSEDED  working-2026-11-24-1320-volume-button.bin — holds the CRASHING
             f9fa9a6 build (volume painted from the touch task). Do not restore.
