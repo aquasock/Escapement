@@ -302,6 +302,7 @@ Topic IDs are the `record_id` prefix. An entry reserves a name; it does not clai
 | Why does a fullscreen app flicker against the console? | EXT | EXT-003 |
 | Why does pressing an on-glass app button crash the watch? | DISPLAY | DSP-009 |
 | Why is there a solid white block in the framebuffer's top-left corner? | EXT | EXT-004 |
+| What does a gnuboy savestate contain, and what does its loader not check? | EXT | EXT-005 |
 
 ---
 
@@ -400,6 +401,7 @@ EXT-001: "The SPLB32 Tamagotchi core runs at 4.05x realtime headless on this boa
 EXT-002: "The linear flash window 0x42000000 is readable from userspace, so a 512 KB ROM at 0x42480000 costs zero RAM -- the fix for contiguity on NOMMU; file mmap costs 2x the file and MAP_SHARED fails ENODEV"
 EXT-003: "A fullscreen app on fb0 flickers against fbcon because every printk repaints the console over it; console_loglevel decides it, and /etc/sysctl.conf sets kernel.printk = 1 4 1 7"
 EXT-004: "TinyDesk's render layer SHOWS the terminal cursor and homes it when it leaves a full-screen screen (`ESC[?25h` ... `ESC[H`), so a cell-based panel driver ends up with `cursor_visible` true at cell (0,0); painting that cursor means INVERTING the cell's colours, which on a dark taskbar cell is a solid white one-character block in the top-left corner of the framebuffer"
+EXT-005: "gnuboy's savestate is `SAVE_VERSION 0x107` written as a named-field header then five block runs -- 4 KiB of `hw.ioregs`/pal/OAM/wave, then WRAM, VRAM and cartridge RAM at 4096-byte granularity -- and `do_save_load()` validates the VERSION but never the CARTRIDGE: a `.st` from a different ROM loads silently, and its `fwrite`/`fread` are checked only for fewer than one 4096-byte block, so a truncated file or a full card is not reported"
 
 EMU-001: "Doubles cost 711 ns against 121 ns for the integer equivalent, so SPLB32's accumulators are 64-bit fixed-point at CYC_SHIFT=7; float is not slow but fatal, because the kernel does not enable the FPU coprocessor for user tasks and the process dies with SIGSEGV"
 EMU-002: "Entering the time screen takes about 1.5 s because the guest computes for 580.1 ms of emulated time and emulated time then runs at about a third of real; parked by user decision, with 43-135 ms per frame during the stall still unexplained"
@@ -994,6 +996,19 @@ BRD-006: "The XL9555 expander's CONFIG and OUTPUT registers survive an ESP32-S3 
     - "tinydesk src/vterm.c:62, `vt->cursor_visible = true` in td_vterm_init()"
     - "tinydesk-twatch ports/twatchultra/main/display.c: paint_cell()'s inversion and display_cursor_draw()"
   verification: "Established by reading the four call sites and the framebuffer painter, then confirmed fixed on the glass 2026-11-24: the operator had reported a solid white one-character block at the framebuffer's top-left corner on every reboot into slot A, for a long time and predating recent work, and it was gone after the inversion was gated off (core-log entry 16). THE CONFIRMATION CAME FROM THE OPERATOR, NOT FROM THIS AGENT: the artifact needed the glass, and the USB mirror carries the terminal stream rather than framebuffer pixels, so it could not be observed from a host. The size, colour, position and permanence could all be predicted from the mechanism before the test, and all four matched."
+
+- record_id: EXT-005
+  kind: EXTERNAL
+  topic_id: EXT
+  title: "gnuboy savestates carry a format version but no cartridge identity, and short writes are not detected"
+  status: VERIFIED
+  verified_date: 2026-11-24
+  statement: "gnuboy's `do_save_load()` writes `SAVE_VERSION` (0x107 in this tree) as the first field of a 53-field named header -- CPU registers, IME and the interrupt mask, timing, the mapper's bank state, the RTC block and the four sound channels -- and then four block runs: 1 block of the 4 KiB `buf` holding `hw.ioregs`, `hw.pal`, `hw.oam` and `hw.snd->wave`, then `hw.rambanks`, `hw.vbanks` and `cart.rambanks`, each at 4096-byte granularity with a block count of 8 or 2 (WRAM), 4 or 2 (VRAM) and `cart.ramsize * 2` depending on the hardware type. Loading checks only `sav_ver != SAVE_VERSION`; there is no cartridge identity anywhere in the file and no length check. Both directions test `fwrite`/`fread` only for a return below ONE block, so a write cut short after its first block returns success."
+  consequence: "Two facts a caller has to design around rather than fix. A savestate file is ONLY meaningful for the cartridge that produced it, so a driver must key the filename on the ROM, which is what the watch port does with `/sd/saves/gbc/<rom>.st0` -- one file per cartridge, no catalogue. And a truncated or failed write can be reported as a clean save, so the only trustworthy evidence that a savestate is good is loading it, not the return code from saving it. NEITHER IS A LIMIT TO FIX IN THE VENDORED CORE unless the port grows a savestate slot list or a shared file: with the file keyed per cartridge the first cannot bite, and the second leaves a truncated file that the next load reads as a version-valid stub."
+  sources:
+    - "tinydesk-twatch ports/twatchultra/components/gnuboy/gnuboy.c: SAVE_VERSION at line 741, do_save_load(), the sblock_t blocks[] table at 839, and the `fwrite < 1` / `fread < 1` tests"
+    - "tinydesk-twatch ports/twatchultra/main/gb.c: s_state_path, and the guest-task request that calls these"
+  verification: "Read from the vendored source on 2026-11-24 while wiring the Save and Load buttons to it (core-log entry 17). The save and load paths themselves were confirmed working on the glass by the operator in the same entry, so the format round-trips for one cartridge. THE LIMITS ARE STATED FROM CODE AND NOT DEMONSTRATED: no truncated write and no cross-cartridge load was exercised, so treat the two failure modes as the code's shape rather than as measured behaviour."
 
 - record_id: BRD-005
   kind: BOARD
