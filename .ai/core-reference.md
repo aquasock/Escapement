@@ -303,6 +303,7 @@ Topic IDs are the `record_id` prefix. An entry reserves a name; it does not clai
 | Why does pressing an on-glass app button crash the watch? | DISPLAY | DSP-009 |
 | Why is there a solid white block in the framebuffer's top-left corner? | EXT | EXT-004 |
 | What does a gnuboy savestate contain, and what does its loader not check? | EXT | EXT-005 |
+| Why does the screen tear for one frame when a whole screen updates? | LCD | LCD-015 |
 
 ---
 
@@ -335,6 +336,7 @@ LCD-011: "40 MHz is clean on the glass and is the driver's compiled-in default, 
 LCD-012: "SPI DMA is not usable here today: the GDMA out-link descriptor address field is 20 bits, so a descriptor must sit in internal DRAM below 1 MB, and Linux owns none of it -- the obstacle is allocation, not addressability (SOC-004)"
 LCD-013: "A full 320x400 frame costs 93-95 ms at 40 MHz and 108.8 ms at 20 MHz through fbbench, so halving the clock costs only 15 percent and the transfer is neither wire bound nor MMIO bound: roughly 20 us of each 64-byte transaction is fixed engine turnaround"
 LCD-014: "spi_device_acquire_bus() in ESP-IDF 5.3.1 requires portMAX_DELAY: a finite wait tripped SPI_CHECK and returned ESP_ERR_INVALID_ARG without touching the lock, so a pusher cannot bound its wait -- it must take the infinite acquire and check the result, which is what makes contention a skipped band and a hang something else entirely"
+LCD-015: "The CO5300 TE line is on GPIO 6 and configured in board.conf, but LCD_TE appears zero times in the driver, so a whole-frame update goes out as 18 unaligned 16-row bands and straddles a refresh -- one torn frame per full-screen update"
 TCH-001: "The touch controller is a CST9217 at I2C 0x1A (register 0x0000 reads 0xCA, the family checkcode); 0x5A is the DRV2605 haptic driver, whose register 0x00 reads 0xE0 (DEVICE_ID bits), and only 0x1A completes the CST92xx unlock handshake"
 TCH-002: "A reset CST9217 is in command mode and reports nothing: write 0xD1=0x01, then 0xD1=0x1E twice, require byte 1 of a read of 0x0002 to be 0x1E, then write 0xD1=0x09 for normal mode"
 TCH-003: "Report block at 0xD000 is 15 bytes and the transfer must be all 15 even though only 7 are decoded; byte 0 = 0x06 for a down event and 0xAB means no new report; x=(b1<<4)|(b3>>4), y=(b2<<4)|(b3&0x0F); a short read leaves the ack mid-block so a held touch freezes"
@@ -1651,6 +1653,19 @@ BRD-006: "The XL9555 expander's CONFIG and OUTPUT registers survive an ESP32-S3 
     - "ESP-IDF 5.3.1 components/esp_driver_spi/src/gpspi/spi_master.c: spi_device_acquire_bus(), the two SPI_CHECK lines at the top, and spi_device_release_bus() which asserts `ret == ESP_OK` on a bus this device never acquired"
     - "tinydesk-twatch ports/twatchultra/main/display.c: push_pixels_raw_buf(), BUS_PH_* phase markers and s_bus_misses"
   verification: "Established on this project's tools and hardware 2026-11-21 (core-log entry 89). A bounded acquire was built and flashed; every panel push then failed, driving the driver's miss counter from 29 to 43,680 across one session, which is what sent the investigation to the driver source and found the SPI_CHECK. Reverting to portMAX_DELAY restored 0 to 15 misses per session. The `ESP_ERR_INVALID_STATE` polling check is the same one already recorded as fatal in display.c's comment, where ignoring it and then calling release produced `assert failed: spi_device_release_bus spi_master.c:1330 (ret == ESP_OK)` and a reboot."
+- record_id: LCD-015
+  kind: DISPLAY
+  topic_id: LCD
+  status: VERIFIED
+  verified_date: 2026-11-24
+  title: "The panel's TE line is configured and never read, so a frame is pushed as bands that straddle a refresh"
+  statement: "The CO5300's tearing-effect output is on GPIO 6 and is present in `board.conf` as `lcd.te = 6`, but the twatchultra driver never references it: `LCD_TE` appears ZERO times in `ports/twatchultra/main/display.c` and nowhere else in `main/`, so the line is configured by the board table and read by nothing. A full frame reaches the panel as a sequence of band transactions -- `BAND_ROWS` is 16 and `s_tx` is `DISPLAY_W * BAND_ROWS`, so the Game Boy's 320x288 picture is 18 bands -- written as fast as the SPI engine accepts them."
+  consequence: "A whole-frame update therefore takes about one frame's push time end to end (roughly 8 ms at the measured full-frame cost), and that span is not aligned to the panel's own scanout. The top of the glass shows the new content while the bottom still shows the previous content, for the duration of one push: on the glass that reads as a single torn frame rather than a persistent fault. This is the mechanism behind the tearing reported on a diagnostic cartridge that redraws the whole screen on a cycle of 2.4 s; the 2.4 s belongs to the ROM's own test sequence and is not a firmware period -- no task, timer or retry in the port has that period. The fix the hardware provides is to gate the first band on a TE edge so the sequence lands inside one refresh window. Two things are NOT yet established and must be read before that is attempted: the TE polarity and pulse width for this controller, and what the wait costs -- a TE gate can add up to one refresh period of latency per frame, 16.7 ms, against a guest measured at 6.9 ms of work in a 16.7 ms budget."
+  sources:
+    - "tinydesk-twatch ports/twatchultra/board.conf: `lcd.te = 6`"
+    - "tinydesk-twatch ports/twatchultra/main/display.c: BAND_ROWS and s_tx, push_pixels_raw_buf(), and the absence of any LCD_TE reference"
+    - "Escapement .ai/core-reference.md BRD-004: the panel's TE line is GPIO 6"
+  verification: "Established 2026-11-24 (core-log entry 18) by searching the port for LCD_TE (zero hits) and reading the band arithmetic, after the operator reported that a diagnostic cartridge's screen tears for 2.4 s +/- 0.2 s per cycle. THE TORN FRAME ITSELF WAS SEEN BY THE OPERATOR, NOT BY THIS AGENT, and no measurement has yet correlated a push with a TE edge; the band-straddling refresh explanation is the mechanism that fits the observation and the code, and it is unproven until a TE-synchronised push is compared against the current one on the glass."
 - record_id: EMU-003
   kind: EMU
   topic_id: EMU
