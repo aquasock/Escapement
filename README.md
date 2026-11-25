@@ -174,6 +174,22 @@ satellites and can set the watch's clock from them — which works indoors,
 because a time needs ephemeris and not a fix. BLE is both the input path and an
 alternate console.
 
+**Slot B, a second personality from the same image.** The same firmware is
+flashed into both OTA slots, and which slot the bootloader picked decides what
+runs: `ota_0` is the desktop, `ota_1` is a bare emulator personality with no
+desktop, no shell, no WiFi and no SSH — just the three emulators and the display,
+touch, audio and card drivers they need. Choosing an emulator from the Start
+menu reboots into it, so the wearer sees black and then a game, never a boot
+sequence. That is worth a boot because it hands back the watch's scarcest
+resources: no `esp_wifi_init()`, no SSH heap floor, no littlefs mount, and no
+desktop painter or shell stacks competing with the emulator for a core. Pusher A
+backs out — to slot B's own menu when that is where the wearer came from, and to
+the desktop otherwise — and a slot B that dies before an emulator starts is
+rolled back to the desktop by the bootloader on the next reset, so it cannot
+brick the watch. The whole of it — the boot path, the app table, the
+peripheral bring-up order and the flash instruments it needs because it has no
+console — is in the fork's `ports/twatchultra/README.md`.
+
 ## Building
 
 The port is an ESP-IDF project and needs **ESP-IDF 5.3.1** plus an
