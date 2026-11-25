@@ -1,25 +1,28 @@
-# Handoff — Escapement / TinyDesk on T-Watch Ultra, 2026-11-25T00:48
+# Handoff — Escapement / TinyDesk on T-Watch Ultra, 2026-11-25T02:06
 
 Orientation, not authority. **Verify before acting on it.** The files, the flash
 and the board are the fact; this file is a claim.
 
 ## One line
 
-**ALL THREE CONSOLES NOW CHOOSE A CARTRIDGE THE SAME WAY** (entry 25). The
-Tamagotchi is a fourth config on the one shared navigator, reached from a new
-slot B row and a new desktop entry `●☼ Tama V3`. The menu now reads `●■ GBC`,
-`●▲ NES`, `●♦ PokéMini`, `●☼ Tama V3`.
+**ONE SHIPPED CHANGE HAS NO USER VERDICT — START THERE** (entry 27). The
+Tamagotchi's Save and Load are now revealed by Hold rather than merely gated by
+it. It is built, flashed and both slots verified, but the operator ended the
+session before the emulator ran. Everything else this session passed on the glass.
 
-**Also this session:** page buttons and menu icons (entry 24); Pokemon Mini reached
-margin parity with Game Boy (entries 21–23: picker, geometry, Hold/Save/Load).
+**Also this session:** the Tamagotchi picker plus its slot B and desktop entry
+(entry 25); its margins cleared of the picker's leftover words and both columns
+relaid out (entry 26); Pokemon Mini reached margin parity with Game Boy (entries
+21–23); page buttons and menu icons (entry 24).
 
 **Earlier this session:** the tearing is fixed (entry 20, TE sync); the terminal
 cursor is not painted (entry 16).
 
 **Latest shipped behaviour:** all three consoles pick their cartridge from the same
-navigator; Game Boy and Pokemon Mini reveal Save/Load (savestates) on Hold, and the
-Tamagotchi has Pause/Resume, a rate control and its own volume stepper but no
-savestate button; the terminal cursor is not painted.
+navigator. Game Boy and Pokemon Mini reveal Save/Load savestates on Hold. The
+Tamagotchi also reveals Save/Load on Hold — into its own `tama.sav`, not a
+savestate — and its right column reads Hold / blank / sound level / rate / Pause.
+The terminal cursor is not painted.
 
 **Still open from before:** the original "rom not found" (entries 11–12) is
 closed on the operator's verdict, **not** on a demonstrated cause — the
@@ -36,6 +39,27 @@ successful run overwrote the record that would have said which fault it was.
   registered Tama's consumer, and slot B never calls it because slot B has no shell —
   so the app would have run perfectly and been unpressable. The split is
   `*_install_touch_hook()` (gb, nes, pm, tama), called together in `slotb_run()`.
+- **THE PICKER PAINTS LABEL OVERRIDES, AND `paint_margins()` CONSULTS OVERRIDES
+  BEFORE THE APP TABLES.** So every slot `gbpick_run_cfg()` touched keeps the
+  picker's word — PgUp, PgDn, the two arrows, Enter and Up — unless the app
+  overwrites it. An app that overrides only the slots whose words change will come
+  up wearing the picker's furniture. **`display_margins_set(DISPLAY_MARGINS_APP)`
+  will NOT fix it either**: the picker already left the driver in APP mode, so the
+  call returns on its own `mode == s_margin_mode` guard without painting. The
+  per-slot or per-column writes are what repaint. This made the Tamagotchi look
+  like it had no controls at all (entry 26).
+- **An app that writes both columns in full every paint does not need a separate
+  clear** — and clearing first costs an extra full-height paint per column and
+  FLASHES the table's words for one frame. `paint_column_state()` overwrites every
+  override by construction. The strip is the exception: only `display_margin_btn_label()`
+  writes it, so it still has to be cleared explicitly on start and on stop.
+- **A hidden word must be an explicit `" "`, never a `NULL`.** A `NULL` clears the
+  override and falls back to the shared table — showing exactly the word being
+  hidden. Both `gb.c` and `tama.c` depend on this for their Hold-reveal Save/Load.
+- **The Hold latch is drained ABOVE the pause branch, in both branches.** A paused
+  guest produces no frames, and a pause is precisely when a player reaches for Save.
+  A busy-only or idle-only drain leaves the held state unpainted for as long as the
+  pause lasts (DSP-009, third application).
 - **There is ONE cartridge picker, configured per console.** `pk_cfg_t` in
   `gbpick.h` holds what is console-specific (extensions, roots, title);
   `gbpick_run_cfg()` is the navigator. **Do not add a second picker or special-case
@@ -107,7 +131,7 @@ successful run overwrote the record that would have said which fault it was.
 - **The picker's bands tile the framebuffer under a `_Static_assert`.** With the
   fill gone, an unclaimed row is a permanent stripe, not a blink.
 
-## What changed, entries 8–25 (all pushed)
+## What changed, entries 8–27 (all pushed)
 
 Read the entry, not this list, before trusting a claim.
 
@@ -161,26 +185,33 @@ Read the entry, not this list, before trusting a claim.
 - **Entry 25 (fork `672004e`)**: Tamagotchi picker as the fourth config; slot B
   row and desktop entry `●☼ Tama V3`. Fixed tama.c's 64-byte ROM path and split
   `tama_install_touch_hook()` out of its shell-command registration.
+- **Entry 26 (fork `9941946`)**: the picker's words off the Tamagotchi's margins,
+  and both columns relaid out — right is Hold/blank/Sound/rate/Pause, left is
+  Save and Load. Pause and Speed moved; Shot, Reset and Exit lost their slots.
+- **Entry 27 (fork `8db2c31`, **USER TEST: NOT RUN**)**: Save and Load revealed by
+  Hold. Built, flashed, slots verified, host test green — never seen on the glass.
 
 ## Where things live
 
-- Project control: `/run/media/vash/GIT/Escapement`, `main`, **log at entry 25**.
+- Project control: `/run/media/vash/GIT/Escapement`, `main`, **log at entry 27**.
 - Active code: `/run/media/vash/GIT/tinydesk-twatch`, branch `t-watch-ultra`,
-  HEAD `672004e`, pushed to `fork`. Push to `fork` (`aquasock/tinydesk`) only —
+  HEAD `8db2c31`, pushed to `fork`. Push to `fork` (`aquasock/tinydesk`) only —
   **never** `origin` (upstream, read-only).
 - `.ai/core.md` is RESTRICTED. Do not edit without an explicit instruction.
 
 ```
-Fork        /run/media/vash/GIT/tinydesk-twatch  branch t-watch-ultra  HEAD 672004e
-Project     /run/media/vash/GIT/Escapement       branch main          log entry 25
+Fork        /run/media/vash/GIT/tinydesk-twatch  branch t-watch-ultra  HEAD 8db2c31
+Project     /run/media/vash/GIT/Escapement       branch main          log entry 27
 Port        /dev/ttyACM0  (also /dev/serial/by-id/usb-Espressif_...-if00)
-Build       3,122,096 B  sha256 4429ca3bd1d66afc5b0648c8ed71d4675064b545864c7473aac5da9d23d3ac32
-Module      flac.bin 26,725 B sha256 924de86e3824420b5992d5d3e2439bd6db8595788718744fef862cfbd43b7f01
+Build       3,122,416 B  sha256 7081c22617b6570a733c5b2a7e695a356e6d2faa886949413e10681bf518481a
+Module      flac.bin 26,725 B sha256 947fc4eb86d878fc318f1e3b514ac309587744d47df338a384f765f417b58ff6
             flac.data.bin 1,976 B sha256 4eccdad2da2a42f3deb7b79b156cf346f81a034401c1d66b386bf2e036587c11
-            host=0x3c281bf8  inst=0x42ae0000  data=0x3cce0000  app=3122096
+            host=0x3c281bf0  inst=0x42ae0000  data=0x3cce0000  app=3122416
             (host moves with almost every build; re-check, then rebuild)
-Backup      ~/twatch-backup/working-2026-11-25-0045-tama-picker.bin
-sha256      0ad455d96f22c0055fb7e3e1a61dab841df01af3da2d7a24ee29eeeddcc13e9f
+Backup      ~/twatch-backup/working-2026-11-25-0145-tama-layout.bin
+sha256      2cf63c83c224ede7bda09b4106c52b3db07883fa9e7f46d2a8c84dabaea90db6
+            *** PREDATES ENTRY 27. A restore returns to the layout cycle WITHOUT
+            the Hold-reveal Save/Load. Nothing newer was taken. ***
             (whole 16 MiB; both app slots and flac.bin verified inside)
 SUPERSEDED  working-2026-11-24-1320-volume-button.bin — holds the CRASHING
             f9fa9a6 build (volume painted from the touch task). Do not restore.
@@ -190,9 +221,10 @@ SUPERSEDED  working-2026-11-24-1320-volume-button.bin — holds the CRASHING
             working-2026-11-24-2115-clean-noinstrument.bin,
             working-2026-11-24-2135-te-sync.bin,
             working-2026-11-24-2215-pm-picker-ui.bin,
-            working-2026-11-24-2250-pm-hold-saveload.bin and
-            working-2026-11-25-0030-menu-icons-names.bin — right for their
-            cycles, superseded by entry 25.
+            working-2026-11-24-2250-pm-hold-saveload.bin,
+            working-2026-11-25-0030-menu-icons-names.bin and
+            working-2026-11-25-0045-tama-picker.bin — right for their cycles,
+            superseded by entry 26.
 DO NOT USE  working-2026-11-23-2230-upbar-nomenu.bin.STALE-MODULE
 Layout      ota_0 0x20000, ota_1 0x400000 (0x3E0000 each), coredump 0x7E0000,
             otadata 0x7F0000, storage 0x800000, modules 0xC00000, moddata 0xE00000
@@ -282,81 +314,100 @@ the number. Any new reader of this sector has the same trap.
 
 ## Open, in the order I would take them
 
-1. **The Tamagotchi now has TWO Start menu entries**, and the card-side one is the
+1. **VERIFY ENTRY 27 ON THE GLASS — it is the only shipped change with no user
+   verdict.** Run the Tamagotchi and check four things, in order of how easily they
+   fail silently: Save and Load are ABSENT when the emulator opens and appear while
+   Hold is held; they disappear on release rather than sticking; they still appear
+   and disappear while the game is PAUSED (the branch the latch was moved above);
+   and an unarmed press of the left slots after a release does nothing and is
+   silent. If the words STICK, the fault is in the drain or the transition test. If
+   they FLASH "Save" on open, something paints before `s_hold` is assigned.
+2. **The Tamagotchi has TWO Start menu entries**, and the card-side one is the
    noise: `●☼ Tama V3` is native (entry 25), and `py Tamagotchi V2-3` is a `.tdlink`
    to `/root/Apps/tama.py` that opens a Terminal and echoes its command first. This
    is the same duplicate the `(B)` suffix once marked on Pokemon Mini, which entry 24
    resolved by deleting the `.tdlink` rather than by adding a suffix. Delete
    `/root/Start menu/Tamagotchi V2-3.tdlink` (a shell command on the littlefs, not a
    commit) and update `scripts/apps/README.md`, which still documents it as live.
-2. **`/root/Apps/pm.py` is now orphaned** — nothing points at it. Left in place
-   deliberately; removing it would also mean updating `scripts/apps/README.md`, which
-   still documents it as a live Start menu entry.
-3. **Watch the `te:` line in `gb status` for a while.** The gate aligns the START of
+3. **`/root/Apps/pm.py` is orphaned** — nothing points at it. Left in place
+   deliberately; removing it would also mean updating `scripts/apps/README.md`.
+4. **The Tamagotchi's Shot, Reset and Exit have no margin slot** since entry 26's
+   layout, so they are reachable only from the shell (`tama do shot`, `do reset`);
+   Exit is also what Pusher A does. With Save and Load now on the left under Hold,
+   the blank at right 1 is the only thing separating the arm from the sound level and
+   may be worth using.
+5. **The Tamagotchi's checkpoint is a single shared `/sd/saves/tama/tama.sav`**,
+   unlike Game Boy's and Pokemon Mini's per-cartridge paths keyed on the ROM name.
+   Correct with one ROM; the moment the picker offers a second it becomes the
+   cross-cartridge collision of EXT-005/EXT-006.
+6. **A short Tama ROM cannot say why it was refused.** `read_rom()` requires exactly
+   `TMC_ROM_BYTES` and there is no `why` hook, so a truncated dump shows slot B's
+   generic "did not start".
+7. **Watch the `te:` line in `gb status` for a while.** The gate aligns the START of
    a picture and does not bound its LENGTH, so a returning tear would mean the band
    run itself has outgrown one refresh — the answer then is fewer, larger transfers,
    not better alignment. A climbing `timeout` count with `edges` static means the pin
    or the ISR has stopped.
-4. **Pokemon Mini has no `why` hook**, so a refused start still cannot say its
+8. **Pokemon Mini has no `why` hook**, so a refused start still cannot say its
    reason the way `gb_last_error()` does. That is the one piece of margin
    behaviour that still does not match the Game Boy's.
-5. **The cross-cartridge savestate refusal is unexercised** on PM: the comparison
+9. **The cross-cartridge savestate refusal is unexercised** on PM: the comparison
    exists because the core does not make it (EXT-006), not because a wrong state
    was seen loading. Two cartridges and one deliberate mismatch would be the
    first evidence the refusal path itself works.
-6. **The stall-log experiment is stashed, not deployed** (`stash@{0}` on the fork,
+10. **The stall-log experiment is stashed, not deployed** (`stash@{0}` on the fork,
    "stall instrumentation (not deployed)"). Do not restore it as-is: its freeze
    watchdog writes to the card **from the blit task**, and that task owns the panel,
    which is the leading candidate for the two freezes seen while it was running. Any
    future instrument must write from a task that does not own the panel, and must
    not rely on a stop-time dump — a hang prevents stopping.
-7. **A savestate gives NO feedback on the glass.** The column words are identical
+11. **A savestate gives NO feedback on the glass.** The column words are identical
    before and after, so the only evidence is the 150–250 ms stutter and a wearer
    cannot tell a save from a missed press. A brief acknowledgement in the pressed
    slot is the obvious next cycle, and it should be built on a report.
-8. **The other left-column buttons still have no duty.** On Game Boy they are now
+12. **The other left-column buttons still have no duty.** On Game Boy they are now
    BLANK (blanked in entry 17) — honest but unfinished. The NES still draws
    "Pause" and "Reset" and handles neither, and the Pokemon Mini's "Exit" and
    "Save" buzz and do nothing. Use the Hold button's shape: hit test in the
    callback, act via a latch the blit task drains.
-9. **The savestate stall (150–250 ms) is accepted, not solved.** A background
+13. **The savestate stall (150–250 ms) is accepted, not solved.** A background
    write or a smaller state would fix it; the button is not the lever.
-10. **The picker's start-up repaints each left-column label at full height**, about
+14. **The picker's start-up repaints each left-column label at full height**, about
    ten full-height pushes before the first frame. Pre-existing, visible only as
    launch latency, and `paint_column_range()` is the tool for it.
-11. **The volume is only tested on Game Boy.** The code path is shared; the test
+15. **The volume is only tested on Game Boy.** The code path is shared; the test
    is not. Whether the NES and Pokemon Mini steps sound as even is unverified.
-12. **Startup audio burst**: 99% of drops are two episodes (sec 0 = 7,177;
+16. **Startup audio burst**: 99% of drops are two episodes (sec 0 = 7,177;
    sec 14 = 3,915). The recorded theory ("stream opens before ROM load") is
    **wrong**: `sound_stream_open()` is near line 1490, `gnuboy_load_rom()` near
    1427. Likely the I2S ring draining. Instrument: the per-second `gbhist` record.
    **Note:** streams now start Muted, so the burst is inaudible unless the volume
    is raised first — which may itself change what `gbhist` shows.
-13. **The desktop's two emulator entries are still `.tdlink` → `.py`** and open a
+17. **The desktop's two emulator entries are still `.tdlink` → `.py`** and open a
    Terminal — the same noise entries 5–6 removed from slot B.
-14. **Picker rescans the card on every launch** — five taps to a cartridge. A
+18. **Picker rescans the card on every launch** — five taps to a cartridge. A
    remembered selection is the cheapest remaining win, and the `retail` level can
    be collapsed to one tap.
-15. **A failed cartridge returns to the desktop, not the picker** — costly for
+19. **A failed cartridge returns to the desktop, not the picker** — costly for
    someone sampling 1,143 ROMs. Needs a remembered directory plus a retry, and
    should be built on a report.
-16. **The Tamagotchi's save is a single shared `/sd/saves/tama/tama.sav`**, unlike
+20. **The Tamagotchi's save is a single shared `/sd/saves/tama/tama.sav`**, unlike
     Game Boy's and Pokemon Mini's per-cartridge paths keyed on the ROM name. Correct
     with one ROM; the moment the picker offers a second it becomes the cross-cartridge
     collision of EXT-005/EXT-006, so per-ROM naming turns into a correctness
     requirement rather than tidiness.
-17. **A short Tama ROM cannot say why it was refused.** `read_rom()` requires exactly
+21. **A short Tama ROM cannot say why it was refused.** `read_rom()` requires exactly
     `TMC_ROM_BYTES`, and there is no `why` hook, so a truncated dump shows slot B's
     generic "did not start" — the same gap Pokemon Mini has.
-18. **`lcd.boot_pattern = 1` in `board.conf` re-enables the RGB bring-up bands** —
+22. **`lcd.boot_pattern = 1` in `board.conf` re-enables the RGB bring-up bands** —
     implemented, default off, **never exercised**. One line and a reboot to test.
-19. **The `0x1A000` trail and the `0x1B000` record are both owed removal** once
+23. **The `0x1A000` trail and the `0x1B000` record are both owed removal** once
     slot B runs a few cycles without an unexplained failure.
-20. **Open question, the operator's to decide:** `spi_device_acquire_bus()`'s
+24. **Open question, the operator's to decide:** `spi_device_acquire_bus()`'s
     return is unchecked in `paint_column()`, so a second-writer mistake panics
     instead of skipping a repaint. Loud is what made entry 14 a one-read
     diagnosis; checking it trades that for resilience.
-21. **`core-syntax.md` still names the wrong target** — "deployed to the Tang"
+25. **`core-syntax.md` still names the wrong target** — "deployed to the Tang"
     and "the active Tang-Phosphor log". The formatting rules are sound, the
     device name is not. Needs the operator's word because it is a `.ai/` file.
 
