@@ -1,49 +1,39 @@
-# Handoff — Escapement / TinyDesk on T-Watch Ultra, 2026-11-25T12:4x
+# Handoff — Escapement / TinyDesk on T-Watch Ultra, 2026-11-25T11:45
 
 Orientation, not authority. **Verify before acting on it.** The files, the flash
 and the board are the fact; this file is a claim.
 
 ## One line
 
-**ONE CHANGE AWAITS A VERDICT** (no log entry yet). The Tamagotchi's up-time
-counter is built and flashed, and the reason the operator saw nothing has been
-found and fixed: **the top strip did not exist in slot B at all**. The Start
-menu's emulator entries reboot into slot B; `board_startup_override()` runs in
-app_main before `hal_start()` calls `link_init()`, and `link_init()` was the only
-thing that started the strip. So slot B ran with rows 0..43 dark and no app
-could put anything there. `slotb_run()` now starts it, after `display_init()`
-(whose `panel_fill()` would wipe it) and with `statusbar_clock_present(false)`
-because slot B never reaches `fill_sysinfo()` and has no clock to show.
+**NOTHING IS OUTSTANDING ON THE GLASS.** Entry 29 shipped the Tamagotchi's
+up-time counter in the top strip and the operator passed it -- *"looks perfect.
+pass"*. The log's last entry is 29; fork `257be10` is pushed; a verified 16 MiB
+backup of that exact build exists.
 
-**Fork state: `257be10`, committed, NOT PUSHED.** Two commits await the verdict:
-`41949bf` (the counter itself) and `257be10` (the slot B fix plus an honest
-band push). Entry 29 has NOT been written; it waits on the glass.
+**The cycle's real lesson, which is worth more than the feature.** The first
+build was declared verified on counters that said the strip had painted, when
+the pixels had never been on the glass; only the operator looking at the watch
+found it. Two causes, both now fixed:
 
-**What was verified on hardware:** desktop path -- claim held (`app='0d00h10m'`,
-date and clock suppressed), `bands lost=0`, strip rectangle 88..311 at rows
-6..37. Age advanced 00m -> 10m with guest time; 4x measured 3.99 guest seconds
-per wall second; pause held `cyc` unchanged over 10 s; Reset took the age to
-`0d00h00m`; Load restored `base=428s`. Slot B -- booted via a hand-written
-otadata entry, ran with the strip task started, and the coredump partition is
-byte-identical to before, so the new task does not fault. 98 host checks pass in
-`test_tama_age`; the suite is 46 of 47 with only the pre-existing
-`board_keys`/`lcd.boot_pattern` failure.
+- **The top strip did not exist in slot B at all.** `statusbar_start()` is called
+  only from `link_init()`; the Start menu's emulator entries reboot into slot B;
+  `board_startup_override()` runs in app_main before `hal_start()` reaches
+  link_init() and never returns. Slot B therefore ran with rows 0..43 dark and
+  no app could paint there. `slotb_run()` now starts the strip after
+  `display_init()` (whose `panel_fill()` would wipe it) and calls
+  `statusbar_clock_present(false)` because slot B never reaches `fill_sysinfo()`
+  and has no clock.
+- **A band refused on the panel bus was reported as painted.**
+  `push_pixels_raw_buf()` returned `void` and `display_panel_push()` returned
+  `true` regardless, so the strip recorded its text as shown and never retried.
+  The push now returns its own result, `sb_paint()` retries a refused band in
+  place and only records the rectangle when every band landed, and `statusbar`
+  prints `bands lost`.
 
-**SECOND DEFECT FOUND AND FIXED, worth knowing about.** `push_pixels_raw_buf()`
-returned `void` and `display_panel_push()` returned `true` whatever happened, so
-a band refused because another task held the panel bus was reported as painted.
-The strip then recorded its text as shown and never retried -- a label missing
-from the glass while every counter reported success. That is why the earlier
-"verification" of this feature was worthless: it measured counters, not pixels.
-The push now reports its result, a refused band is retried in place, and
-`statusbar` prints `bands lost`.
-
-**NOT verified:** the slot B glass itself. Slot B has no console and no mirror,
-so I can prove the task runs and does not fault, but not that the label appears.
-That is the operator's to confirm -- and it is the whole point of the change.
-
-**Also observed:** the strip shows `--/-- --:--` in slot A until the clock is
-set. Pre-existing, unrelated to the age.
+**Before trusting any on-glass claim, do what this cycle failed to do:** have the
+operator look, or find a path to the pixels. There is no way to read the panel --
+it is write-only -- and slot B has no console and no mirror at all, which is
+exactly why the fault survived a cycle.
 
 ## Previously
 
@@ -239,6 +229,11 @@ Read the entry, not this list, before trusting a claim.
 - **Entry 27 (fork `8db2c31`)**: Save and Load revealed by Hold. Built, flashed,
   slots verified, host test green; **user test passed in the session after**, and
   the verdict is recorded in entry 28.
+- **Entry 29 (fork `257be10`, supersedes `41949bf`)**: the Tamagotchi's up-time
+  counter in the top strip, in guest seconds derived from the emulator's cycle
+  count. Load persists it in a sidecar `/sd/saves/tama/tama.age`. Fixed two
+  things on the way: the strip never existed in slot B, and a refused panel band
+  was reported as painted.
 - **Entry 28 (fork `94ac276`)**: the Tamagotchi's Save moved from left slot 1 to
   slot 0 — Save / blank / Load, matching Game Boy and Pokemon Mini. Three tables
   moved together (`left_label_app()`, `tama_ui.c`'s map, `paint_column_state()`).
@@ -248,24 +243,24 @@ Read the entry, not this list, before trusting a claim.
 
 - Project control: `/run/media/vash/GIT/Escapement`, `main`, **log at entry 28**.
 - Active code: `/run/media/vash/GIT/tinydesk-twatch`, branch `t-watch-ultra`,
-  HEAD `257be10`, **NOT YET PUSHED** (push with the verdict). Push to `fork` (`aquasock/tinydesk`) only —
+  HEAD `257be10`, pushed to `fork`. Push to `fork` (`aquasock/tinydesk`) only —
   **never** `origin` (upstream, read-only).
 - `.ai/core.md` is RESTRICTED. Do not edit without an explicit instruction.
-- **The flash holds only entry 28's build**, and a full backup of it now exists:
-  `~/twatch-backup/working-2026-11-25-0910-tama-save-top.bin`, 16,777,216 B,
-  sha256 `2f896ab1ab238201234a743157af2e41c9536e6d950a1faee782da0e567073af`,
-  read and verified against the chip with the board held in the bootloader. Both
-  OTA slots inside it hash to `475e44c4…`, the entry 28 build. Entry 27's image is
-  on neither slot and is reproducible only from `8db2c31`.
+- **The flash holds entry 29's build**, and a full backup of it exists:
+  `~/twatch-backup/working-2026-11-25-1145-tama-uptime.bin`, 16,777,216 B,
+  sha256 `be09e1f877aa3df3e7ce193f2e07ccbef3dfbceb6685e95ad5614d41f1d36f13`,
+  verified against the chip with the board held in the bootloader, and both OTA
+  slots inside it hash to `f30f3ef7…` -- the entry 29 build. The previous
+  backup, `working-2026-11-25-0910-tama-save-top.bin`, holds entry 28.
 
 ```
 Fork        /run/media/vash/GIT/tinydesk-twatch  branch t-watch-ultra  HEAD 257be10
-Project     /run/media/vash/GIT/Escapement       branch main          log entry 28
+Project     /run/media/vash/GIT/Escapement       branch main          log entry 29
 Port        /dev/ttyACM0  (also /dev/serial/by-id/usb-Espressif_...-if00)
 Build       3,124,944 B  sha256 40e9288881a450e04ff34bf30cea8c32b939ead55a1373cf5ff7939c594a883e
 Module      flac.bin 26,725 B sha256 947fc4eb86d878fc318f1e3b514ac309587744d47df338a384f765f417b58ff6
             flac.data.bin 1,976 B sha256 4eccdad2da2a42f3deb7b79b156cf346f81a034401c1d66b386bf2e036587c11
-            host=0x3c281d68  inst=0x42ae0000  data=0x3cce0000  app=3124944
+            host=0x3c281d78  inst=0x42ae0000  data=0x3cce0000  app=3125264
             (host moves with almost every build; re-check, then rebuild)
 Backup      ~/twatch-backup/working-2026-11-25-0145-tama-layout.bin
 sha256      2cf63c83c224ede7bda09b4106c52b3db07883fa9e7f46d2a8c84dabaea90db6
