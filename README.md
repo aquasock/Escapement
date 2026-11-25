@@ -25,14 +25,15 @@ desktop      40x26 at 320x416 on the AMOLED, touch and margins live
 shell        TinyDesk Shell in a Terminal window, plus telnet and SSH/SFTP
 input        BLE keyboard and mouse, BLE gamepad, USB keyboard, the margins
 audio        FLAC from the SD card out of the built-in speaker
-emulators    NES, Game Boy / GBC, Pokemon Mini, Tamagotchi V3
+emulators    Game Boy / GBC, Pokemon Mini, Tamagotchi V3
 radio        WiFi (telnet 23, SSH 22), BLE, NFC card reads, GNSS
 power        AXP2101 gauge and charging, and an RTC chip, so the clock is right
              with no network
 ```
 
-The app image is `0x2e3090` bytes with 52 KB still free in its OTA slot, so
-there is room to keep going.
+The NES is deliberately not in that list: see **The NES** under [What it
+does](#what-it-does). The app image is `0x2FAF80` bytes (2.98 MiB) against a
+`0x3E0000` OTA slot, leaving 916 KB free, so there is room to keep going.
 
 ## How it got here — and that Linux is not coming back
 
@@ -146,13 +147,21 @@ from what it does.
 **A shell.** TinyDesk Shell in a Terminal window, reachable over USB serial,
 telnet on 23, or SSH/SFTP on 22. `tdsh` is its own shell — not bash.
 
-**Emulators.** NES (nofrendo), Game Boy and Game Boy Color (gnuboy), Pokemon
-Mini, and the Tamagotchi Connection V3. The Game Boy core measures 116 fps
-against a 59.7 fps target, nearly twice real time; the NES is playable at about
-21 fps, with the frame split roughly evenly between the 6502 interpreter and
-the blit. Which core to vendor was decided by running them on the watch, not by
-reading source — `docs/nes-accuracy.md`, `docs/gbc-scoping.md` and
-`docs/pokemini-scoping.md` are those measurements.
+**Emulators.** Game Boy and Game Boy Color (gnuboy), Pokemon Mini, and the
+Tamagotchi Connection V3. The Game Boy core measures 116 fps against a 59.7 fps
+target, nearly twice real time. Which core to vendor was decided by running them
+on the watch, not by reading source — `docs/gbc-scoping.md`,
+`docs/pokemini-scoping.md` and `docs/nes-accuracy.md` are those measurements.
+
+**The NES.** No longer offered anywhere, and the reason is the glass rather than
+the emulator. nofrendo runs at about 21 fps with the frame split evenly between
+the 6502 interpreter and the blit, and it is playable — but 320x240 of console
+output on a 410x502 wrist display is not something a wearer can read, and a menu
+that offers it is a promise this port should not make. Both Start menu entries
+were retired (`0cc6c8f`, decision-log entry 31). **The code is kept**: `nes.c`,
+`components/nofrendo` and `docs/nes-accuracy.md` are untouched, `nes` still runs
+from a Terminal in the desktop, and reviving it is two menu registrations — the
+row in slot B's app table and the `s_app_nes` entry in the desktop's app list.
 
 **Music.** `music <file.flac>` decodes FLAC from the SD card out of the
 built-in speaker, with the decoder running out of the `modules` partition. A
@@ -311,14 +320,17 @@ tried first and why that failed. It is long because it is honest.
 - **No picker, queue or seek for music.** `music` takes a path and plays it.
 - **One codec.** FLAC only. The partition layout has room for eleven Rockbox
   codecs; nothing else is ported, and the loader holds a single blob.
-- **The NES is playable but not smooth** — about 21 fps, with the blit a large
-  share of the frame. A direct path from the core's palette output into the
-  flush buffer is the known fix.
-- **No NES save persistence** — nofrendo keeps battery saves in RAM only.
-- **The margins' side columns are unassigned in the emulator ports.** The
-  Tamagotchi declines them and logs the refusal, so "not wired" stays visible
-  rather than becoming a silent no-op. SELECT is unmapped in the NES, which a
-  few games need.
+- **The NES is backburnered, not shipping.** It runs at about 21 fps with the
+  blit a large share of the frame, and a direct path from the core's palette
+  output into the flush buffer is the known fix — but the blocking problem is
+  that 320x240 is illegible at wrist distance, so no speed work is planned.
+- **No NES save persistence** — nofrendo keeps battery saves in RAM only. Moot
+  while the emulator is off the menus.
+- **The margins are wired per emulator, and the blanks are honest.** Game Boy,
+  Pokemon Mini and the Tamagotchi each fill the slots they use and leave the rest
+  drawn-but-empty rather than advertising a duty they do not have. The NES still
+  draws `Pause` and `Reset` with no handler, and `SELECT` is unmapped, which a few
+  games need — both moot while it is off the menus.
 - **Bluetooth media keys are untested.** The consumer-page reports arrive; the
   report map is not parsed, so they cannot be decoded.
 - **No suspend.** The PMU interrupt works and nothing acts on it, so the watch

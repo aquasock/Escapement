@@ -1,3 +1,35 @@
+## 32 COMMIT Unreleased 2026-11-25T14:27:00-07:00
+
+#### Coming From:
+
+Unreleased 4e09428
+
+#### Purpose:
+
+Correct the two READMEs that still described the port as offering an NES and the Tamagotchi as having the margin layout from four cycles ago.
+
+#### Outcome:
+
+THE TWO README'S FALSE STATEMENTS ARE CORRECTED AND NOTHING ELSE WAS TOUCHED -- a documentation-only cycle, so no source file changed, no build or flash was owed, and the image on the watch is still entry 31's `a14c6d11` exactly as the operator passed it. THE TOP-LEVEL README ASSERTED THAT THE NES SHIPS IN THREE PLACES, all now corrected: the status block's `emulators` line drops it; the emulators prose no longer lists nofrendo among what runs and gains its own **The NES** paragraph explaining that the glass saw it off -- 320x240 of console output on a 410x502 wrist display is not something a wearer can read, which is a display limit rather than an emulator one -- and naming the two registrations that would revive it; and the `Not done` bullets about it are reframed as backburnered instead of pending. THAT PASS ALSO FOUND AND FIXED A STALE FIGURE NOBODY HAD FLAGGED: the status block still claimed the app image was `0x2e3090` bytes with 52 KB free, which described the port as it was many cycles ago; the image is `0x2FAF80` bytes (2.98 MiB) against a `0x3E0000` OTA slot with 916 KB free, and the difference between "nearly full" and "room for two more of these" is the kind of error that costs a document its credibility for reasons unrelated to what it missed. THE FORK'S PORT README -- the authoritative subsystem-by-subsystem record the top-level README tells a reader to consult before changing anything -- STILL DESCRIBED THE TAMAGOTCHI'S MARGINS AS "Left column: Pause, Save, Load, Speed, Sound. Right column: Hold, Shot, blank, blank, Reset", a layout entries 26 through 30 replaced twice over, and still said its two columns were declined by the handler. It now states the shipped layout: left is Save, blank, Load, blank, blank, with the pair revealed only while the arm is held; right is Hold, a deliberate blank, the sound level, the rate and Pause; Shot, Reset and Exit have no slot; the sound button is the shared control and boots muted; and the pet's up time is in the top strip, which works only because slot B now starts the strip at all. Its NES row now leads with BACKBURNERED and the reason, keeps every measurement it had, and states that nothing was deleted. THREE CLAIMS WERE CHECKED AGAINST THE SOURCE WHILE REWRITING AND TWO OF THEM WERE WRONG IN THE TEXT FIRST WRITTEN, which is what made this cycle more than mechanical: `tama do exit` is NOT accepted, because `cmd_tama`'s loop stops at `TAMA_ACT_RESET`, so `TAMA_ACT_EXIT` is gated, named, handled in `apply_action()` and unreachable by any path; and the gated set is four actions rather than the two that are reachable, because `tama_ui_is_gated()` still covers Reset and Exit. Both are now stated as they are, including that the Exit action is dead code kept for the shape of the enum, since a reader who assumed `do exit` worked would write code against a path that refuses. The host test counts were re-measured rather than copied -- `test_tama_ui` 182, `test_tama_age` 98, `test_twatch_edges` 1,591 -- replacing a 206 and a 1,567 that had been stale in opposite directions. TWO STALE COMMENTS WERE FOUND AND DELIBERATELY LEFT IN CODE, which is a scope decision and not an oversight: `edges.h`'s label table still says the sound button "cycles 100..Mute" when it now steps Mute..Max upward, and the block above it still calls the strip's degree circle "the next cycle's work" when the strip's bars have driven the guest since Phase 4. Both are comment-only and both are false, but `esp_app_desc` embeds the compile date and time, so editing them forces a rebuild whose image differs from the flashed one and therefore a flash and a verdict; that belongs in a cycle that was going to flash anyway, and they are named in Next Steps so they cannot be lost. THE CORE-SYNTAX AUDIT REQUIRED BY core.md WAS PERFORMED BEFORE THIS COMMIT: core.md and core-syntax.md were re-read, the complete `.ai/` diff inspected, core.md confirmed unchanged, and this entry checked against the template, the six-section order, the prose rules, the numbering and the 100-entry limit.
+
+#### Next Steps:
+
+TWO STALE CODE COMMENTS ARE OWED A CODE CYCLE: `edges.h` says the sound button "cycles 100..Mute" and still describes the bottom strip's degree circle as "the next cycle's work", and both are false -- the control steps Mute, 25, 50, 75, Max upward and wraps, and the strip's bars have driven the guest for many cycles. They are one-line edits, left for a cycle that was going to flash anyway. THE SAME CYCLE COULD SETTLE `TAMA_ACT_EXIT`: it is gated, named, handled and unreachable, which this entry now says out loud, and the honest resolutions are to accept `exit` in `cmd_tama`'s loop or to delete the action and its handler -- a branch nothing can reach is the smaller sin, but it is still a branch nobody tests. THE PORT README HAS NO SLOT B SECTION AT ALL, which is a gap rather than an error: slot B is a whole personality with its own boot path, menu, peripheral bring-up and now its own status strip, and the document that claims to describe the port subsystem by subsystem describes none of it; that is a cycle of its own and it is the largest remaining documentation debt. THE FIGURES THIS CYCLE CORRECTED WILL GO STALE AGAIN BY CONSTRUCTION -- the app image size, the free space in the OTA slot and the three host test counts are all asserted as current and all change with every code cycle, so the honest long-term fix is to state them with a date or to stop quoting a figure the build already prints. EVERYTHING ELSE IN THE ORDERED WORK IS UNCHANGED: the Tamagotchi still has one shared `tama.sav` rather than one per cartridge; savestates give no feedback on the glass for Game Boy and Pokemon Mini; the cross-cartridge savestate refusal is unexercised on Pokemon Mini and does not exist for the Tamagotchi; the volume is exercised on the glass on Game Boy and the Tamagotchi only, so one press each on NES and Pokemon Mini would close an item open since entry 21; the picker repaints each left column label at full height on start-up and rescans the card on every launch; a failed cartridge returns to the desktop rather than the picker; `/root/Apps/pm.py` is orphaned; the 0x1A000 trail and the 0x1B000 record are owed removal; the unchecked `spi_device_acquire_bus()` return is the operator's decision; the stall-log experiment is stashed as `stash@{0}` and must not be restored as-is; and `core-syntax.md` still names the wrong device.
+
+#### Files Modified:
+
+- README.md
+
+The fork carries its half at `a1f8b9f` (`ports/twatchultra/README.md`).
+
+#### Status:
+
+- Build: N/A
+- Deployment: N/A
+- User Test: N/A
+
+---
+
 ## 31 COMMIT Unreleased 2026-11-25T14:17:56-07:00
 
 #### Coming From:
