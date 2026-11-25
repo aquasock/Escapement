@@ -5,42 +5,29 @@ and the board are the fact; this file is a claim.
 
 ## One line
 
-**NOTHING IS OUTSTANDING ON THE GLASS.** Entry 29 shipped the Tamagotchi's
-up-time counter in the top strip and the operator passed it -- *"looks perfect.
-pass"*. The log's last entry is 29; fork `257be10` is pushed; a verified 16 MiB
-backup of that exact build exists.
+**ONE CHANGE AWAITS A VERDICT.** The Tamagotchi's Sound button now uses the same
+volume control as Game Boy, NES and Pokemon Mini: it boots MUTED and each press
+steps UP -- Mute, 25%, 50%, 75%, Max -- wrapping back to Mute. Fork `7d28941`,
+committed locally and **NOT PUSHED**; entry 30 is not written.
 
-**The cycle's real lesson, which is worth more than the feature.** The first
-build was declared verified on counters that said the strip had painted, when
-the pixels had never been on the glass; only the operator looking at the watch
-found it. Two causes, both now fixed:
+**What was verified from the shell on the board:** `tama status` reads
+`1x Mute` immediately after a fresh start, then 25%, 50%, 75%, Max and back to
+Mute across five presses. That is the whole requested behaviour; the label on
+the right column comes from `sound_volume_label()`, so the glass and the report
+agree by construction. 46 of 47 host tests pass, `board_keys` being the
+pre-existing `lcd.boot_pattern` failure.
 
-- **The top strip did not exist in slot B at all.** `statusbar_start()` is called
-  only from `link_init()`; the Start menu's emulator entries reboot into slot B;
-  `board_startup_override()` runs in app_main before `hal_start()` reaches
-  link_init() and never returns. Slot B therefore ran with rows 0..43 dark and
-  no app could paint there. `slotb_run()` now starts the strip after
-  `display_init()` (whose `panel_fill()` would wipe it) and calls
-  `statusbar_clock_present(false)` because slot B never reaches `fill_sysinfo()`
-  and has no clock.
-- **A band refused on the panel bus was reported as painted.**
-  `push_pixels_raw_buf()` returned `void` and `display_panel_push()` returned
-  `true` regardless, so the strip recorded its text as shown and never retried.
-  The push now returns its own result, `sb_paint()` retries a refused band in
-  place and only records the rectangle when every band landed, and `statusbar`
-  prints `bands lost`.
+**What was NOT verified:** that each level SOUNDS right. The gain is applied once
+in `sound_stream_write()` (the private multiply in `tama.c` is deleted, so it
+cannot be squared), and at Mute the guest is still stepped with no rendering, so
+muting cannot change the pet's speed -- but audibility is the operator's to judge.
 
-**Before trusting any on-glass claim, do what this cycle failed to do:** have the
-operator look, or find a path to the pixels. There is no way to read the panel --
-it is write-only -- and slot B has no console and no mirror at all, which is
-exactly why the fault survived a cycle.
-
-## Previously
-
-Entry 28 (`94ac276`) moved the Tamagotchi's Save to the top of the left column and
-the operator passed it; the same message closed entry 27, which had shipped
-without a verdict. The left column now reads Save / blank / Load on all three
-consoles. The log's last entry is 28.
+**Why the two steppers existed.** `sound.c`'s own comment cited the Tamagotchi as
+the reason its "applies" flag existed, because the pet had no volume button and
+so could not undo a mute. Entry 26 gave it one; the rationale went stale and the
+private table stayed. Deleting it removes a second implementation of a control
+this port already had, running in the opposite direction and with a different
+taper.
 
 **Latest shipped behaviour:** all three consoles pick their cartridge from the same
 navigator. Game Boy and Pokemon Mini reveal Save/Load savestates on Hold. The
@@ -243,7 +230,7 @@ Read the entry, not this list, before trusting a claim.
 
 - Project control: `/run/media/vash/GIT/Escapement`, `main`, **log at entry 28**.
 - Active code: `/run/media/vash/GIT/tinydesk-twatch`, branch `t-watch-ultra`,
-  HEAD `257be10`, pushed to `fork`. Push to `fork` (`aquasock/tinydesk`) only —
+  HEAD `7d28941`, **NOT PUSHED** -- pending the verdict on the volume control. Push to `fork` (`aquasock/tinydesk`) only —
   **never** `origin` (upstream, read-only).
 - `.ai/core.md` is RESTRICTED. Do not edit without an explicit instruction.
 - **The flash holds entry 29's build**, and a full backup of it exists:
@@ -254,18 +241,18 @@ Read the entry, not this list, before trusting a claim.
   backup, `working-2026-11-25-0910-tama-save-top.bin`, holds entry 28.
 
 ```
-Fork        /run/media/vash/GIT/tinydesk-twatch  branch t-watch-ultra  HEAD 257be10
+Fork        /run/media/vash/GIT/tinydesk-twatch  branch t-watch-ultra  HEAD 7d28941
 Project     /run/media/vash/GIT/Escapement       branch main          log entry 29
 Port        /dev/ttyACM0  (also /dev/serial/by-id/usb-Espressif_...-if00)
-Build       3,124,944 B  sha256 40e9288881a450e04ff34bf30cea8c32b939ead55a1373cf5ff7939c594a883e
+Build       3,125,072 B  sha256 a041d53ae95b9bd21b4c68291a8b662fce848c2e7b80dd950b1610455d31c559
 Module      flac.bin 26,725 B sha256 947fc4eb86d878fc318f1e3b514ac309587744d47df338a384f765f417b58ff6
             flac.data.bin 1,976 B sha256 4eccdad2da2a42f3deb7b79b156cf346f81a034401c1d66b386bf2e036587c11
-            host=0x3c281d78  inst=0x42ae0000  data=0x3cce0000  app=3125264
+            host=0x3c281d78  inst=0x42ae0000  data=0x3cce0000  app=3125072
             (host moves with almost every build; re-check, then rebuild)
-Backup      ~/twatch-backup/working-2026-11-25-0145-tama-layout.bin
-sha256      2cf63c83c224ede7bda09b4106c52b3db07883fa9e7f46d2a8c84dabaea90db6
-            *** PREDATES ENTRY 27. A restore returns to the layout cycle WITHOUT
-            the Hold-reveal Save/Load. Nothing newer was taken. ***
+Backup      ~/twatch-backup/working-2026-11-25-1145-tama-uptime.bin
+sha256      be09e1f877aa3df3e7ce193f2e07ccbef3dfbceb6685e95ad5614d41f1d36f13
+            Holds ENTRY 29's build (slots hash f30f3ef7...). This cycle's build is
+            newer and NOT covered by any backup yet -- take one after the verdict.
             (whole 16 MiB; both app slots and flac.bin verified inside)
 SUPERSEDED  working-2026-11-24-1320-volume-button.bin — holds the CRASHING
             f9fa9a6 build (volume painted from the touch task). Do not restore.
