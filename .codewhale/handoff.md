@@ -1,15 +1,16 @@
-# Handoff — Escapement / TinyDesk on T-Watch Ultra, 2026-11-24T21:15
+# Handoff — Escapement / TinyDesk on T-Watch Ultra, 2026-11-24T21:35
 
 Orientation, not authority. **Verify before acting on it.** The files, the flash
 and the board are the fact; this file is a claim.
 
 ## One line
 
-**ENTRY 18 IS CLOSED, WITH THE TEARING UNDERSTOOD AND UNFIXED.** The reported
-"stutter" is a **torn frame**, not a stall: a whole-screen update goes out as 18
-unaligned 16-row bands and straddles a refresh. The **TE line (GPIO 6) is
-configured in `board.conf` and never read by the driver** — that is the fix, and it
-is the next cycle. The watch runs entry 17's firmware, unchanged.
+**THE TEARING IS FIXED AND CONFIRMED ON THE GLASS** (entry 20). The reported
+"stutter" was a **torn frame**: a whole-picture push went out as 18 unaligned
+16-row bands and straddled a refresh. The CO5300 had been emitting a TE pulse all
+along (TEON 35h at init) with **nothing reading GPIO 6**. Now a rising-edge
+interrupt plus **one gate per picture** — never per band — bounded at 20 ms and
+failing open. Operator: *"we got it! pass."*
 
 **Latest shipped behaviour:** Hold reveals Save/Load (savestates); Pause/Reset are
 blank and inert; the volume steps on the third left slot when idle; the terminal
@@ -21,13 +22,13 @@ successful run overwrote the record that would have said which fault it was.
 
 ## Standing invariants that cost a cycle each
 
-- **The TEARING is an unaligned push, and TE is unused.** A whole-frame update
-  goes out as `BAND_ROWS`-sized transactions (18 of them for a Game Boy frame, 320
-  wide) and that span is not aligned to the panel scanout, so a full-screen change
-  straddles a refresh. The panel's TE line is **GPIO 6**, in `board.conf`, and
-  `LCD_TE` appears **zero times** in the driver. See **LCD-015** before touching it:
-  read the polarity/pulse contract first, and measure what a gate costs (up to one
-  16.7 ms refresh per frame).
+- **Whole-picture pushes are TE-gated; NOTHING ELSE IS.** `display_picture_rows()`
+  waits for one TE edge before its first band. **Do not add a second gate**, and in
+  particular never gate `push_pixels_buf()` — that is per band, so a frame would wait
+  up to a refresh eighteen times. The gate fails open at 20 ms by design: a frozen
+  watch is worse than a torn frame. **If you see tearing again, read the `te:` line in
+  `gb status` before theorising** — `timeout` climbing means the pin or ISR stopped
+  delivering. LCD-015 has the contract (rising edge, drain before taking).
 - **While an app owns the pixels, ONLY ITS BLIT TASK MAY PAINT.** `gb_blit_task`,
   `nes_blit_task`, `pm_blit_task`. A touch callback may record state and return.
   `display_margin_label()` paints synchronously on the caller's task and takes
@@ -68,7 +69,7 @@ successful run overwrote the record that would have said which fault it was.
 - **The picker's bands tile the framebuffer under a `_Static_assert`.** With the
   fill gone, an unclaimed row is a permanent stripe, not a blink.
 
-## What changed, entries 8–18 (all pushed)
+## What changed, entries 8–20 (all pushed)
 
 Read the entry, not this list, before trusting a claim.
 
@@ -101,6 +102,12 @@ Read the entry, not this list, before trusting a claim.
   18-band push; the TE line is configured and unused. LCD-015 records it. The
   instrumentation built for this was over-done, froze the emulator twice, and is
   **stashed, not deployed**.
+- **Entry 19 (no fork change)**: read the CO5300 datasheet and schematic. TE has
+  three modes; polarity is rising; LCD-015 corrected — the driver already sent
+  TEON, and only the host side was missing.
+- **Entry 20 (fork `e5fe7aa`)**: TE sync. Rising-edge ISR on GPIO 6, one gate per
+  picture in `display_picture_rows()`, drained then taken with a 20 ms fail-open
+  bound. Tear gone. `gb status` gained a `te:` line.
 
 ## Where things live
 
@@ -112,22 +119,23 @@ Read the entry, not this list, before trusting a claim.
 
 ```
 Fork        /run/media/vash/GIT/tinydesk-twatch  branch t-watch-ultra  HEAD 74d9ed0
-Project     /run/media/vash/GIT/Escapement       branch main          log entry 18
+Project     /run/media/vash/GIT/Escapement       branch main          log entry 20
 Port        /dev/ttyACM0  (also /dev/serial/by-id/usb-Espressif_...-if00)
-Build       3,112,944 B  sha256 1311014e9a7f2c8a1481ba48cb1f6605364ab8fd4272874859c929d5ef1eaadc
-Module      flac.bin 26,725 B sha256 dfe1815408b1f9290c071032768265615628a8411027c2367aa2763197e74f9b
+Build       3,113,584 B  sha256 bd8a4136e89a54642fc21339fd052400d3324518bf858d49c8b3462c481052af
+Module      flac.bin 26,725 B sha256 cf95b21666570599d1a53ebb0b35dc743f79e073aa4a68516c2475279b2e9fb9
             flac.data.bin 1,976 B sha256 4eccdad2da2a42f3deb7b79b156cf346f81a034401c1d66b386bf2e036587c11
-            host=0x3c2819e4  inst=0x42ae0000  data=0x3cce0000  app=3112944
-            (matches the deployed clean build -- checked, not assumed)
-Backup      ~/twatch-backup/working-2026-11-24-2115-clean-noinstrument.bin
-sha256      4260436980ce49bda313a887d52bd6dcf058fcde4d176feec518d988d043e338
-            (whole 16 MiB; both app slots AND the blob verified inside)
+            host=0x3c281ab0  inst=0x42ae0000  data=0x3cce0000  app=3113584
+            (moved at entry 20; blob rebuilt and music re-verified by ear)
+Backup      ~/twatch-backup/working-2026-11-24-2135-te-sync.bin
+sha256      c104f040d412b8322ead512b79de6269dfc0ce8ce950f1fb234c8485976ec20e
+            (whole 16 MiB; both app slots, flac.bin AND flac.data.bin verified)
 SUPERSEDED  working-2026-11-24-1320-volume-button.bin — holds the CRASHING
             f9fa9a6 build (volume painted from the touch task). Do not restore.
             working-2026-11-24-1350-volume-button-fixed.bin,
             working-2026-11-24-1745-hold-volume-cursor.bin and
-            working-2026-11-24-1900-saveload-volfix.bin — right for their
-            cycles, superseded by entry 18's clean rebuild.
+            working-2026-11-24-1900-saveload-volfix.bin and
+            working-2026-11-24-2115-clean-noinstrument.bin — right for their
+            cycles, superseded by entry 20's TE sync.
 DO NOT USE  working-2026-11-23-2230-upbar-nomenu.bin.STALE-MODULE
 Layout      ota_0 0x20000, ota_1 0x400000 (0x3E0000 each), coredump 0x7E0000,
             otadata 0x7F0000, storage 0x800000, modules 0xC00000, moddata 0xE00000
@@ -217,11 +225,11 @@ the number. Any new reader of this sector has the same trap.
 
 ## Open, in the order I would take them
 
-1. **THE TEARING — gate the first band of a frame on a TE edge.** Understood, not
-   fixed. Read the CO5300's tearing-effect contract for polarity, pulse width and
-   whether it follows scanout; then gate and compare the glass. Settle the cost
-   question FIRST: a TE wait can add up to 16.7 ms per frame against a guest using
-   6.9 ms of a 16.7 ms budget, so it is affordable but not free.
+1. **Watch the `te:` line in `gb status` for a while.** The gate aligns the START of
+   a picture and does not bound its LENGTH, so a returning tear would mean the band
+   run itself has outgrown one refresh — the answer then is fewer, larger transfers,
+   not better alignment. A climbing `timeout` count with `edges` static means the pin
+   or the ISR has stopped.
 2. **The stall-log experiment is stashed, not deployed** (`stash@{0}` on the fork,
    "stall instrumentation (not deployed)"). Do not restore it as-is: its freeze
    watchdog writes to the card **from the blit task**, and that task owns the panel,
@@ -276,7 +284,8 @@ path and stage 8 RETURN (entry 12), the console labels, the blank margins,
 Up-at-root, the Up bar (entries 10–12), the picker's redraw (entry 13), the
 volume button on Game Boy (entry 14), the Hold button (entry 15), the white block
 in the framebuffer's corner (entry 16), Save/Load plus the blanked placeholder slots
-(entry 17), and the diagnosis that the "stutter" is a torn frame (entry 18).
+(entry 17), the "stutter" being a torn frame (entry 18), and the TE fix itself
+(entry 20).
 
 ## Build / flash
 
