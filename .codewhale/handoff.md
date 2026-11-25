@@ -151,14 +151,14 @@ Read the entry, not this list, before trusting a claim.
 
 ## Where things live
 
-- Project control: `/run/media/vash/GIT/Escapement`, `main`, **log at entry 16**.
+- Project control: `/run/media/vash/GIT/Escapement`, `main`, **log at entry 24**.
 - Active code: `/run/media/vash/GIT/tinydesk-twatch`, branch `t-watch-ultra`,
-  HEAD `74d9ed0`, pushed to `fork`. Push to `fork` (`aquasock/tinydesk`) only —
+  HEAD `262e26c`, pushed to `fork`. Push to `fork` (`aquasock/tinydesk`) only —
   **never** `origin` (upstream, read-only).
 - `.ai/core.md` is RESTRICTED. Do not edit without an explicit instruction.
 
 ```
-Fork        /run/media/vash/GIT/tinydesk-twatch  branch t-watch-ultra  HEAD 74d9ed0
+Fork        /run/media/vash/GIT/tinydesk-twatch  branch t-watch-ultra  HEAD 262e26c
 Project     /run/media/vash/GIT/Escapement       branch main          log entry 24
 Port        /dev/ttyACM0  (also /dev/serial/by-id/usb-Espressif_...-if00)
 Build       3,121,792 B  sha256 b2e8704f93fb2cc29cd1903c7a314157af1fdf7813fe46e09292009518115ccb
