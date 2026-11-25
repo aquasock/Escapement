@@ -5,32 +5,32 @@ and the board are the fact; this file is a claim.
 
 ## One line
 
-**NOTHING IS OUTSTANDING ON THE GLASS.** Entry 31 retired the NES and the
-card-side Tamagotchi launcher from the menus and the operator passed it -- *"pass"*.
-Log at entry 31; fork `0cc6c8f` pushed; a verified 16 MiB backup of that exact
-build exists.
+**DOCUMENTATION CYCLE, NOTHING OUTSTANDING ON THE GLASS.** Entry 32 corrected the
+two READMEs that described an NES the port does not offer and a Tamagotchi margin
+layout four cycles out of date. No source changed, no build or flash was owed, and
+the watch still runs entry 31's image `a14c6d11` exactly as the operator passed it.
+Log at entry 32; fork `a1f8b9f` pushed.
 
-**THE FIRST THING TO FIX IS A FALSEHOOD IN THIS REPOSITORY.** `README.md`'s status
-block still lists `emulators    NES, Game Boy / GBC, Pokemon Mini, Tamagotchi V3`.
-The NES does not ship. That was reported and deliberately left alone because it is
-outside what the operator asked for -- it is a one-line change and it should be
-the next commit.
+**Two things the cycle caught that were not the assignment:**
 
-**The NES is backburnered, not deleted.** `nes.c` is untouched and `nes` still
-runs from a Terminal in the desktop; `nes status` was checked on the board after
-the flash. What went is the OFFER: `s_app_nes` in `link_twatch.c` and the NES row
-in `slotb.c`'s `s_apps[]`. To revive it, put those two back and nothing else.
-`nes_install_touch_hook()` is still installed at slot B init and still declines
-unless the emulator is running, so that side needs no change either.
+- The top README's status block claimed the app image was `0x2e3090` bytes with
+  52 KB free. It is `0x2FAF80` with 916 KB free — the difference between a port
+  that is nearly full and one with room for two more of these.
+- **`tama do exit` does not exist.** `cmd_tama`'s loop stops at `TAMA_ACT_RESET`,
+  so `TAMA_ACT_EXIT` is gated, named, handled in `apply_action()` and reachable
+  from nothing. It is dead code. Write `tama stop` to leave the emulator.
 
-**Removing a row from `s_apps[]` changes two menus at once, by design.** That
-table is what slot B's menu draws AND what `slotb play <key>` resolves through, so
-an app there cannot be launchable-but-invisible or visible-but-unlaunchable. Do
-not remove a row from one surface only.
+**A documentation claim is only worth what it was checked against.** Three claims
+went into the port README during this cycle and two of them were wrong until the
+source was read. Anything asserted about a control's reachability in these
+documents should be verified against the handler, not inferred from the label.
 
-**A tdsh quirk that makes a status check lie.** `rm` does not accept `-f`: the flag
-is read as a filename, so `rm -f X` prints `rm '-f': No such file or directory`
-and returns 1 -- and deletes X anyway. Use plain `rm X` and verify with `cat`.
+**Deliberately NOT changed, and owed a code cycle:** two stale comments in
+`edges.h` — the sound button is described as cycling "100..Mute" (it steps
+Mute..Max now) and the bottom strip's degree circle is still called "the next
+cycle's work". Comment-only edits force a rebuild, and `esp_app_desc` embeds the
+compile time, so the image would differ from the flashed one and need a verdict.
+Batch them with a cycle that has to flash anyway.
 
 **Latest shipped behaviour:** all three consoles pick their cartridge from the same
 navigator. Game Boy and Pokemon Mini reveal Save/Load savestates on Hold. The
@@ -219,6 +219,9 @@ Read the entry, not this list, before trusting a claim.
 - **Entry 27 (fork `8db2c31`)**: Save and Load revealed by Hold. Built, flashed,
   slots verified, host test green; **user test passed in the session after**, and
   the verdict is recorded in entry 28.
+- **Entry 32 (fork `a1f8b9f`)**: documentation only. The NES marked backburnered in
+  both READMEs, the Tamagotchi's real margin layout written down, and two stale
+  figures corrected (app size, host test counts).
 - **Entry 31 (fork `0cc6c8f`)**: the NES and the card-side `Tamagotchi V2-3`
   launcher off both menus. NES code kept, reachable by the `nes` shell command.
   The `.tdlink` was deleted on the device, not in this repository.
@@ -239,7 +242,7 @@ Read the entry, not this list, before trusting a claim.
 
 - Project control: `/run/media/vash/GIT/Escapement`, `main`, **log at entry 28**.
 - Active code: `/run/media/vash/GIT/tinydesk-twatch`, branch `t-watch-ultra`,
-  HEAD `0cc6c8f`, pushed to `fork`. Push to `fork` (`aquasock/tinydesk`) only —
+  HEAD `a1f8b9f`, pushed to `fork` (README only; image unchanged). Push to `fork` (`aquasock/tinydesk`) only —
   **never** `origin` (upstream, read-only).
 - `.ai/core.md` is RESTRICTED. Do not edit without an explicit instruction.
 - **The flash holds entry 29's build**, and a full backup of it exists:
@@ -250,8 +253,8 @@ Read the entry, not this list, before trusting a claim.
   backup, `working-2026-11-25-0910-tama-save-top.bin`, holds entry 28.
 
 ```
-Fork        /run/media/vash/GIT/tinydesk-twatch  branch t-watch-ultra  HEAD 0cc6c8f
-Project     /run/media/vash/GIT/Escapement       branch main          log entry 31
+Fork        /run/media/vash/GIT/tinydesk-twatch  branch t-watch-ultra  HEAD a1f8b9f
+Project     /run/media/vash/GIT/Escapement       branch main          log entry 32
 Port        /dev/ttyACM0  (also /dev/serial/by-id/usb-Espressif_...-if00)
 Build       3,125,120 B  sha256 a14c6d11b57a32977de75caac0848bffa8ac8c5b9f4532f8eaf4f9509cd82081
 Module      flac.bin 26,725 B sha256 947fc4eb86d878fc318f1e3b514ac309587744d47df338a384f765f417b58ff6
