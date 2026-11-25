@@ -1,15 +1,46 @@
-# Handoff — Escapement / TinyDesk on T-Watch Ultra, 2026-11-25T09:02
+# Handoff — Escapement / TinyDesk on T-Watch Ultra, 2026-11-25T12:4x
 
 Orientation, not authority. **Verify before acting on it.** The files, the flash
 and the board are the fact; this file is a claim.
 
 ## One line
 
-**NOTHING IS OUTSTANDING ON THE GLASS.** Entry 28 (`94ac276`) moved the
-Tamagotchi's Save to the top of the left column and the operator passed it; the
-same message closed entry 27, whose Hold reveal had been shipped without a
-verdict. The log has no entry with a missing or failed user test. The left column
-now reads Save / blank / Load on all three consoles.
+**ONE CHANGE AWAITS A VERDICT** (no log entry yet). The Tamagotchi's up-time
+counter is built, flashed to both slots and functionally verified on the board,
+but the operator has not seen it on the glass, so entry 29 has NOT been written.
+The fork carries it at **`41949bf`**, committed ahead of the verdict so the work
+would not be lost; the Escapement log entry stays unwritten until the verdict is
+in, per core-syntax's "after the cycle reaches a terminal result".
+
+**What was verified on hardware, from the shell over the console:** starting the
+Tama puts `app='0d00h00m'` on the strip with the date and clock suppressed;
+the age advanced 00m -> 10m with guest time; 4x measured **3.99 guest seconds per
+wall second**; pause held `cyc` unchanged over 10 s; Reset took the age to
+`0d00h00m`; Load restored `base=428s` and the age to 07m; stopping released the
+claim (`app=None`, date and clock rebuilt). 98 host checks pass in the new
+`test_tama_age`, and the full suite passes 46 of 47 with only the pre-existing
+`board_keys`/`lcd.boot_pattern` failure.
+
+**ONE THING WAS NOT VERIFIED, AND IT IS THE THING TO LOOK AT.** After the
+emulator stopped, the strip's own `pushes` counter read 17 and its last-painted
+key still said `app|0d00h10m` while `sb_build` had already returned the
+date/clock — i.e. the release repaint may not have reached the glass, or the
+reads may have been stale. The reads were made over a console whose diff stream
+drops unchanged cells and whose shell can go busy, so this is **unconfirmed,
+not a demonstrated fault**. If the strip stays on the age after `tama stop`, the
+cause is in `sb_paint()`'s width guard (the union of the app line and the
+date+clock line is exactly `SB_MAX_W`, 224 px) and it is where to look first.
+
+**Also observed:** after the final flash the strip showed `--/--|--:--`, meaning
+the strip's clock was unset at that moment. Pre-existing and unrelated to the
+age, but it means the strip does not repaint at all until the clock is set.
+
+## Previously
+
+Entry 28 (`94ac276`) moved the Tamagotchi's Save to the top of the left column and
+the operator passed it; the same message closed entry 27, which had shipped
+without a verdict. The left column now reads Save / blank / Load on all three
+consoles. The log's last entry is 28.
 
 **Latest shipped behaviour:** all three consoles pick their cartridge from the same
 navigator. Game Boy and Pokemon Mini reveal Save/Load savestates on Hold. The
@@ -207,7 +238,7 @@ Read the entry, not this list, before trusting a claim.
 
 - Project control: `/run/media/vash/GIT/Escapement`, `main`, **log at entry 28**.
 - Active code: `/run/media/vash/GIT/tinydesk-twatch`, branch `t-watch-ultra`,
-  HEAD `94ac276`, pushed to `fork`. Push to `fork` (`aquasock/tinydesk`) only —
+  HEAD `41949bf`, **NOT YET PUSHED** (commit it with the verdict, then push). Push to `fork` (`aquasock/tinydesk`) only —
   **never** `origin` (upstream, read-only).
 - `.ai/core.md` is RESTRICTED. Do not edit without an explicit instruction.
 - **The flash holds only entry 28's build**, and a full backup of it now exists:
@@ -218,13 +249,13 @@ Read the entry, not this list, before trusting a claim.
   on neither slot and is reproducible only from `8db2c31`.
 
 ```
-Fork        /run/media/vash/GIT/tinydesk-twatch  branch t-watch-ultra  HEAD 94ac276
+Fork        /run/media/vash/GIT/tinydesk-twatch  branch t-watch-ultra  HEAD 41949bf
 Project     /run/media/vash/GIT/Escapement       branch main          log entry 28
 Port        /dev/ttyACM0  (also /dev/serial/by-id/usb-Espressif_...-if00)
-Build       3,122,416 B  sha256 475e44c46bfa74c55c7ff09b25150a5b08600cb15eb26bc05f6e7bc01cae1923
+Build       3,124,944 B  sha256 40e9288881a450e04ff34bf30cea8c32b939ead55a1373cf5ff7939c594a883e
 Module      flac.bin 26,725 B sha256 947fc4eb86d878fc318f1e3b514ac309587744d47df338a384f765f417b58ff6
             flac.data.bin 1,976 B sha256 4eccdad2da2a42f3deb7b79b156cf346f81a034401c1d66b386bf2e036587c11
-            host=0x3c281bf0  inst=0x42ae0000  data=0x3cce0000  app=3122416
+            host=0x3c281d68  inst=0x42ae0000  data=0x3cce0000  app=3124944
             (host moves with almost every build; re-check, then rebuild)
 Backup      ~/twatch-backup/working-2026-11-25-0145-tama-layout.bin
 sha256      2cf63c83c224ede7bda09b4106c52b3db07883fa9e7f46d2a8c84dabaea90db6
