@@ -1,15 +1,19 @@
-# Handoff — Escapement / TinyDesk on T-Watch Ultra, 2026-11-24T20:20
+# Handoff — Escapement / TinyDesk on T-Watch Ultra, 2026-11-24T21:15
 
 Orientation, not authority. **Verify before acting on it.** The files, the flash
 and the board are the fact; this file is a claim.
 
 ## One line
 
-**ENTRY 17 IS CLOSED — ON THE OPERATOR'S VERDICT.** Game Boy's left column no
-longer advertises Pause/Reset; **Hold** now reveals **Save** (top slot) and **Load**
-(third slot), which are savestates via gnuboy's own save/load, working on the
-glass. The third slot is the volume while idle and Load during a hold. Entry 16's
-white-block artifact (the terminal cursor) stays fixed.
+**ENTRY 18 IS CLOSED, WITH THE TEARING UNDERSTOOD AND UNFIXED.** The reported
+"stutter" is a **torn frame**, not a stall: a whole-screen update goes out as 18
+unaligned 16-row bands and straddles a refresh. The **TE line (GPIO 6) is
+configured in `board.conf` and never read by the driver** — that is the fix, and it
+is the next cycle. The watch runs entry 17's firmware, unchanged.
+
+**Latest shipped behaviour:** Hold reveals Save/Load (savestates); Pause/Reset are
+blank and inert; the volume steps on the third left slot when idle; the terminal
+cursor is not painted.
 
 **Still open from before:** the original "rom not found" (entries 11–12) is
 closed on the operator's verdict, **not** on a demonstrated cause — the
@@ -17,6 +21,13 @@ successful run overwrote the record that would have said which fault it was.
 
 ## Standing invariants that cost a cycle each
 
+- **The TEARING is an unaligned push, and TE is unused.** A whole-frame update
+  goes out as `BAND_ROWS`-sized transactions (18 of them for a Game Boy frame, 320
+  wide) and that span is not aligned to the panel scanout, so a full-screen change
+  straddles a refresh. The panel's TE line is **GPIO 6**, in `board.conf`, and
+  `LCD_TE` appears **zero times** in the driver. See **LCD-015** before touching it:
+  read the polarity/pulse contract first, and measure what a gate costs (up to one
+  16.7 ms refresh per frame).
 - **While an app owns the pixels, ONLY ITS BLIT TASK MAY PAINT.** `gb_blit_task`,
   `nes_blit_task`, `pm_blit_task`. A touch callback may record state and return.
   `display_margin_label()` paints synchronously on the caller's task and takes
@@ -57,7 +68,7 @@ successful run overwrote the record that would have said which fault it was.
 - **The picker's bands tile the framebuffer under a `_Static_assert`.** With the
   fill gone, an unclaimed row is a permanent stripe, not a blink.
 
-## What changed, entries 8–17 (all pushed)
+## What changed, entries 8–18 (all pushed)
 
 Read the entry, not this list, before trusting a claim.
 
@@ -86,6 +97,10 @@ Read the entry, not this list, before trusting a claim.
   blanked; Hold reveals **Save**/top and **Load**/third as savestates
   (`gnuboy_save_state`/`load_state`, `<rom>.st0`). The first build broke the
   volume button — a local left declared and never assigned — fixed in `74d9ed0`.
+- **Entry 18 (no fork change)**: diagnostic-only. The tearing is an unaligned
+  18-band push; the TE line is configured and unused. LCD-015 records it. The
+  instrumentation built for this was over-done, froze the emulator twice, and is
+  **stashed, not deployed**.
 
 ## Where things live
 
@@ -97,22 +112,22 @@ Read the entry, not this list, before trusting a claim.
 
 ```
 Fork        /run/media/vash/GIT/tinydesk-twatch  branch t-watch-ultra  HEAD 74d9ed0
-Project     /run/media/vash/GIT/Escapement       branch main          log entry 17
+Project     /run/media/vash/GIT/Escapement       branch main          log entry 18
 Port        /dev/ttyACM0  (also /dev/serial/by-id/usb-Espressif_...-if00)
-Build       3,112,944 B  sha256 6075af4f74ed8d7d7849f5fb899ac2f0ac7e8fbd46abf570c8e5ba9dc7905b5a
+Build       3,112,944 B  sha256 1311014e9a7f2c8a1481ba48cb1f6605364ab8fd4272874859c929d5ef1eaadc
 Module      flac.bin 26,725 B sha256 dfe1815408b1f9290c071032768265615628a8411027c2367aa2763197e74f9b
             flac.data.bin 1,976 B sha256 4eccdad2da2a42f3deb7b79b156cf346f81a034401c1d66b386bf2e036587c11
             host=0x3c2819e4  inst=0x42ae0000  data=0x3cce0000  app=3112944
-            (host MOVED at entry 17 and the blob was rebuilt and reflashed;
-             re-check after every build that changes the image size)
-Backup      ~/twatch-backup/working-2026-11-24-1900-saveload-volfix.bin
-sha256      c722e4042030c443cced73e6d07944c3cd0c1f1981bbf70bb550c408343e0240
-            (whole 16 MiB; both app slots AND both blob regions verified inside)
+            (matches the deployed clean build -- checked, not assumed)
+Backup      ~/twatch-backup/working-2026-11-24-2115-clean-noinstrument.bin
+sha256      4260436980ce49bda313a887d52bd6dcf058fcde4d176feec518d988d043e338
+            (whole 16 MiB; both app slots AND the blob verified inside)
 SUPERSEDED  working-2026-11-24-1320-volume-button.bin — holds the CRASHING
             f9fa9a6 build (volume painted from the touch task). Do not restore.
-            working-2026-11-24-1350-volume-button-fixed.bin and
-            working-2026-11-24-1745-hold-volume-cursor.bin — right for their
-            cycles, superseded by entry 17.
+            working-2026-11-24-1350-volume-button-fixed.bin,
+            working-2026-11-24-1745-hold-volume-cursor.bin and
+            working-2026-11-24-1900-saveload-volfix.bin — right for their
+            cycles, superseded by entry 18's clean rebuild.
 DO NOT USE  working-2026-11-23-2230-upbar-nomenu.bin.STALE-MODULE
 Layout      ota_0 0x20000, ota_1 0x400000 (0x3E0000 each), coredump 0x7E0000,
             otadata 0x7F0000, storage 0x800000, modules 0xC00000, moddata 0xE00000
@@ -202,46 +217,57 @@ the number. Any new reader of this sector has the same trap.
 
 ## Open, in the order I would take them
 
-1. **A savestate gives NO feedback on the glass.** The column words are identical
+1. **THE TEARING — gate the first band of a frame on a TE edge.** Understood, not
+   fixed. Read the CO5300's tearing-effect contract for polarity, pulse width and
+   whether it follows scanout; then gate and compare the glass. Settle the cost
+   question FIRST: a TE wait can add up to 16.7 ms per frame against a guest using
+   6.9 ms of a 16.7 ms budget, so it is affordable but not free.
+2. **The stall-log experiment is stashed, not deployed** (`stash@{0}` on the fork,
+   "stall instrumentation (not deployed)"). Do not restore it as-is: its freeze
+   watchdog writes to the card **from the blit task**, and that task owns the panel,
+   which is the leading candidate for the two freezes seen while it was running. Any
+   future instrument must write from a task that does not own the panel, and must
+   not rely on a stop-time dump — a hang prevents stopping.
+3. **A savestate gives NO feedback on the glass.** The column words are identical
    before and after, so the only evidence is the 150–250 ms stutter and a wearer
    cannot tell a save from a missed press. A brief acknowledgement in the pressed
    slot is the obvious next cycle, and it should be built on a report.
-2. **The other left-column buttons still have no duty.** On Game Boy they are now
+4. **The other left-column buttons still have no duty.** On Game Boy they are now
    BLANK (blanked in entry 17) — honest but unfinished. The NES still draws
    "Pause" and "Reset" and handles neither, and the Pokemon Mini's "Exit" and
    "Save" buzz and do nothing. Use the Hold button's shape: hit test in the
    callback, act via a latch the blit task drains.
-3. **The savestate stall (150–250 ms) is accepted, not solved.** A background
+5. **The savestate stall (150–250 ms) is accepted, not solved.** A background
    write or a smaller state would fix it; the button is not the lever.
-4. **The picker's start-up repaints each left-column label at full height**, about
+6. **The picker's start-up repaints each left-column label at full height**, about
    ten full-height pushes before the first frame. Pre-existing, visible only as
    launch latency, and `paint_column_range()` is the tool for it.
-5. **The volume is only tested on Game Boy.** The code path is shared; the test
+7. **The volume is only tested on Game Boy.** The code path is shared; the test
    is not. Whether the NES and Pokemon Mini steps sound as even is unverified.
-6. **Startup audio burst**: 99% of drops are two episodes (sec 0 = 7,177;
+8. **Startup audio burst**: 99% of drops are two episodes (sec 0 = 7,177;
    sec 14 = 3,915). The recorded theory ("stream opens before ROM load") is
    **wrong**: `sound_stream_open()` is near line 1490, `gnuboy_load_rom()` near
    1427. Likely the I2S ring draining. Instrument: the per-second `gbhist` record.
    **Note:** streams now start Muted, so the burst is inaudible unless the volume
    is raised first — which may itself change what `gbhist` shows.
-7. **The desktop's two emulator entries are still `.tdlink` → `.py`** and open a
+9. **The desktop's two emulator entries are still `.tdlink` → `.py`** and open a
    Terminal — the same noise entries 5–6 removed from slot B.
-8. **Picker rescans the card on every launch** — five taps to a cartridge. A
+10. **Picker rescans the card on every launch** — five taps to a cartridge. A
    remembered selection is the cheapest remaining win, and the `retail` level can
    be collapsed to one tap.
-9. **A failed cartridge returns to the desktop, not the picker** — costly for
+11. **A failed cartridge returns to the desktop, not the picker** — costly for
    someone sampling 1,143 ROMs. Needs a remembered directory plus a retry, and
    should be built on a report.
-10. **Tamagotchi is the only emulator not in slot B's menu.**
-11. **`lcd.boot_pattern = 1` in `board.conf` re-enables the RGB bring-up bands** —
+12. **Tamagotchi is the only emulator not in slot B's menu.**
+13. **`lcd.boot_pattern = 1` in `board.conf` re-enables the RGB bring-up bands** —
     implemented, default off, **never exercised**. One line and a reboot to test.
-12. **The `0x1A000` trail and the `0x1B000` record are both owed removal** once
+14. **The `0x1A000` trail and the `0x1B000` record are both owed removal** once
     slot B runs a few cycles without an unexplained failure.
-13. **Open question, the operator's to decide:** `spi_device_acquire_bus()`'s
+15. **Open question, the operator's to decide:** `spi_device_acquire_bus()`'s
     return is unchecked in `paint_column()`, so a second-writer mistake panics
     instead of skipping a repaint. Loud is what made entry 14 a one-read
     diagnosis; checking it trades that for resilience.
-14. **`core-syntax.md` still names the wrong target** — "deployed to the Tang"
+16. **`core-syntax.md` still names the wrong target** — "deployed to the Tang"
     and "the active Tang-Phosphor log". The formatting rules are sound, the
     device name is not. Needs the operator's word because it is a `.ai/` file.
 
@@ -249,8 +275,8 @@ the number. Any new reader of this sector has the same trap.
 path and stage 8 RETURN (entry 12), the console labels, the blank margins,
 Up-at-root, the Up bar (entries 10–12), the picker's redraw (entry 13), the
 volume button on Game Boy (entry 14), the Hold button (entry 15), the white block
-in the framebuffer's corner (entry 16), and Save/Load plus the blanked
-placeholder slots (entry 17).
+in the framebuffer's corner (entry 16), Save/Load plus the blanked placeholder slots
+(entry 17), and the diagnosis that the "stutter" is a torn frame (entry 18).
 
 ## Build / flash
 
