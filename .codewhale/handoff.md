@@ -5,32 +5,32 @@ and the board are the fact; this file is a claim.
 
 ## One line
 
-**DOCUMENTATION CYCLE, NOTHING OUTSTANDING ON THE GLASS.** Entry 32 corrected the
-two READMEs that described an NES the port does not offer and a Tamagotchi margin
-layout four cycles out of date. No source changed, no build or flash was owed, and
-the watch still runs entry 31's image `a14c6d11` exactly as the operator passed it.
-Log at entry 32; fork `a1f8b9f` pushed.
+**DOCUMENTATION, AND ONE FINDING THAT IS NOT PAPER.** Entry 33 documented slot B,
+which neither README described. Writing it down found a **latent cold-boot panel
+fault**: `slotb_peripherals()` raises the panel rail *after* `display_init()` runs,
+while its own comment says the rail must come first "or the driver drives a dark
+panel" -- and adds that on a cold boot the panel coming up was "luck as well as the
+rail being set". Recorded, not reordered: that wants a test on a genuinely cold
+board. Log at entry 33; fork `d6ae9f0` pushed; image still `a14c6d11`.
 
-**Two things the cycle caught that were not the assignment:**
+**THE NEXT MEANINGFUL TEST IS A COLD BOOT IN SLOT B**, not a reset: pull power,
+boot slot B with `lcd.boot_pattern = 1`, and see whether the panel lights. A dark
+panel confirms the ordering fault and makes the fix worth doing; a lit one means
+the expander latches survive power loss too and the comment is merely wrong. Do
+not move the call without that test -- it is a boot path with no console.
 
-- The top README's status block claimed the app image was `0x2e3090` bytes with
-  52 KB free. It is `0x2FAF80` with 916 KB free — the difference between a port
-  that is nearly full and one with room for two more of these.
-- **`tama do exit` does not exist.** `cmd_tama`'s loop stops at `TAMA_ACT_RESET`,
-  so `TAMA_ACT_EXIT` is gated, named, handled in `apply_action()` and reachable
-  from nothing. It is dead code. Write `tama stop` to leave the emulator.
+**Two more stale claims fixed in passing:** the "NVS is 64 KB" paragraph appeared
+twice verbatim in the port README, and the padding note called 0x1A000-0x20000
+"deliberately unused" when slot B writes its stage trail and launch record there.
+The note now says both, and says the conflict is already on the removal list.
 
-**A documentation claim is only worth what it was checked against.** Three claims
-went into the port README during this cycle and two of them were wrong until the
-source was read. Anything asserted about a control's reachability in these
-documents should be verified against the handler, not inferred from the label.
-
-**Deliberately NOT changed, and owed a code cycle:** two stale comments in
-`edges.h` — the sound button is described as cycling "100..Mute" (it steps
-Mute..Max now) and the bottom strip's degree circle is still called "the next
-cycle's work". Comment-only edits force a rebuild, and `esp_app_desc` embeds the
-compile time, so the image would differ from the flashed one and need a verdict.
-Batch them with a cycle that has to flash anyway.
+**Checked-before-committed, which is now the rule.** Every claim in the new prose
+was read out of the source rather than out of a comment: the call order from
+`slotb_run()`/`slotb_peripherals()`, `slotb_confirm()`'s single caller, the picker
+roots from `gbpick.c`, the rollback and console settings from `sdkconfig`. Two
+figures were *dropped* rather than asserted because they could not be supported —
+a line count for `display.c` wrong by a third, and a claim that slot B has no
+littlefs (true only in that the partition is never mounted).
 
 **Latest shipped behaviour:** all three consoles pick their cartridge from the same
 navigator. Game Boy and Pokemon Mini reveal Save/Load savestates on Hold. The
@@ -219,6 +219,10 @@ Read the entry, not this list, before trusting a claim.
 - **Entry 27 (fork `8db2c31`)**: Save and Load revealed by Hold. Built, flashed,
   slots verified, host test green; **user test passed in the session after**, and
   the verdict is recorded in entry 28.
+- **Entry 33 (fork `d6ae9f0`)**: documentation only. Slot B written up in both
+  READMEs. Found a latent cold-boot panel ordering fault (rail raised after
+  `display_init()`), a duplicated NVS paragraph, and the false "padding is
+  unused" note.
 - **Entry 32 (fork `a1f8b9f`)**: documentation only. The NES marked backburnered in
   both READMEs, the Tamagotchi's real margin layout written down, and two stale
   figures corrected (app size, host test counts).
@@ -242,7 +246,7 @@ Read the entry, not this list, before trusting a claim.
 
 - Project control: `/run/media/vash/GIT/Escapement`, `main`, **log at entry 28**.
 - Active code: `/run/media/vash/GIT/tinydesk-twatch`, branch `t-watch-ultra`,
-  HEAD `a1f8b9f`, pushed to `fork` (README only; image unchanged). Push to `fork` (`aquasock/tinydesk`) only —
+  HEAD `d6ae9f0`, pushed to `fork` (README only; image unchanged). Push to `fork` (`aquasock/tinydesk`) only —
   **never** `origin` (upstream, read-only).
 - `.ai/core.md` is RESTRICTED. Do not edit without an explicit instruction.
 - **The flash holds entry 29's build**, and a full backup of it exists:
@@ -253,8 +257,8 @@ Read the entry, not this list, before trusting a claim.
   backup, `working-2026-11-25-0910-tama-save-top.bin`, holds entry 28.
 
 ```
-Fork        /run/media/vash/GIT/tinydesk-twatch  branch t-watch-ultra  HEAD a1f8b9f
-Project     /run/media/vash/GIT/Escapement       branch main          log entry 32
+Fork        /run/media/vash/GIT/tinydesk-twatch  branch t-watch-ultra  HEAD d6ae9f0
+Project     /run/media/vash/GIT/Escapement       branch main          log entry 33
 Port        /dev/ttyACM0  (also /dev/serial/by-id/usb-Espressif_...-if00)
 Build       3,125,120 B  sha256 a14c6d11b57a32977de75caac0848bffa8ac8c5b9f4532f8eaf4f9509cd82081
 Module      flac.bin 26,725 B sha256 947fc4eb86d878fc318f1e3b514ac309587744d47df338a384f765f417b58ff6
