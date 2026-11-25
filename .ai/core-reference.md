@@ -304,6 +304,7 @@ Topic IDs are the `record_id` prefix. An entry reserves a name; it does not clai
 | Why is there a solid white block in the framebuffer's top-left corner? | EXT | EXT-004 |
 | What does a gnuboy savestate contain, and what does its loader not check? | EXT | EXT-005 |
 | Why does the screen tear for one frame when a whole screen updates? | LCD | LCD-015 |
+| What does a PokeMini savestate validate, and what does it leave to the caller? | EXT | EXT-006 |
 
 ---
 
@@ -404,6 +405,7 @@ EXT-002: "The linear flash window 0x42000000 is readable from userspace, so a 51
 EXT-003: "A fullscreen app on fb0 flickers against fbcon because every printk repaints the console over it; console_loglevel decides it, and /etc/sysctl.conf sets kernel.printk = 1 4 1 7"
 EXT-004: "TinyDesk's render layer SHOWS the terminal cursor and homes it when it leaves a full-screen screen (`ESC[?25h` ... `ESC[H`), so a cell-based panel driver ends up with `cursor_visible` true at cell (0,0); painting that cursor means INVERTING the cell's colours, which on a dark taskbar cell is a solid white one-character block in the top-left corner of the framebuffer"
 EXT-005: "gnuboy's savestate is `SAVE_VERSION 0x107` written as a named-field header then five block runs -- 4 KiB of `hw.ioregs`/pal/OAM/wave, then WRAM, VRAM and cartridge RAM at 4096-byte granularity -- and `do_save_load()` validates the VERSION but never the CARTRIDGE: a `.st` from a different ROM loads silently, and its `fwrite`/`fread` are checked only for fewer than one 4096-byte block, so a truncated file or a full card is not reported"
+EXT-006: "PokeMini savestates carry a 12-byte magic, the CORE id, a 128-byte ROM path and tagged RAM/REG/CPU/IRQ/sound blocks; CheckSSFile validates the magic and the core id but only COPIES the ROM path out, comparing nothing -- so a state from another cartridge loads silently unless the caller compares it, and LoadSSFile does no validation at all"
 
 EMU-001: "Doubles cost 711 ns against 121 ns for the integer equivalent, so SPLB32's accumulators are 64-bit fixed-point at CYC_SHIFT=7; float is not slow but fatal, because the kernel does not enable the FPU coprocessor for user tasks and the process dies with SIGSEGV"
 EMU-002: "Entering the time screen takes about 1.5 s because the guest computes for 580.1 ms of emulated time and emulated time then runs at about a third of real; parked by user decision, with 43-135 ms per frame during the stall still unexplained"
@@ -1669,6 +1671,20 @@ BRD-006: "The XL9555 expander's CONFIG and OUTPUT registers survive an ESP32-S3 
     - "Xinyuan-LilyGO/LilyGoLib, variants/lilygo_twatch_ultra/pins_arduino.h: `#define DISP_TE (6)`"
     - "Xinyuan-LilyGO/LilyGoLib, src/display/LilyGoDispInterface.h: `_use_tearing_effect(false)` in the constructor and `enableTearingEffect()`"
   verification: "Established 2026-11-24 (core-log entry 18 and entry 19) by searching the port for LCD_TE and reading the band arithmetic, then reading the CO5300 datasheet (sections 5.3, 7.5.27-7.5.28, 7.5.35-7.5.36) and the T-Watch Ultra schematic, both supplied by the operator; then, on 2026-11-24, LilyGo's own driver in the LilyGoLib repository, reached from the product wiki page, which settles polarity (rising), the input mode, the drain-first ordering and the 20 ms fail-open timeout from working vendor code rather than from a timing diagram. REVISED 2026-11-24 (core-log entry 19): this record first said the TE output was never enabled. That was wrong and the correction is the useful part -- the driver sends TEON Mode 1 at init and has done all along, so the panel has been emitting a synchronisation pulse nobody reads. What is missing is host-side only: no gpio_config() for GPIO 6 and no reader. THE TORN FRAME ITSELF WAS SEEN BY THE OPERATOR, NOT BY THIS AGENT, and no measurement has yet correlated a push with a TE edge; the band-straddling explanation was the mechanism that fit the observation and the code. CONFIRMED ON THE GLASS 2026-11-24 (core-log entry 20): with the gate in place the operator reported the tearing gone, which is both the fix and the proof of the diagnosis -- the tear was the unaligned push and nothing else. The pin's own liveness was measured before that test rather than assumed: `gb status` reported `te: edges=1211` with no emulator running, about 60 edges a second against an idle clock, which is the refresh rate and not a floating pin picking up noise."
+- record_id: EXT-006
+  kind: EXTERNAL
+  topic_id: EXT
+  title: "PokeMini savestates carry the core's ID and the cartridge's path, but the ROM match is the caller's job"
+  status: VERIFIED
+  verified_date: 2026-11-24
+  statement: "PokeMini's `PokeMini_SaveSSFile(state, romfile)` writes a chunked state file: a 12-byte `PokeMiniStat` magic, a 4-byte `PokeMini_ID`, a 128-byte record of the ROM file the state belongs to, a timestamp, and then tagged blocks of 4-byte name plus 4-byte big-endian length plus payload -- `RAM-` at 0x1000 bytes of PM_RAM, `REG-` at 256 bytes of PM_IO, and then the CPU, IRQ and sound blocks via their own SaveState calls. `PokeMini_CheckSSFile(state, romout)` validates the magic and compares `PokeMini_ID` against the live core, and on any mismatch invokes `PokeMini_OnLoadStateFile` with -1..-4 and returns 0. It then reads the 128-byte ROM record and COPIES IT INTO THE CALLER'S BUFFER without comparing it to anything. `PokeMini_LoadSSFile()` does not call `CheckSSFile` at all; the core's own command-line path calls it separately before deciding which ROM to load."
+  consequence: "The identity a savestate is validated against is the CORE'S, not the cartridge's, so a state saved from one game will load over another without complaint -- and the result is not a clean refusal but a machine whose RAM, registers and mapper state belong to a different program, which surfaces as a crash or corruption somewhere unrelated. The caller therefore has to compare the ROM itself using the path `CheckSSFile` returns, which is what the watch port does (`rc = -3`). The second consequence is naming: because the file carries no enforced identity, the FILENAME has to carry it, so one state file per cartridge keyed on the ROM's name is a correctness requirement here and not merely tidiness. `PokeMini_LoadSSFile` is also not a validation path -- calling it directly skips every check the format offers."
+  sources:
+    - "tinydesk-twatch ports/twatchultra/components/pokemini/PokeMini.c: PokeMini_SaveSSFile() at 707, PokeMini_CheckSSFile() at 543, PokeMini_LoadSSFile() at 582, and the command-line path at 1020 and 1050"
+    - "tinydesk-twatch ports/twatchultra/components/pokemini/PokeMini.h: the three prototypes at 271-277"
+    - "tinydesk-twatch ports/twatchultra/main/pm.c: the savestate block in pm_task(), including the ROM comparison and rc -3"
+  verification: "Read from the vendored core on 2026-11-24 while wiring Pokemon Mini's Save and Load buttons (core-log entry 23). Saving and loading both round-trip for one cartridge, confirmed by the operator on the glass. THE CROSS-CARTRIDGE CASE WAS NOT EXERCISED: the comparison exists because the source does not make it, not because a wrong state was seen loading, so this records the code's shape rather than a measured failure."
+
 - record_id: EMU-003
   kind: EMU
   topic_id: EMU
