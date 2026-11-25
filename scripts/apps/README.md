@@ -1,22 +1,37 @@
 # Board app launchers
 
-The two Python files here are the targets of this watch's desktop Start-menu
-entries. They live on the device at `/root/Apps/`, on the littlefs `storage`
-partition, and **they are not part of the firmware image** — a full-image flash
-or a fresh install does not create them. These copies exist so they can be
-restored.
+**NEITHER OF THESE IS A START-MENU ENTRY ANY MORE, and the folder on the device
+is now empty.** Both files are kept here as the source of record for scripts that
+still exist at `/root/Apps/` on the littlefs `storage` partition — they are **not
+part of the firmware image**, so a full-image flash or a fresh install does not
+create them, and these copies exist so they can be restored.
 
 ```
-pm.py     -> /root/Apps/pm.py     Pokemon Mini  (Start menu: "Pokémon Mini")
-tama.py   -> /root/Apps/tama.py   Tamagotchi V3 (Start menu: "Tamagotchi V2-3")
+pm.py     -> /root/Apps/pm.py     Pokemon Mini   -- orphaned, no menu entry
+tama.py   -> /root/Apps/tama.py   Tamagotchi V3  -- orphaned, no menu entry
 ```
 
-Each is paired with a shortcut file the desktop reads:
+WHAT HAPPENED TO THE ENTRIES, in order, because the two went for different
+reasons and only one of them was about the script:
 
 ```
-/root/Start menu/Pokémon Mini.tdlink      target=/root/Apps/pm.py
-/root/Start menu/Tamagotchi V2-3.tdlink   target=/root/Apps/tama.py
+/root/Start menu/Pokémon Mini.tdlink      removed earlier; slot B's picker
+                                          does this better, without a Terminal
+/root/Start menu/Tamagotchi V2-3.tdlink   removed 2026-11-25; the native
+                                          "●☼ Tama V3" entry replaces it
 ```
+
+A `.tdlink` to a `.py` is opened by `td_script_run()`, whose only path is
+`td_terminal_run()` — so every launch put a Terminal on the glass, echoed the
+command and printed a line before the game started. The native entries in
+`board_apps_register()` do not: the panel simply goes black until the emulator is
+up. That is the same reasoning that retired the three slot B launchers below.
+
+BOTH SCRIPTS ARE NOW ORPHANED RATHER THAN WRONG. `pm.py` lost its entry at the
+operator's direction and was deliberately left on the card because deleting it
+was not asked for; `tama.py` lost its entry last. Neither is called by anything,
+both still work from a shell (`py /root/Apps/tama.py`), and neither should be
+treated as dead: they are the fallback if a native entry ever misbehaves.
 
 ## The slot B launchers are NOT scripts any more
 
@@ -94,3 +109,9 @@ escape sequence in a **single** `write()`. The desktop's parser gives up on a
 lone `ESC` after a few tens of milliseconds, so a byte-at-a-time sender turns
 `F10` into `Escape` (which *closes* the menu) followed by the literal text
 `[21~`.
+
+A second note, about deleting files there: **`tdsh`'s `rm` does not take `-f`.**
+It reads the flag as a filename, prints `rm '-f': No such file or directory`, and
+returns 1 — but it still removes the real operand, so a `rm -f X; echo $?` looks
+like a failure while having done the deletion. Verify with `cat` afterwards
+rather than trusting the status, and write plain `rm X`.

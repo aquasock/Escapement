@@ -5,25 +5,33 @@ and the board are the fact; this file is a claim.
 
 ## One line
 
-**NOTHING IS OUTSTANDING ON THE GLASS.** Entry 30 put the Tamagotchi's Sound
-button on the shared volume control and the operator passed it -- *"works
-perfect. pass"*. All four emulators now use one control: boots muted, steps up
-Mute / 25 / 50 / 75 / Max, wraps to Mute. Log at entry 30; fork `7d28941`
-pushed; a verified 16 MiB backup of that exact build exists.
+**ONE CHANGE AWAITS A VERDICT.** Two Start menu entries are gone: the NES (from
+both the desktop Start menu and slot B's menu) and the card-side `Tamagotchi
+V2-3.tdlink`. Fork `0cc6c8f`, committed locally and **NOT PUSHED**; entry 31 is
+not written. `scripts/apps/README.md` is updated in Escapement.
 
-**The volume is one implementation now, and the way it became two is worth
-keeping.** `sound.c`'s comment on its own "applies" flag cited the Tamagotchi as
-the reason the flag existed -- the pet "keeps its own Sound toggle from the
-desktop", so it could not undo a mute it inherited. Entry 26 gave the pet a
-Sound button on the glass. The argument died and the private table in `tama.c`
-outlived it by four cycles. A comment in one file justified a design on a fact
-owned by another, and nothing invalidated it when that fact changed.
+**The NES decision, in the operator's words:** it will not ship, the screen is too
+small for a wearer to see 320x240 output, and the CODE IS KEPT. `nes.c` is
+untouched and `nes` still runs from a Terminal in the desktop -- verified with
+`nes status` on the board after the change.
 
-**Watch for the gain being applied twice.** It now happens only in
-`sound_stream_write()`. The pet used to multiply its own samples before they
-reached that funnel; leaving both in would have squared it -- Max correct and
-every step below it quieter than its label, which sounds plausible until
-compared against the other three emulators.
+**Verified on the board:**
+- `slotb play` with no key prints `apps: gb pm tama` -- NES is out of the table
+  that both the slot B menu and `slotb play <key>` resolve through.
+- The desktop Start menu, read off the glass, now ends
+  `Music / GBC / PokéMini / Tama V3` with no NES row and no `Tamagotchi V2-3`.
+- `/root/Start menu/` is empty, confirmed by `cat` on the old path rather than by
+  a return code -- see the `rm -f` note below.
+
+**A tdsh quirk worth remembering.** `rm -f` is not a valid form there: the flag is
+read as a filename, so it prints `rm '-f': No such file or directory` and returns
+1, then removes the real operand anyway. A status check says failure while the
+deletion happened. Write plain `rm X` and verify with `cat`.
+
+**STILL CLAIMING NES SHIPS, and deliberately not changed here:** the top-level
+`README.md` status block lists `emulators    NES, Game Boy / GBC, Pokemon Mini,
+Tamagotchi V3`. That is now false and is a one-line fix, but it is outside what
+was asked and is reported rather than silently changed.
 
 **Latest shipped behaviour:** all three consoles pick their cartridge from the same
 navigator. Game Boy and Pokemon Mini reveal Save/Load savestates on Hold. The
@@ -229,7 +237,7 @@ Read the entry, not this list, before trusting a claim.
 
 - Project control: `/run/media/vash/GIT/Escapement`, `main`, **log at entry 28**.
 - Active code: `/run/media/vash/GIT/tinydesk-twatch`, branch `t-watch-ultra`,
-  HEAD `7d28941`, pushed to `fork`. Push to `fork` (`aquasock/tinydesk`) only —
+  HEAD `0cc6c8f`, **NOT PUSHED** -- pending the verdict on the menu removals. Push to `fork` (`aquasock/tinydesk`) only —
   **never** `origin` (upstream, read-only).
 - `.ai/core.md` is RESTRICTED. Do not edit without an explicit instruction.
 - **The flash holds entry 29's build**, and a full backup of it exists:
@@ -240,13 +248,13 @@ Read the entry, not this list, before trusting a claim.
   backup, `working-2026-11-25-0910-tama-save-top.bin`, holds entry 28.
 
 ```
-Fork        /run/media/vash/GIT/tinydesk-twatch  branch t-watch-ultra  HEAD 7d28941
+Fork        /run/media/vash/GIT/tinydesk-twatch  branch t-watch-ultra  HEAD 0cc6c8f
 Project     /run/media/vash/GIT/Escapement       branch main          log entry 30
 Port        /dev/ttyACM0  (also /dev/serial/by-id/usb-Espressif_...-if00)
-Build       3,125,072 B  sha256 a041d53ae95b9bd21b4c68291a8b662fce848c2e7b80dd950b1610455d31c559
+Build       3,125,120 B  sha256 a14c6d11b57a32977de75caac0848bffa8ac8c5b9f4532f8eaf4f9509cd82081
 Module      flac.bin 26,725 B sha256 947fc4eb86d878fc318f1e3b514ac309587744d47df338a384f765f417b58ff6
             flac.data.bin 1,976 B sha256 4eccdad2da2a42f3deb7b79b156cf346f81a034401c1d66b386bf2e036587c11
-            host=0x3c281d78  inst=0x42ae0000  data=0x3cce0000  app=3125072
+            host=0x3c281d78  inst=0x42ae0000  data=0x3cce0000  app=3125120
             (host moves with almost every build; re-check, then rebuild)
 Backup      ~/twatch-backup/working-2026-11-25-1245-tama-volume.bin
 sha256      860c7a87f3cac80a54287bd40a327a6c54ec7fac26da5d4ad98ea9ff74a3045b
