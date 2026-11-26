@@ -5,54 +5,44 @@ and the board are the fact; this file is a claim.
 
 ## One line
 
-**A MAP APP IS BUILT, FLASHED AND REGISTERED, BUT THERE IS NO IMAGE ON THE CARD
-YET** -- so nothing has been seen on the glass and entry 35 is not written. Fork
-`9f0c05a` and Escapement `8c177b4` are committed LOCALLY and **NOT PUSHED**.
+**A MAP FILLS THE SCREEN AND THE OPERATOR PASSED IT** -- *"pass. looks great!"*.
+Entry 35. Fork `97c6011` pushed, Escapement pushed, and a verified 16 MiB backup
+of that exact build exists.
 
-**What works and is verified:**
-- `tools/maps_tile.py` cuts a 320x416 window of OpenTopoMap tiles at 1:1 and
-  never scales; it is deterministic (two runs byte-identical). I looked at the
-  crop: downtown Phoenix, street labels (`East Lincoln Street`, `3rd
-  Street/Jefferson`) are legible at 320x416, which is a good sign for the watch.
-  The artifact is `~/.cache/escapement/maps/tile.tmap`, 266,256 B, sha256
-  `c19fe7ac…`, header `TMAP v1 fmt1 320x416 crc ffbf96cb`.
-- `ports/twatchultra/main/maps.c/.h` blits it with `display_picture_rgb()`.
-  Flashed; `slotb play` lists `gb pm tama map`; `maps` reports `no map file`
-  correctly, which proves the code path and the registration.
-- `tests/test_maps_crc.c` pins the checksum against zlib vectors and walks every
-  header field that can make it refuse. 17 checks. Suite 48 of 49, `board_keys`
-  being the long-standing `lcd.boot_pattern` failure.
+**The legibility question is answered, which was the whole point of the phase.**
+Downtown Phoenix at z15 -- 4.78 m/px, about 1.5 km across 320 px -- reads on the
+watch, street labels included. That is the finding phase 2 should be designed
+around.
 
-**THE BLOCKER IS GETTING 266 KB ONTO THE SD CARD, AND IT IS INFRASTRUCTURE, NOT
-THIS APP.** The card is in the watch; there is no reader attached (a STORAGE
-DEVICE appeared once as `sdd` and is gone). Nothing on this PC can mount it.
+**What transferred from TinyMaps, and what did not.** It is a hard-real-time FPGA
+renderer: line engine, SDRAM controller, TMDS at 1280x720. None of that fits a
+watch. What does is the tile model and one rule -- *"nothing is resampled, every
+pixel kept is the tile's own"* -- and that rule is why the app crops a 320x416
+window at 1:1 rather than scaling a 256x256 tile to fit. The operator chose the
+window over a centred tile or an upscale, and it is the only one of the three
+that shows real map pixels.
 
-The project's own transfer tools do not work on this firmware:
-`scripts/usb-send.py` and `watch-deploy.sh` shell out to **base64, sha256sum and
-stty** -- and tdsh has none of the three. `network` is offline, so no SFTP.
+**CONTENT DELIVERY IS THE GAP THIS CYCLE FOUND, AND IT WILL RECUR.** The card
+lives in the watch, and the project's own transfer tools -- `scripts/usb-send.py`
+and `watch-deploy.sh` -- shell out to **base64, sha256sum and stty, none of which
+this firmware's shell has.** They cannot run here at all; a transfer tool built on
+commands the shell lacks is not a tool, it is a script nobody has run. Measured
+console limits, for anyone who tries again: one `echo` payload of 2000 characters
+survives, 3000 wedges the shell, a single append works, and a 254-chunk loop loses
+focus and renders echoes without executing them. **The workflow that works is
+moving the card** -- `tools/gbcstage.py` assumes exactly that -- and the reader
+now appears as `/run/media/vash/ESCAPEMENT/`.
 
-I tried a console transfer and it does not sustain. Measured on the way:
-- one `echo` payload of 2000 chars survives; 3000 wedges the shell;
-- a **single** append works (verified: file grew to 401 bytes);
-- a **sustained loop** of 254 chunks does not: the session loses focus, the
-  echoes are rendered but not executed, and the shell ends up with leftover
-  input (`pipeline parse error`, `unmatched quote`). After a reboot the target
-  file was absent, so nothing had landed.
-The reason is that without `stty -echo` every byte is echoed and every command
-re-reads through the desktop's VT100 renderer, and there is no way to flush the
-tty input queue between chunks.
+**The image is on the card at `/sd/media/maps/tile.tmap`**, 266,256 B, sha256
+`c19fe7ac…`, and the app validates its CRC before drawing. Regenerate with
+`tools/maps_tile.py --out <card>/media/maps/tile.tmap`.
 
-**Three ways forward, and the first is the cheapest:**
-1. **Put the microSD in a card reader on this PC** (power the watch down first).
-   That is the project's own established workflow -- `tools/gbcstage.py` assumes
-   exactly it -- and the copy then takes a second and is verifiable with sha256.
-2. Write a transfer that does not need echo off, e.g. drive MicroPython's raw
-   REPL (Ctrl-A) through the Terminal, which suppresses echo and shell parsing.
-   Real work, reusable, but it is a cycle of its own.
-3. Store the image at 8bpp + a 256-entry palette (133 KB instead of 266 KB,
-   which is what TinyMaps itself does) and blit it through
-   `display_picture_rows()` with a pre-swapped lookup table. Halves the payload
-   AND is the better format, but does not by itself fix the loop.
+**Phase 2 (pan and zoom) is not started.** Two things make it cheap rather than
+one: `display_picture_rgb()` already takes x and y, so panning a window is state
+plus a sub-rectangle; and the format should change before the gesture does --
+8bpp against a 256-entry palette halves the bytes and blits through
+`display_picture_rows()` with a pre-swapped table, which is what TinyMaps itself
+stores.
 
 **Latest shipped behaviour:** all three consoles pick their cartridge from the same
 navigator. Game Boy and Pokemon Mini reveal Save/Load savestates on Hold. The
@@ -241,6 +231,10 @@ Read the entry, not this list, before trusting a claim.
 - **Entry 27 (fork `8db2c31`)**: Save and Load revealed by Hold. Built, flashed,
   slots verified, host test green; **user test passed in the session after**, and
   the verdict is recorded in entry 28.
+- **Entry 35 (fork `97c6011`)**: the maps slot B app -- one static 320x416 map
+  image at native scale, cropped by `tools/maps_tile.py` and blitted with
+  `display_picture_rgb()`. Legibility confirmed at z15. Registered in both menus;
+  `maps` shell command with start/stop/draw/status.
 - **Entry 34 (fork `b00c1e4`)**: F11 retired from the desktop's left margin --
   label and key together, box kept. Also cleared the two stale `edges.h`
   comments entry 32 owed a flash cycle.
@@ -271,7 +265,7 @@ Read the entry, not this list, before trusting a claim.
 
 - Project control: `/run/media/vash/GIT/Escapement`, `main`, **log at entry 28**.
 - Active code: `/run/media/vash/GIT/tinydesk-twatch`, branch `t-watch-ultra`,
-  HEAD `9f0c05a`, **NOT PUSHED** -- the map app, awaiting a verdict. Push to `fork` (`aquasock/tinydesk`) only —
+  HEAD `97c6011`, pushed to `fork`. Push to `fork` (`aquasock/tinydesk`) only —
   **never** `origin` (upstream, read-only).
 - `.ai/core.md` is RESTRICTED. Do not edit without an explicit instruction.
 - **The flash holds entry 29's build**, and a full backup of it exists:
@@ -282,19 +276,19 @@ Read the entry, not this list, before trusting a claim.
   backup, `working-2026-11-25-0910-tama-save-top.bin`, holds entry 28.
 
 ```
-Fork        /run/media/vash/GIT/tinydesk-twatch  branch t-watch-ultra  HEAD 9f0c05a
-Project     /run/media/vash/GIT/Escapement       branch main          log entry 34
+Fork        /run/media/vash/GIT/tinydesk-twatch  branch t-watch-ultra  HEAD 97c6011
+Project     /run/media/vash/GIT/Escapement       branch main          log entry 35
 Port        /dev/ttyACM0  (also /dev/serial/by-id/usb-Espressif_...-if00)
 Build       3,127,392 B  sha256 241a97519c4b8f9c95604c28eabab77ccba2486f3d456234c8d228238d6bfc34
-Module      flac.bin 26,725 B sha256 947fc4eb86d878fc318f1e3b514ac309587744d47df338a384f765f417b58ff6
+Module      flac.bin 26,725 B sha256 74a59b867c2a40cd297266de0b89691c9b8c374f5d4ea32187f5c821252c6cda
             flac.data.bin 1,976 B sha256 4eccdad2da2a42f3deb7b79b156cf346f81a034401c1d66b386bf2e036587c11
-            host=0x3c281d78  inst=0x42ae0000  data=0x3cce0000  app=3127392
+            host=0x3c281f80  inst=0x42ae0000  data=0x3cce0000  app=3127392
             (host moves with almost every build; re-check, then rebuild)
-Backup      ~/twatch-backup/working-2026-11-25-1700-f11-retired.bin
-sha256      4aa80e5a5165e57581b486db6c5544a6746b707c1a5bed0938d6e004ac23022a
-            Holds ENTRY 34's build. Verified against the chip, and inside it both
-            app slots hash 52c7ea0b... and the modules region hashes 3de1ef6b...
-            -- each matching the build. The previous backup holds entry 31.
+Backup      ~/twatch-backup/working-2026-11-25-2030-maps.bin
+sha256      e5e82579d300afd4b491ccfe6a52f93495211c7bce496c17fc5ca0be96bb000e
+            Holds ENTRY 35's build. Verified against the chip, and inside it both
+            app slots hash 241a9751... and the modules region hashes 74a59b86...
+            -- each matching the build. The previous backup holds entry 34.
             (whole 16 MiB; both app slots and flac.bin verified inside)
 SUPERSEDED  working-2026-11-24-1320-volume-button.bin — holds the CRASHING
             f9fa9a6 build (volume painted from the touch task). Do not restore.
