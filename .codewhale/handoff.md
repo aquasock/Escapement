@@ -5,40 +5,34 @@ and the board are the fact; this file is a claim.
 
 ## One line
 
-**ONE CHANGE AWAITS A VERDICT.** The desktop's left margin has lost its F11
-button: the fifth slot is now blank and inert, so the column reads F10 / Esc / F6
-/ Super+D and then an empty box. Fork `b00c1e4`, committed locally and **NOT
-PUSHED**; entry 34 is not written.
+**NOTHING IS OUTSTANDING ON THE GLASS.** Entry 34 retired F11 from the desktop's
+left margin and the operator passed it -- *"pass"*. The column reads F10 / Esc /
+F6 / Super+D and then a blank, inert box. Log at entry 34; fork `b00c1e4` pushed;
+a verified 16 MiB backup of that exact build exists.
 
-**Why it went.** F11 was full screen for the focused window, and every app now
-opens maximised (`TD_OPEN_MAXIMIZED`), so the key only ever grew a window to the
-size it already had. Retired rather than left as a word advertising a no-op.
+**THE MOST VALUABLE SINGLE TEST STILL AVAILABLE IS A COLD BOOT IN SLOT B.** Entry
+33 found that `slotb_peripherals()` raises the panel rail *after* `display_init()`
+runs, while its own comment says the rail must come first "or the driver drives a
+dark panel" -- and adds that on a cold boot the panel coming up was "luck as well
+as the rail being set". Pull power, boot slot B with `lcd.boot_pattern = 1`, and
+see whether the panel lights. A dark panel confirms it and makes the fix worth
+doing; a lit one means the expander latches survive power loss too and the comment
+is merely wrong. Do not move the call without that test -- no console there.
 
-**The word and the duty moved together, deliberately:** `left_label()[4]` is `""`
-in `edges.h`, and `s_fkey[4]` is `NULL` in `touch.c`. Either alone is a fault this
-project has recorded twice — a blank label with a live key is a phantom button, a
-NULL key with a word is a label/duty split. `NULL` is the same inert path the
-right column's reserved top slot already takes, so a press there neither sends a
-key nor buzzes.
+**The margin columns cannot be verified from a host.** They live outside the
+framebuffer and are painted straight to the panel, so the USB mirror does not
+carry them (DSP-003) and the panel is write-only. Anything about those columns is
+the operator's to confirm; a host test can only pin the *word*, which is what
+`test_twatch_edges` does.
 
-**THE BOX STAYS, and that was the operator's choice** between three options.
-Slot geometry is shared by both columns and by the emulator screens, so
-re-dividing this column into four taller buttons would make the slot height
-per-column — the sort of change that lets a drawn button and its touch target
-drift apart. `display.c`'s `s_col_n` already records the house rule: a column that
-wants fewer buttons gets a COUNT, not a height.
+**A comment-only edit is not free on this board.** `esp_app_desc` embeds the
+compile timestamp, so any rebuild produces an image that differs from the flashed
+one and therefore needs a flash and a verdict. That is why entry 32's two stale
+`edges.h` comments waited three cycles and rode with this one. Batch them.
 
-**NOT VERIFIED ON THE GLASS, AND IT CANNOT BE FROM HERE.** The margin columns live
-outside the framebuffer and are painted straight to the panel, so the USB mirror
-does not carry them; the panel is write-only and cannot be read back. What is
-verified is the label (host test, 1,593 checks) and that the board booted the new
-image. Whether the fifth box looks right — empty rather than broken, and correctly
-separated from Super+D — is the operator's to judge.
-
-**This cycle also paid off a debt entry 32 left for a flash cycle:** two stale
-`edges.h` comments, the app-mode Sound label still saying "cycles 100..Mute" (it
-steps Mute..Max since entry 30) and the bottom strip's degree circle still called
-"the next cycle's work" (its bars have driven the guest since Phase 4).
+**One code item is owed and small:** `TAMA_ACT_EXIT` is gated, named, handled in
+`apply_action()` and reachable from nothing (`cmd_tama`'s loop stops at
+`TAMA_ACT_RESET`). Accept `exit` there, or delete the action and its handler.
 
 **Latest shipped behaviour:** all three consoles pick their cartridge from the same
 navigator. Game Boy and Pokemon Mini reveal Save/Load savestates on Hold. The
@@ -227,6 +221,9 @@ Read the entry, not this list, before trusting a claim.
 - **Entry 27 (fork `8db2c31`)**: Save and Load revealed by Hold. Built, flashed,
   slots verified, host test green; **user test passed in the session after**, and
   the verdict is recorded in entry 28.
+- **Entry 34 (fork `b00c1e4`)**: F11 retired from the desktop's left margin --
+  label and key together, box kept. Also cleared the two stale `edges.h`
+  comments entry 32 owed a flash cycle.
 - **Entry 33 (fork `d6ae9f0`)**: documentation only. Slot B written up in both
   READMEs. Found a latent cold-boot panel ordering fault (rail raised after
   `display_init()`), a duplicated NVS paragraph, and the false "padding is
@@ -254,7 +251,7 @@ Read the entry, not this list, before trusting a claim.
 
 - Project control: `/run/media/vash/GIT/Escapement`, `main`, **log at entry 28**.
 - Active code: `/run/media/vash/GIT/tinydesk-twatch`, branch `t-watch-ultra`,
-  HEAD `b00c1e4`, **NOT PUSHED** -- pending the verdict on the F11 removal. Push to `fork` (`aquasock/tinydesk`) only —
+  HEAD `b00c1e4`, pushed to `fork`. Push to `fork` (`aquasock/tinydesk`) only —
   **never** `origin` (upstream, read-only).
 - `.ai/core.md` is RESTRICTED. Do not edit without an explicit instruction.
 - **The flash holds entry 29's build**, and a full backup of it exists:
@@ -266,17 +263,18 @@ Read the entry, not this list, before trusting a claim.
 
 ```
 Fork        /run/media/vash/GIT/tinydesk-twatch  branch t-watch-ultra  HEAD b00c1e4
-Project     /run/media/vash/GIT/Escapement       branch main          log entry 33
+Project     /run/media/vash/GIT/Escapement       branch main          log entry 34
 Port        /dev/ttyACM0  (also /dev/serial/by-id/usb-Espressif_...-if00)
 Build       3,125,104 B  sha256 52c7ea0b38d8933fc65e08c1e0761372aac18e26b3f487c203555d9538c3ed6d
 Module      flac.bin 26,725 B sha256 947fc4eb86d878fc318f1e3b514ac309587744d47df338a384f765f417b58ff6
             flac.data.bin 1,976 B sha256 4eccdad2da2a42f3deb7b79b156cf346f81a034401c1d66b386bf2e036587c11
             host=0x3c281d78  inst=0x42ae0000  data=0x3cce0000  app=3125104
             (host moves with almost every build; re-check, then rebuild)
-Backup      ~/twatch-backup/working-2026-11-25-1330-nes-retired.bin
-sha256      6d541a5fd4f97f2322d4bdc1536b2ed74c9814d5d805d88012b1c891d222aad6
-            Holds ENTRY 31's build (slots hash a14c6d11...), verified against the
-            chip. The previous backup holds entry 30.
+Backup      ~/twatch-backup/working-2026-11-25-1700-f11-retired.bin
+sha256      4aa80e5a5165e57581b486db6c5544a6746b707c1a5bed0938d6e004ac23022a
+            Holds ENTRY 34's build. Verified against the chip, and inside it both
+            app slots hash 52c7ea0b... and the modules region hashes 3de1ef6b...
+            -- each matching the build. The previous backup holds entry 31.
             (whole 16 MiB; both app slots and flac.bin verified inside)
 SUPERSEDED  working-2026-11-24-1320-volume-button.bin — holds the CRASHING
             f9fa9a6 build (volume painted from the touch task). Do not restore.
