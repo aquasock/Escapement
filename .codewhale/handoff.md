@@ -5,34 +5,33 @@ and the board are the fact; this file is a claim.
 
 ## One line
 
-**NOTHING IS OUTSTANDING ON THE GLASS.** Entry 34 retired F11 from the desktop's
-left margin and the operator passed it -- *"pass"*. The column reads F10 / Esc /
-F6 / Super+D and then a blank, inert box. Log at entry 34; fork `b00c1e4` pushed;
-a verified 16 MiB backup of that exact build exists.
+**ONE CHANGE AWAITS A VERDICT.** The top strip's text moved half a character
+right: `SB_GLASS_CX` 200 -> 208 in `statusbar.c`. Fork `ce8d71a`, committed
+locally and **NOT PUSHED**; entry 35 is not written.
 
-**THE MOST VALUABLE SINGLE TEST STILL AVAILABLE IS A COLD BOOT IN SLOT B.** Entry
-33 found that `slotb_peripherals()` raises the panel rail *after* `display_init()`
-runs, while its own comment says the rail must come first "or the driver drives a
-dark panel" -- and adds that on a cold boot the panel coming up was "luck as well
-as the rail being set". Pull power, boot slot B with `lcd.boot_pattern = 1`, and
-see whether the panel lights. A dark panel confirms it and makes the fix worth
-doing; a lit one means the expander latches survive power loss too and the comment
-is merely wrong. Do not move the call without that test -- no console there.
+**Verified on the board, not just in the source:** `statusbar` reports
+`glass-cx=208`, `left=96,192` (was `88,184`), `painted x 96..319` (was
+`88..311`) -- exactly 8 px, width unchanged at 224, `bands lost=0`. It was
+showing the 8-character 12-hour clock at the time, which is the worst case.
 
-**The margin columns cannot be verified from a host.** They live outside the
-framebuffer and are painted straight to the panel, so the USB mirror does not
-carry them (DSP-003) and the panel is write-only. Anything about those columns is
-the operator's to confirm; a host test can only pin the *word*, which is what
-`test_twatch_edges` does.
+**Verified against the font, not estimated.** A host script parsed the real
+799-glyph table, laid out every string `sb_build()` can produce, and checked each
+inked pixel against both chamfer lines:
 
-**A comment-only edit is not free on this board.** `esp_app_desc` embeds the
-compile timestamp, so any rebuild produces an image that differs from the flashed
-one and therefore needs a flash and a verdict. That is why entry 32's two stale
-`edges.h` comments waited three cycles and rode with this one. Batch them.
+```
+centre 200   worst-case ink x 104..309   outside 0
+centre 208   worst-case ink x 112..317   outside 0
+```
 
-**One code item is owed and small:** `TAMA_ACT_EXIT` is gated, named, handled in
-`apply_action()` and reachable from nothing (`cmd_tama`'s loop stops at
-`TAMA_ACT_RESET`). Accept `exit` there, or delete the action and its handler.
+So the right cut is now the tight side: 42 px of clearance left against 13 right
+at the binding row. **`SB_GLASS_CX` is not free to raise again** without re-running
+that check -- the script is in the entry's reasoning, and the constants are
+`x+y>=80` and `410-x+y>=90`.
+
+**What is still the operator's to judge:** whether it looks right. The strip is
+painted straight to the panel outside the framebuffer, so the USB mirror does not
+carry it and the panel cannot be read back. Geometry, extents and band-drop
+counters are verified; the appearance is not.
 
 **Latest shipped behaviour:** all three consoles pick their cartridge from the same
 navigator. Game Boy and Pokemon Mini reveal Save/Load savestates on Hold. The
@@ -251,7 +250,7 @@ Read the entry, not this list, before trusting a claim.
 
 - Project control: `/run/media/vash/GIT/Escapement`, `main`, **log at entry 28**.
 - Active code: `/run/media/vash/GIT/tinydesk-twatch`, branch `t-watch-ultra`,
-  HEAD `b00c1e4`, pushed to `fork`. Push to `fork` (`aquasock/tinydesk`) only —
+  HEAD `ce8d71a`, **NOT PUSHED** -- pending the verdict on the strip shift. Push to `fork` (`aquasock/tinydesk`) only —
   **never** `origin` (upstream, read-only).
 - `.ai/core.md` is RESTRICTED. Do not edit without an explicit instruction.
 - **The flash holds entry 29's build**, and a full backup of it exists:
@@ -262,10 +261,10 @@ Read the entry, not this list, before trusting a claim.
   backup, `working-2026-11-25-0910-tama-save-top.bin`, holds entry 28.
 
 ```
-Fork        /run/media/vash/GIT/tinydesk-twatch  branch t-watch-ultra  HEAD b00c1e4
+Fork        /run/media/vash/GIT/tinydesk-twatch  branch t-watch-ultra  HEAD ce8d71a
 Project     /run/media/vash/GIT/Escapement       branch main          log entry 34
 Port        /dev/ttyACM0  (also /dev/serial/by-id/usb-Espressif_...-if00)
-Build       3,125,104 B  sha256 52c7ea0b38d8933fc65e08c1e0761372aac18e26b3f487c203555d9538c3ed6d
+Build       3,125,104 B  sha256 b6d1f6aa4c9702d00ce3d9dd718fe2cc5f4024cc35d45e85694092dd91117f7a
 Module      flac.bin 26,725 B sha256 947fc4eb86d878fc318f1e3b514ac309587744d47df338a384f765f417b58ff6
             flac.data.bin 1,976 B sha256 4eccdad2da2a42f3deb7b79b156cf346f81a034401c1d66b386bf2e036587c11
             host=0x3c281d78  inst=0x42ae0000  data=0x3cce0000  app=3125104
