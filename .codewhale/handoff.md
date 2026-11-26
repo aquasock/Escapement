@@ -5,33 +5,54 @@ and the board are the fact; this file is a claim.
 
 ## One line
 
-**ONE CHANGE AWAITS A VERDICT.** The top strip's text moved half a character
-right: `SB_GLASS_CX` 200 -> 208 in `statusbar.c`. Fork `ce8d71a`, committed
-locally and **NOT PUSHED**; entry 35 is not written.
+**A MAP APP IS BUILT, FLASHED AND REGISTERED, BUT THERE IS NO IMAGE ON THE CARD
+YET** -- so nothing has been seen on the glass and entry 35 is not written. Fork
+`9f0c05a` and Escapement `8c177b4` are committed LOCALLY and **NOT PUSHED**.
 
-**Verified on the board, not just in the source:** `statusbar` reports
-`glass-cx=208`, `left=96,192` (was `88,184`), `painted x 96..319` (was
-`88..311`) -- exactly 8 px, width unchanged at 224, `bands lost=0`. It was
-showing the 8-character 12-hour clock at the time, which is the worst case.
+**What works and is verified:**
+- `tools/maps_tile.py` cuts a 320x416 window of OpenTopoMap tiles at 1:1 and
+  never scales; it is deterministic (two runs byte-identical). I looked at the
+  crop: downtown Phoenix, street labels (`East Lincoln Street`, `3rd
+  Street/Jefferson`) are legible at 320x416, which is a good sign for the watch.
+  The artifact is `~/.cache/escapement/maps/tile.tmap`, 266,256 B, sha256
+  `c19fe7ac…`, header `TMAP v1 fmt1 320x416 crc ffbf96cb`.
+- `ports/twatchultra/main/maps.c/.h` blits it with `display_picture_rgb()`.
+  Flashed; `slotb play` lists `gb pm tama map`; `maps` reports `no map file`
+  correctly, which proves the code path and the registration.
+- `tests/test_maps_crc.c` pins the checksum against zlib vectors and walks every
+  header field that can make it refuse. 17 checks. Suite 48 of 49, `board_keys`
+  being the long-standing `lcd.boot_pattern` failure.
 
-**Verified against the font, not estimated.** A host script parsed the real
-799-glyph table, laid out every string `sb_build()` can produce, and checked each
-inked pixel against both chamfer lines:
+**THE BLOCKER IS GETTING 266 KB ONTO THE SD CARD, AND IT IS INFRASTRUCTURE, NOT
+THIS APP.** The card is in the watch; there is no reader attached (a STORAGE
+DEVICE appeared once as `sdd` and is gone). Nothing on this PC can mount it.
 
-```
-centre 200   worst-case ink x 104..309   outside 0
-centre 208   worst-case ink x 112..317   outside 0
-```
+The project's own transfer tools do not work on this firmware:
+`scripts/usb-send.py` and `watch-deploy.sh` shell out to **base64, sha256sum and
+stty** -- and tdsh has none of the three. `network` is offline, so no SFTP.
 
-So the right cut is now the tight side: 42 px of clearance left against 13 right
-at the binding row. **`SB_GLASS_CX` is not free to raise again** without re-running
-that check -- the script is in the entry's reasoning, and the constants are
-`x+y>=80` and `410-x+y>=90`.
+I tried a console transfer and it does not sustain. Measured on the way:
+- one `echo` payload of 2000 chars survives; 3000 wedges the shell;
+- a **single** append works (verified: file grew to 401 bytes);
+- a **sustained loop** of 254 chunks does not: the session loses focus, the
+  echoes are rendered but not executed, and the shell ends up with leftover
+  input (`pipeline parse error`, `unmatched quote`). After a reboot the target
+  file was absent, so nothing had landed.
+The reason is that without `stty -echo` every byte is echoed and every command
+re-reads through the desktop's VT100 renderer, and there is no way to flush the
+tty input queue between chunks.
 
-**What is still the operator's to judge:** whether it looks right. The strip is
-painted straight to the panel outside the framebuffer, so the USB mirror does not
-carry it and the panel cannot be read back. Geometry, extents and band-drop
-counters are verified; the appearance is not.
+**Three ways forward, and the first is the cheapest:**
+1. **Put the microSD in a card reader on this PC** (power the watch down first).
+   That is the project's own established workflow -- `tools/gbcstage.py` assumes
+   exactly it -- and the copy then takes a second and is verifiable with sha256.
+2. Write a transfer that does not need echo off, e.g. drive MicroPython's raw
+   REPL (Ctrl-A) through the Terminal, which suppresses echo and shell parsing.
+   Real work, reusable, but it is a cycle of its own.
+3. Store the image at 8bpp + a 256-entry palette (133 KB instead of 266 KB,
+   which is what TinyMaps itself does) and blit it through
+   `display_picture_rows()` with a pre-swapped lookup table. Halves the payload
+   AND is the better format, but does not by itself fix the loop.
 
 **Latest shipped behaviour:** all three consoles pick their cartridge from the same
 navigator. Game Boy and Pokemon Mini reveal Save/Load savestates on Hold. The
@@ -250,7 +271,7 @@ Read the entry, not this list, before trusting a claim.
 
 - Project control: `/run/media/vash/GIT/Escapement`, `main`, **log at entry 28**.
 - Active code: `/run/media/vash/GIT/tinydesk-twatch`, branch `t-watch-ultra`,
-  HEAD `ce8d71a`, **NOT PUSHED** -- pending the verdict on the strip shift. Push to `fork` (`aquasock/tinydesk`) only —
+  HEAD `9f0c05a`, **NOT PUSHED** -- the map app, awaiting a verdict. Push to `fork` (`aquasock/tinydesk`) only —
   **never** `origin` (upstream, read-only).
 - `.ai/core.md` is RESTRICTED. Do not edit without an explicit instruction.
 - **The flash holds entry 29's build**, and a full backup of it exists:
@@ -261,13 +282,13 @@ Read the entry, not this list, before trusting a claim.
   backup, `working-2026-11-25-0910-tama-save-top.bin`, holds entry 28.
 
 ```
-Fork        /run/media/vash/GIT/tinydesk-twatch  branch t-watch-ultra  HEAD ce8d71a
+Fork        /run/media/vash/GIT/tinydesk-twatch  branch t-watch-ultra  HEAD 9f0c05a
 Project     /run/media/vash/GIT/Escapement       branch main          log entry 34
 Port        /dev/ttyACM0  (also /dev/serial/by-id/usb-Espressif_...-if00)
-Build       3,125,104 B  sha256 b6d1f6aa4c9702d00ce3d9dd718fe2cc5f4024cc35d45e85694092dd91117f7a
+Build       3,127,392 B  sha256 241a97519c4b8f9c95604c28eabab77ccba2486f3d456234c8d228238d6bfc34
 Module      flac.bin 26,725 B sha256 947fc4eb86d878fc318f1e3b514ac309587744d47df338a384f765f417b58ff6
             flac.data.bin 1,976 B sha256 4eccdad2da2a42f3deb7b79b156cf346f81a034401c1d66b386bf2e036587c11
-            host=0x3c281d78  inst=0x42ae0000  data=0x3cce0000  app=3125104
+            host=0x3c281d78  inst=0x42ae0000  data=0x3cce0000  app=3127392
             (host moves with almost every build; re-check, then rebuild)
 Backup      ~/twatch-backup/working-2026-11-25-1700-f11-retired.bin
 sha256      4aa80e5a5165e57581b486db6c5544a6746b707c1a5bed0938d6e004ac23022a
