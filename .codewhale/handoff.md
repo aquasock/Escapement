@@ -5,51 +5,38 @@ and the board are the fact; this file is a claim.
 
 ## One line
 
-**A TILED MAP THAT THE ARROWS WALK, AND THE OPERATOR PASSED IT** -- *"ok. it
-works. pass"*. Entry 36. Fork `ed5b3a3` pushed, Escapement pushed, verified 16 MiB
-backup of that exact build exists.
+**THE MAP LAUNCHER IS CALLED "Maps" AND THE OPERATOR PASSED IT** -- *"pass. looks
+good"*. Entry 37. Fork `b775885` pushed, Escapement pushed, verified 16 MiB backup
+of that exact build exists.
 
-**The design is the operator's:** a 2x2 square of z15 tiles in PSRAM (512 KB, never
-more) with the 320x416 framebuffer as a window into it. The right column's arrows
-slide the square one tile per press and the window re-centres on the four-way
-intersection. **A slide reads two tiles, not four** -- the survivors move by pointer.
+**THE START MENU APP TABLE IS EXACTLY FULL, AND THIS IS THE NEXT BLOCKER.** 27
+built-in apps + Music + this port's four = 32, and `TD_MAX_APPS` is 32. Maps took
+the last slot. `td_app_register()` returns -1 when full and nothing reports it, so
+the next app added would simply not appear in the menu — indistinguishable from an
+app that was never built. Registration now logs a refusal *and* the occupancy at
+boot. **The two honest ways past it: raise `TD_MAX_APPS` in
+`include/tinydesk/td_config.h` (4 bytes a slot) or retire an entry.** That is an
+operator decision, not an implementation detail. Candidates for retirement have all
+been unused on this board: Store, Remote Desktop, Software Update, MQTT.
 
-**A tile is drawn at its own 256 px and NEVER scaled**, and that is arithmetic
-rather than taste: a tile's aspect is 1.25 and the framebuffer's 1.625, so "tile at
-framebuffer size" stretches the map 30% taller than wide. The screen is a window,
-which also keeps the map line's "nothing is resampled" rule.
+**A tile is drawn at 1:1 and never scaled** (a tile's aspect is 1.25, the
+framebuffer's 1.625 — drawing "at framebuffer size" stretches the map 30%). Four
+tiles = 512 KB. A slide reads two tiles, not four.
 
-**Pan range is small and measured:** 96 px across, 48 down, against 256 px per arrow
-press. Panning is framing; the arrows do the travelling. If pan should travel, a 3x3
-square gives 512/768 px for 1.2 MB -- same code, bigger array.
+**Pan range is measured: 96 px across, 48 down, against 256 px per arrow press.**
+Panning frames; the arrows travel. A 3x3 square gives 512/768 px for 1.2 MB — same
+code, bigger array.
 
-**TWO FAULTS THIS CYCLE INTRODUCED, BOTH FIXED, BOTH WORTH REMEMBERING:**
+**The agent's screen tool cannot read the Start menu.** It does not model DECSTBM
+scroll regions, so anything below the fold renders as garbage — duplicated rows are
+the tell. **Confirm menu content with the operator or with `strings` on the image**,
+not with that tool. It also used to corrupt long SGR sequences (fixed this cycle,
+and the fix broke bare `ESC 7`/`ESC 8` until that was handled too — both regressions
+are recorded in the entry).
 
-- **A slide past the edge of the set rebooted the watch.** The first `maps_step()`
-  shuffled the slot pointers and NULLed two BEFORE reading, so a failed read left
-  the app "running" with NULL slots and the next redraw dereferenced one. It now
-  loads into temporaries and commits only on success; `compose()` refuses rather
-  than faults if a slot is ever NULL — "should not be reachable" is what the broken
-  version claimed too.
-- **The desktop path had no touch consumer at all.** `maps_install_touch_hook()` was
-  split out of `maps_register_command()` — right for slot B, wrong for the desktop,
-  which then drew perfectly and ignored every press. `tama.c` records the MIRROR of
-  this fault (a hook welded to a shell command, leaving slot B unpressable); that
-  comment was read, half applied, and the inverse created. **Every app installs its
-  hook inside `register_command()`.**
-
-**Content:** `tools/maps_tiles.py` writes `t_<x>_<y>.tmap` per tile plus `start.txt`
-naming the origin — no compiled coordinate, no (0,0) default in the Atlantic. Each
-tile's header carries its own grid coordinates and the app compares them against the
-filename, so a mis-named tile is refused with the coordinate that disagreed. The set
-on the card is 8x8 z15 around central Phoenix, 64 tiles, 8 MB.
-
-**The card now has a reader and 117 GB free**, so content goes on by `cp` and is
-verified with sha256. The console-transfer limits from entry 35 stay recorded but are
-not the workflow.
-
-**Only the desktop path was seen on the glass.** Slot B installs the same hook via
-`slotb_run()`, so the Start menu route is untested end to end.
+**Only the desktop route has been seen on the glass.** Slot B installs the same
+touch hook via `slotb_run()`, so the Start-menu route for Maps is reasoned rather
+than exercised.
 
 **Latest shipped behaviour:** all three consoles pick their cartridge from the same
 navigator. Game Boy and Pokemon Mini reveal Save/Load savestates on Hold. The
@@ -238,6 +225,9 @@ Read the entry, not this list, before trusting a claim.
 - **Entry 27 (fork `8db2c31`)**: Save and Load revealed by Hold. Built, flashed,
   slots verified, host test green; **user test passed in the session after**, and
   the verdict is recorded in entry 28.
+- **Entry 37 (fork `b775885`)**: the map launcher renamed to "Maps" in both menus.
+  Exposed that the app table is full at 32; registration now logs refusals and
+  occupancy.
 - **Entry 36 (fork `ed5b3a3`)**: the 2x2 tiled map walked by the margin arrows.
   `tools/maps_tiles.py` writes the set (per-tile files plus `start.txt`). Fixed a
   slide-past-the-edge reboot and a desktop path with no touch consumer.
@@ -275,7 +265,7 @@ Read the entry, not this list, before trusting a claim.
 
 - Project control: `/run/media/vash/GIT/Escapement`, `main`, **log at entry 28**.
 - Active code: `/run/media/vash/GIT/tinydesk-twatch`, branch `t-watch-ultra`,
-  HEAD `ed5b3a3`, pushed to `fork`. Push to `fork` (`aquasock/tinydesk`) only —
+  HEAD `b775885`, pushed to `fork`. Push to `fork` (`aquasock/tinydesk`) only —
   **never** `origin` (upstream, read-only).
 - `.ai/core.md` is RESTRICTED. Do not edit without an explicit instruction.
 - **The flash holds entry 29's build**, and a full backup of it exists:
@@ -286,19 +276,19 @@ Read the entry, not this list, before trusting a claim.
   backup, `working-2026-11-25-0910-tama-save-top.bin`, holds entry 28.
 
 ```
-Fork        /run/media/vash/GIT/tinydesk-twatch  branch t-watch-ultra  HEAD ed5b3a3
-Project     /run/media/vash/GIT/Escapement       branch main          log entry 36
+Fork        /run/media/vash/GIT/tinydesk-twatch  branch t-watch-ultra  HEAD b775885
+Project     /run/media/vash/GIT/Escapement       branch main          log entry 37
 Port        /dev/ttyACM0  (also /dev/serial/by-id/usb-Espressif_...-if00)
-Build       3,129,296 B  sha256 f7042036b8f6cf1974cafd1b92f43d11561e06c3a47566c03af3bfaa6e16d1da
+Build       3,129,504 B  sha256 ecf7f8cf92e56ffcd3696943fefd3229700ac14c5d5f367f40a0f56f692c2c48
 Module      flac.bin 26,725 B sha256 639f1d770edc6d18849eb4d34a14961d975b3050eb0b8bb84dfa1de1b8b07a31
             flac.data.bin 1,976 B sha256 4eccdad2da2a42f3deb7b79b156cf346f81a034401c1d66b386bf2e036587c11
-            host=0x3c2820e8  inst=0x42ae0000  data=0x3cce0000  app=3129296
+            host=0x3c2820e8  inst=0x42ae0000  data=0x3cce0000  app=3129504
             (host moves with almost every build; re-check, then rebuild)
-Backup      ~/twatch-backup/working-2026-11-25-2200-maps-tiled.bin
-sha256      d9101b4e4968a7b54449308dcddfd638082fe657795921b2600bab84e96e317a
-            Holds ENTRY 36's build. Verified against the chip, and inside it both
-            app slots hash f7042036... and the modules region hashes 639f1d77...
-            -- each matching the build. The previous backup holds entry 35.
+Backup      ~/twatch-backup/working-2026-11-25-2300-maps-menu.bin
+sha256      7f832add5d34a5264f242032965f1babbf38b5a7fa6b7c0fbda8ba4bd7fa4455
+            Holds ENTRY 37's build. Verified against the chip, and inside it both
+            app slots hash ecf7f8cf... and the modules region hashes 639f1d77...
+            -- each matching the build. The previous backup holds entry 36.
             (whole 16 MiB; both app slots and flac.bin verified inside)
 SUPERSEDED  working-2026-11-24-1320-volume-button.bin — holds the CRASHING
             f9fa9a6 build (volume painted from the touch task). Do not restore.
