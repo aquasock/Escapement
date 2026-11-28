@@ -5,8 +5,18 @@ and the board are the fact; this file is a claim.
 
 ## 2026-11-27: task stacks trimmed from measurement (entry 39)
 
-**FLASHED, RUNNING, VERDICT OWED.** Fork `d9b91be`. Desktop and slot B both carry
-the new stacks; slot B was NOT launched (Pusher A is its only exit).
+**PASSED. Operator: "pass. gbc emu works perfect."** Entry 40 records the verdict.
+Fork `d9b91be`. That report also closes entry 38's open item: reaching the GBC
+emulator means the asymmetric slot B image booted AND Pusher A returned to the
+desktop, so launch → emulator → return is now walked, not reasoned.
+
+Re-read after the session: free 89,947, **min-free 83,251** — 16 bytes off the
+pre-session reading, i.e. unchanged. Well above tdsh's 65,536 SSH floor, which
+this port dipped below at 57,307 before the trim.
+
+Precision note: this shows an emulator session does not put the heap back. It does
+NOT prove each of the seven stacks has enough margin — a high-water mark only
+records where a task has been.
 
 Internal DRAM, read from `mem heap` on the board before and after:
 

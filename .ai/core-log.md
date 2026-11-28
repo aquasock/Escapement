@@ -1,3 +1,33 @@
+## 40 COMMIT Unreleased 2026-11-27T21:43:16-07:00
+
+#### Coming From:
+
+Unreleased dbd6e6e
+
+#### Purpose:
+
+Record the operator's result for entry 39's trimmed task stacks, which was committed with the verdict still owed.
+
+#### Outcome:
+
+ENTRY 39 PASSES AND THE OPERATOR'S REPORT CLOSES A SECOND ITEM WITH IT -- *"pass. gbc emu works perfect"*. That single sentence is two results, because reaching the Game Boy emulator means booting the asymmetric slot B image and coming back from it. `Pusher A` returned the wearer to the desktop, so entry 38's "slot B was NOT launched, its only exit is Pusher A" is now exercised rather than reasoned about: the split image boots, runs a cartridge, and hands the boot back. The launch, the emulator and the return are therefore all confirmed under asymmetric slots, and the pairing is not incidental -- the stacks trimmed in entry 39 are compiled into both personalities, so `statusbar`, `display`, `pusher`, `pwrkey` and `bleuart` were all carrying the new sizes while the emulator ran, which is the exercise those five needed. THE LOW-WATER MARK HELD THROUGH A REAL SESSION AND THAT IS THE NUMBER THE TRIM EXISTED TO MOVE. Read on the board after the operator's run: free internal `89,947`, `min-free 83,251`, largest free block `31,744`, against entry 39's post-flash reading of `89,963` and `83,267`. The difference is sixteen bytes, which is one allocation's rounding rather than a trend, and both readings sit more than 17,000 bytes above the `65,536` floor tdsh's SSH server refuses to start under -- the floor this port dipped below at `57,307` before the trim. What that establishes is narrow and worth stating precisely: an emulator session on the other personality does not put the desktop's internal heap back where it was. It does NOT establish that every one of the seven stacks has enough margin, because the session exercised a subset of the paths those tasks take and a high-water mark only records where the tasks HAVE been. THE STACKS REMAIN AT THE POINT WHERE THE NEXT CUT NEEDS EVIDENCE RATHER THAN ARITHMETIC, which entry 39 said and this entry does not soften: each now carries under 3 KB above its measured worst case, and the honest way to find more is a longer session -- doing what a wearer does, not what an agent does -- before re-reading `mem tasks`. No source changed in this cycle and none needed to: the image on the watch is entry 39's build, unmodified, and it is recorded here so the verdict sits against the build it describes. Host tests are 48 of 49 with only `board_keys` failing on `lcd.boot_pattern`, the pre-existing undocumented board key entries 26 through 39 record. THE CORE-SYNTAX AUDIT REQUIRED BY core.md WAS PERFORMED BEFORE THIS COMMIT: core.md and core-syntax.md were re-read, the complete `.ai/` diff inspected, core.md confirmed unchanged, and this entry checked against the template, the six-section order, the prose rules, the numbering and the 100-entry limit.
+
+#### Next Steps:
+
+THE TWO LARGE INTERNAL BUFFERS ARE NOW THE LARGEST UNATTRIBUTED ITEM LEFT on the desktop side -- `57,344` bytes in two blocks of `32,768` and `24,576`, a quarter of everything it holds -- and entry 39 recorded them as consistent with the Wi-Fi dynamic RX pool plus a 32 KB peer WITHOUT proof, because the heap histogram reports sizes and not owners. A `mem blocks` reading from a boot that never initialised the radio is the cheap experiment that would settle it, and it is worth doing before anything else on the memory line. THE 115,200-BYTE IRAM ALIAS IS THE OTHER LEVER AND THE BIGGER ONE, still a third of the DRAM segment and still unexamined, because on this part code forced into internal RAM is charged against data RAM -- anything carrying `IRAM_ATTR` that does not need it costs twice. SLOT B'S OWN TRIM WAS DELIBERATELY NOT DONE and is still there for a cycle that wants it: it holds the desktop plus the emulators at `3,130,384` bytes, and trimming it saves flash in `ota_1` and little else. THE REST OF THE ORDERED WORK IS UNCHANGED: `s_apps[]` and `slotb_app_descs[]` are joined by position and only their length is checked, so a reorder without its twin would launch the wrong app; `ports/twatchultra/README.md` still describes the symmetric single-image design and still claims the emulators are desktop shell commands; `TD_MAX_APPS` is 32 of 32; `TAMA_ACT_EXIT` is gated, named, handled and unreachable; the Tamagotchi still has one shared `tama.sav`; savestates give no feedback on the glass for Game Boy and Pokemon Mini; the cross-cartridge savestate refusal is unexercised on Pokemon Mini; the picker repaints each left column label at full height on start-up and rescans the card on every launch; `/root/Apps/pm.py` is orphaned; the 0x1A000 stage trail and 0x1B000 launch record are owed removal; the unchecked `spi_device_acquire_bus()` return is the operator's decision; the stall-log experiment is stashed as `stash@{0}`; the cold-boot panel ordering fault found in entry 33 is STILL UNTESTED; `core-syntax.md` still names the wrong device; and the two remaining emulators in slot B -- Pokemon Mini and the Tamagotchi -- have not been launched since the split, which is a walk worth doing once because they load their own cores and their own cartridge pickers.
+
+#### Files Modified:
+
+None.
+
+#### Status:
+
+- Build: N/A
+- Deployment: N/A
+- User Test: PASS
+
+---
+
 ## 39 COMMIT Unreleased 2026-11-27T21:37:54-07:00
 
 #### Coming From:
