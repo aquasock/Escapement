@@ -3,6 +3,185 @@
 Orientation, not authority. **Verify before acting on it.** The files, the flash
 and the board are the fact; this file is a claim.
 
+## 2026-11-27: ASYMMETRIC OTA SLOTS — desktop and slot B are now two images
+
+**FLASHED AND PASSED ON THE GLASS.** Operator: *"pass. emulators boot the same and
+we are down to 72kb."* Fork committed and pushed at `50d5f54`; log entry 38 written.
+Watch `80:45:6b:46:df:54`.
+
+**Desktop internal SRAM free: 72 KB** (peak use 63 KB, PSRAM 7.6 MB free, 0
+dropped frames), read off the desktop's own System Monitor after the verdict — not
+just the operator's number.
+
+The cycle is closed. Everything below is the detail that entry 38 compresses.
+
+### Flashed state (verified, not assumed)
+
+```
+ota_0 0x20000   build-desktop/tinydesk.bin  2,798,752 B
+                sha256 23f03b336ccc53128ef3419764c0de9707cb8003898338d6754b5664d76da8ad
+ota_1 0x400000  build-slotb/tinydesk.bin    3,130,384 B
+                sha256 45c362a2caa9edd38cd0abd7d6d831b49c28984ac80e6622ac0440d91cea06fb
+```
+
+Both read back from flash and `cmp`'d against their OWN build — byte-identical.
+The two slots are confirmed to differ from each other, which is the point.
+otadata erased (0x7F0000, all 0xFF read back), so `ota_0` is the default boot.
+Backup taken BEFORE the flash: `~/twatch-backup/pre-asym-2026-11-27-2052.bin`,
+16,777,216 B, sha256
+`04aed5948b46842ef1e9da20a8fd839d31975f93c2d007dd94424a340fb3147c`.
+
+**Desktop confirmed running** by `tools/watch-screen.py` in the FORK: taskbar reads
+`[Start]  root  Offline` with a blank desktop. That is the split desktop image
+booting from `ota_0`.
+
+### Verified from the host
+
+- `check_personality.py`: desktop has no `gb_/pm_/tama_/nes_/maps_` start symbols
+  and a WEAK `board_startup_override`; slot B has all five and a STRONG one.
+- Both images report app version `0.4.0`, so the new launcher version check passes.
+- Desktop binary carries all four launcher labels and NO emulator command strings
+  (`gb [start [rom]` absent); slot B carries both.
+- Host suite 48/49 — only the long-standing `board_keys`/`lcd.boot_pattern`.
+
+### NOT verified — needs a finger
+
+RESOLVED: the operator ran the emulators and passed them (*"emulators boot the
+same"*). The Start menu tap → slot B path works. What is still unwalked is the
+REST of slot B's apps and Pusher A's return under this split, though both are
+untouched code and the launch path that reaches them is proven.
+
+If slot B fails to launch, the bootloader's rollback returns the watch to the
+desktop on the next reset — but note the asymmetry: a rollback now lands on the
+OTHER PERSONALITY, not the same one.
+
+### Known residual risk in the source
+
+`s_apps[]` in `slotb.c` and `slotb_app_descs[]` in `slotb_apps.h` are joined by
+POSITION. A `_Static_assert` checks they are the same LENGTH, so adding an app to
+one and not the other is a compile error. REORDERING one without the other is NOT
+caught and would launch the wrong app or show the wrong label. Order is currently
+gb, pm, tama, map in both.
+
+Deliberately not fixed by a comment-only edit after the flash: `esp_app_desc`
+embeds the build timestamp, so any rebuild needs a reflash of both slots to keep
+the board matching its source.
+
+## 2026-11-27: ASYMMETRIC OTA SLOTS — design notes (pre-flash)
+
+**BUILT AND VERIFIED LOCALLY; NOT FLASHED, NOT SEEN ON THE GLASS.** No board was
+attached (`/dev/ttyACM*` absent, only a SIPEED debugger). Operator's call, made
+explicitly: asymmetric slots were the original plan, symmetric slots were only
+scaffolding while slot B was being proven, and slot B is proven.
+
+### What changed
+
+One source tree, one shared `sdkconfig`, two build directories:
+
+```sh
+cd ports/twatchultra
+python $IDF_PATH/tools/idf.py -B build-desktop -DTD_PERSONALITY=desktop build
+python $IDF_PATH/tools/idf.py -B build-slotb   -DTD_PERSONALITY=slotb   build
+python3 check_personality.py          # gate: reads both ELFs
+```
+
+| | bytes | `.dram0.bss` | `.dram0.data` |
+|---|---|---|---|
+| baseline (one image) | 3,129,504 | 91,648 | 26,988 |
+| desktop | 2,798,752 | 41,984 | 26,588 |
+| slot B | 3,130,384 | 91,752 | 26,972 |
+
+**50,152 bytes of internal DRAM freed on the desktop** — more than the 35 KB
+estimated, because the cores' `.data` and component-level statics went with the
+`.bss`. Heap start moved `0x3fcc1170` → `0x3fcb4de0`.
+
+Files: `main/slotb.h` (rewritten boundary doc), `main/slotbl.c` (new, desktop
+half), `main/slotb_apps.h` (new, shared key table + inline NVS), `main/slotb.c`
+(slot B half only), `main/CMakeLists.txt` (`TD_PERSONALITY`), `main/link_twatch.c`
+(emulator registrations guarded), `check_personality.py` (new gate).
+
+### Verified
+
+- Both images build clean, no warnings from the new code.
+- `check_personality.py`: desktop defines **no** `gb_/pm_/tama_/nes_/maps_` start
+  symbols and its `board_startup_override` is **W**; slot B has all five and the
+  override is **T**. All checks pass.
+- Host suite 48/49 — only the long-standing `board_keys`/`lcd.boot_pattern`.
+- `sdkconfig` is unchanged and shared (ESP-IDF keeps it at the project root, so
+  the two builds physically cannot disagree).
+
+### Behaviour change to test for
+
+The desktop no longer has in-process emulator commands. `gb start`, `nes`,
+`pm`/`tama do ...`, `maps`, `pmbench`, `gbcbench` are gone from the desktop
+build; the Start menu launchers and `slotb play <key>` replace them. This is the
+intent, but it is a real change and should be confirmed on the glass.
+
+### Flash — BOTH SLOTS, DIFFERENT FILES NOW
+
+```sh
+# desktop -> ota_0, slot B -> ota_1. NOT the same file twice any more.
+write_flash 0x20000 build-desktop/tinydesk.bin 0x400000 build-slotb/tinydesk.bin
+# then read both back and cmp against their own build, then erase otadata 0x7F0000
+```
+
+`slotb_launch()` and `slotb` now compare the two slots' app-descriptor version
+strings and REFUSE to switch on a mismatch, naming both versions. So a half-flash
+produces a message rather than a reboot into a personality that cannot answer.
+
+### Still owed
+
+- Flash + cold boot into slot B, Pusher A back, desktop still draws. That is the
+  acceptance test and it needs the operator.
+- `ports/twatchultra/README.md` still describes the symmetric single-image design.
+- Slot B was NOT trimmed: it is still desktop + emulators. That was deliberate
+  (phase one removes only what the desktop does not need), and trimming it is the
+  next cycle if the RAM there ever matters.
+- `core-log.md` has no entry yet: the cycle has not reached a user verdict.
+
+## 2026-11-27 resumption: TMAP v3 sketch found, then REVERTED on operator order
+
+**The trees are clean at the entry-37 state.** Escapement `main` `eb44c31`, fork
+`t-watch-ultra` `b775885`; `git diff` empty in both, no untracked files. Nothing
+was built, flashed, or logged for the sketch below, so no log entry was written.
+
+Earlier today (about 19:33, after `b775885`) a previous agent left **uncommitted,
+never-built** work converting map tiles from RGB565 (v2) to 8bpp indexed (v3): fork
+`maps.c`/`maps.h` (193+/205-), Escapement `tools/maps_tiles.py` (182+/36-) plus an
+untracked `tests/test_maps_crc.c`. The fork's build dir was older than the edits.
+The operator ordered it discarded -- *"revert back. I dont trust that agents work."*
+-- and it was: both trees restored to `HEAD`, untracked test deleted.
+
+What the sketch got wrong is kept because the next attempt will face the same
+traps. Verified by reading and by running the shipped logic:
+
+- `tools/maps_tiles.py` `closest_palette()` seeded `best_dist = 1`, so only an
+  exact palette hit registered. Ten sample RGB565 colours mapped to index 0
+  (black) except exact-grey `0x8410`. A generated tile would have been near-flat.
+- The per-tile palette block was filled from the xterm 256-colour terminal palette
+  (6 levels/channel + 24 greys), not from the tile's own colours, which entries
+  36/37 required.
+- Fork `compose_row()` packed 8-bit palette bytes as if 5/6/5 (`<<11`, `<<5`), so
+  channels overflowed into each other.
+- One shared `s_palette` served the whole 2x2 square while every file carried its
+  own palette, so indices absent from the first tile read black elsewhere.
+- The header-refusal path read `h.format` from an uninitialised `h`.
+- `maps.h` declared `maps_xterm_palette*` / `maps_closest_xterm` extern with no
+  definition in `main/` (dead, unreferenced).
+- The host test passed 18/18 but re-declared the parser instead of including
+  `maps.h`, so it could not catch firmware drift -- the "model written from
+  intention tests the intention" trap this log records three times.
+
+Discarded work is archived at `/tmp/escaperead/reverted/` (ephemeral):
+`fork-maps-v3.patch`, `escapement-maps_tiles-v3.patch`,
+`escapement-test_maps_crc-v3.c`. Ask the operator before restoring any of it.
+
+Also confirmed: `core-syntax.md` line 317 still says "The active Tang-Phosphor log
+began at entry 1" -- the wrong device, carried open since entry 29.
+
+No board attached at resumption: only a SIPEED USB Debugger on the serial bus, no
+`/dev/ttyACM*`.
+
 ## One line
 
 **THE MAP LAUNCHER IS CALLED "Maps" AND THE OPERATOR PASSED IT** -- *"pass. looks
