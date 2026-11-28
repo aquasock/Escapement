@@ -3,6 +3,60 @@
 Orientation, not authority. **Verify before acting on it.** The files, the flash
 and the board are the fact; this file is a claim.
 
+## 2026-11-27: the 57 KB was not two buffers — and entry 39 over-trimmed the shell
+
+**FLASHED, VERDICT OWED.** Fork `d7f17c9`. Operator needs to re-test the shell.
+
+**The 57 KB was never one thing.** Of the two blocks (32,768 and 24,576), the
+24,576 was the SHELL'S STACK — the thing entry 39 had just cut. `mem blocks`
+reports sizes, not owners, which is why it wasn't recognised.
+
+**Entry 39's shell trim was unsafe.** Running real MicroPython drove the shell to
+12,660 bytes used of 16,384, leaving 3,724 — below the 4,096 tdsh warns under:
+
+```
+W tdsh: local USB shell low stack: minimum free=3324 bytes
+```
+
+The board said so itself. Now reversed.
+
+**Rule now stated in `main/CMakeLists.txt`:** every task keeps ≥2,048 bytes
+never-touched at its worst OBSERVED point; tasks running arbitrary code keep
+≥4,096.
+
+| task | now | free |
+|---|---|---|
+| tdsh | 20,480 | 7,820 |
+| tinydesk | 6,144 | 2,704 |
+| statusbar | 6,144 | 4,072 |
+| tdpaint | 4,096 | 2,820 |
+| tdpwrkey | 4,096 | 2,880 |
+| bleuart | 3,072 | 2,208 |
+| tdpusher | 3,072 | 2,324 |
+
+`tdpwrkey` and `tdpusher` are now **above** upstream — applying the rule showed
+upstream's own sizes left 1,864 and 1,808 free, both under the floor.
+
+```
+              entry 39    entry 41 (now)    pre-trim
+free           89,963        80,767          74,172
+min-free       83,267        74,071          57,307
+```
+
+6,595 bytes instead of 15,791 — but every task inside a stated margin, and
+min-free still clears the 65,536 SSH floor.
+
+**Still unattributed: the 32,768 block.** `bt status` says the radio took 44,288
+bytes total, so Bluetooth is the strongest CANDIDATE — not a finding. The
+decisive test (boot with `bt.enable = 0`, read `mem blocks`) was not run.
+
+**Also found, untouched:** a separate region at `0x3fcf0000`, exactly 32,768 bytes,
+**zero allocated** — that's `CONFIG_SPIRAM_MALLOC_RESERVE_INTERNAL`. A real knob,
+but it exists to prevent a runtime allocation failure, so it was left alone.
+
+`/etc/board.conf.bak` was created on the littlefs during preparation and can be
+deleted.
+
 ## 2026-11-27: task stacks trimmed from measurement (entry 39)
 
 **PASSED. Operator: "pass. gbc emu works perfect."** Entry 40 records the verdict.
