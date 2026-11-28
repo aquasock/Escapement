@@ -3,6 +3,52 @@
 Orientation, not authority. **Verify before acting on it.** The files, the flash
 and the board are the fact; this file is a claim.
 
+## 2026-11-27: task stacks trimmed from measurement (entry 39)
+
+**FLASHED, RUNNING, VERDICT OWED.** Fork `d9b91be`. Desktop and slot B both carry
+the new stacks; slot B was NOT launched (Pusher A is its only exit).
+
+Internal DRAM, read from `mem heap` on the board before and after:
+
+```
+              before      after      delta
+free          74,172     89,963     +15,791
+min-free      57,307     83,267     +25,960   <-- the important one
+```
+
+min-free is the low-water mark since boot and it used to dip BELOW the 65,536
+bytes tdsh's SSH server refuses to start under. It no longer does.
+
+| task | was | used | now |
+|---|---|---|---|
+| tdsh | 24,576 | 9,476 | 16,384 |
+| tinydesk (UI) | 8,192 | 3,460 | 6,144 |
+| statusbar | 8,192 | 3,568 | 6,144 |
+| tdpaint | 4,096 | 1,276 | 3,072 |
+| tdpwrkey | 3,072 | 1,208 | 2,048 |
+| bleuart | 3,072 | 856 | 2,048 |
+| tdpusher | 2,560 | 740 | 2,048 |
+
+`tdsh` and `UI_TASK_STACK` sizes were overridden via `#ifndef` + a CMake define,
+NOT edited: the first lives in the tdsh **submodule** (must never be pushed to),
+the second in a file every other board in the fork shares.
+
+**New tool: `tools/scrollread.py`** — models DECSTBM scroll regions and keeps
+scrollback. This is what made `tools/watch-screen.py` show an EMPTY Terminal
+window while the shell was working; do not conclude "the shell is wedged" from
+that tool. Its missing scroll-region support is entry 37's recorded limitation.
+
+**Gotcha that cost time:** `tools/watch-screen.py 2` sends a literal `2` as
+keystrokes — the second argument is keys, not a duration. Call it with no args.
+
+**Next lever, unattributed:** two internal blocks of 32,768 and 24,576 B (57 KB,
+~25% of what the desktop holds). Consistent with the Wi-Fi dynamic RX pool plus a
+32 KB peer, NOT proven — the histogram shows sizes, not owners. A `mem blocks`
+reading from a boot that never initialised the radio would settle it.
+
+**Stale coredump at 0x7E0000** from a build that no longer exists locally;
+`espcoredump.py` refuses it on SHA mismatch. Not evidence either way.
+
 ## 2026-11-27: ASYMMETRIC OTA SLOTS — desktop and slot B are now two images
 
 **FLASHED AND PASSED ON THE GLASS.** Operator: *"pass. emulators boot the same and
